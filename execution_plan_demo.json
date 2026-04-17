@@ -1,0 +1,240 @@
+{
+  "selected_tests": [
+    "test_payment_create_001",
+    "test_payment_create_002",
+    "test_payment_refund_001",
+    "test_user_login_001"
+  ],
+  "skipped_tests": [
+    "test_payment_query_001",
+    "test_user_register_001",
+    "test_user_profile_001",
+    "test_user_update_001",
+    "test_user_logout_001",
+    "test_order_create_001",
+    "test_order_list_001",
+    "test_order_detail_001",
+    "test_order_cancel_001",
+    "test_product_list_001",
+    "test_product_detail_001",
+    "test_product_search_001",
+    "test_product_category_001",
+    "test_search_query_001",
+    "test_search_suggest_001",
+    "test_search_history_001"
+  ],
+  "execution_order": [
+    "test_payment_create_001",
+    "test_payment_create_002",
+    "test_payment_refund_001",
+    "test_user_login_001"
+  ],
+  "parallel_groups": {
+    "payment": [
+      "test_payment_create_001",
+      "test_payment_create_002",
+      "test_payment_refund_001"
+    ],
+    "user": [
+      "test_user_login_001"
+    ]
+  },
+  "risk_scores": [
+    {
+      "test_case_id": "test_payment_create_001",
+      "total_score": 0.3,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 1.0,
+      "coverage_gap": 0.2,
+      "decision": "optional"
+    },
+    {
+      "test_case_id": "test_payment_create_002",
+      "total_score": 0.3,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 1.0,
+      "coverage_gap": 0.2,
+      "decision": "optional"
+    },
+    {
+      "test_case_id": "test_payment_refund_001",
+      "total_score": 0.3,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 1.0,
+      "coverage_gap": 0.2,
+      "decision": "optional"
+    },
+    {
+      "test_case_id": "test_user_login_001",
+      "total_score": 0.3,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 1.0,
+      "coverage_gap": 0.2,
+      "decision": "optional"
+    },
+    {
+      "test_case_id": "test_payment_query_001",
+      "total_score": 0.24,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 0.7,
+      "coverage_gap": 0.2,
+      "decision": "skip"
+    },
+    {
+      "test_case_id": "test_user_register_001",
+      "total_score": 0.24,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 0.7,
+      "coverage_gap": 0.2,
+      "decision": "skip"
+    },
+    {
+      "test_case_id": "test_user_profile_001",
+      "total_score": 0.24,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 0.7,
+      "coverage_gap": 0.2,
+      "decision": "skip"
+    },
+    {
+      "test_case_id": "test_user_update_001",
+      "total_score": 0.24,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 0.7,
+      "coverage_gap": 0.2,
+      "decision": "skip"
+    },
+    {
+      "test_case_id": "test_order_create_001",
+      "total_score": 0.24,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 0.7,
+      "coverage_gap": 0.2,
+      "decision": "skip"
+    },
+    {
+      "test_case_id": "test_order_cancel_001",
+      "total_score": 0.24,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 0.7,
+      "coverage_gap": 0.2,
+      "decision": "skip"
+    },
+    {
+      "test_case_id": "test_user_logout_001",
+      "total_score": 0.18,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 0.4,
+      "coverage_gap": 0.2,
+      "decision": "skip"
+    },
+    {
+      "test_case_id": "test_order_list_001",
+      "total_score": 0.18,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 0.4,
+      "coverage_gap": 0.2,
+      "decision": "skip"
+    },
+    {
+      "test_case_id": "test_order_detail_001",
+      "total_score": 0.18,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 0.4,
+      "coverage_gap": 0.2,
+      "decision": "skip"
+    },
+    {
+      "test_case_id": "test_product_list_001",
+      "total_score": 0.18,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 0.4,
+      "coverage_gap": 0.2,
+      "decision": "skip"
+    },
+    {
+      "test_case_id": "test_product_detail_001",
+      "total_score": 0.18,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 0.4,
+      "coverage_gap": 0.2,
+      "decision": "skip"
+    },
+    {
+      "test_case_id": "test_product_search_001",
+      "total_score": 0.18,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 0.4,
+      "coverage_gap": 0.2,
+      "decision": "skip"
+    },
+    {
+      "test_case_id": "test_product_category_001",
+      "total_score": 0.14,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 0.2,
+      "coverage_gap": 0.2,
+      "decision": "skip"
+    },
+    {
+      "test_case_id": "test_search_query_001",
+      "total_score": 0.14,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 0.2,
+      "coverage_gap": 0.2,
+      "decision": "skip"
+    },
+    {
+      "test_case_id": "test_search_suggest_001",
+      "total_score": 0.14,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 0.2,
+      "coverage_gap": 0.2,
+      "decision": "skip"
+    },
+    {
+      "test_case_id": "test_search_history_001",
+      "total_score": 0.14,
+      "failure_rate": 0.1,
+      "change_frequency": 0.1,
+      "priority_weight": 0.2,
+      "coverage_gap": 0.2,
+      "decision": "skip"
+    }
+  ],
+  "statistics": {
+    "total_tests": 20,
+    "selected_tests": 4,
+    "skipped_tests": 16,
+    "selection_rate": 20.0,
+    "decision_breakdown": {
+      "optional": 4,
+      "skip": 16
+    },
+    "priority_breakdown": {
+      "P0": 4,
+      "P1": 6,
+      "P2": 6,
+      "P3": 4
+    }
+  }
+}

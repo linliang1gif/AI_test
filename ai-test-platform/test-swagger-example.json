@@ -1,0 +1,345 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "测试平台API",
+    "version": "1.0.0",
+    "description": "AI测试平台的示例API文档"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8000",
+      "description": "本地开发服务器"
+    }
+  ],
+  "paths": {
+    "/api/users": {
+      "get": {
+        "summary": "获取用户列表",
+        "description": "返回系统中所有用户的列表",
+        "tags": ["用户管理"],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "description": "页码",
+            "schema": {
+              "type": "integer",
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "description": "每页数量",
+            "schema": {
+              "type": "integer",
+              "default": 10
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功返回用户列表"
+          }
+        }
+      },
+      "post": {
+        "summary": "创建用户",
+        "description": "创建一个新用户",
+        "tags": ["用户管理"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": {
+                    "type": "string",
+                    "description": "用户名"
+                  },
+                  "email": {
+                    "type": "string",
+                    "description": "邮箱"
+                  },
+                  "password": {
+                    "type": "string",
+                    "description": "密码"
+                  }
+                },
+                "required": ["username", "email", "password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "用户创建成功"
+          },
+          "400": {
+            "description": "请求参数错误"
+          }
+        }
+      }
+    },
+    "/api/users/{id}": {
+      "get": {
+        "summary": "获取用户详情",
+        "description": "根据用户ID获取用户详细信息",
+        "tags": ["用户管理"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "用户ID",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功返回用户信息"
+          },
+          "404": {
+            "description": "用户不存在"
+          }
+        }
+      },
+      "put": {
+        "summary": "更新用户",
+        "description": "更新指定用户的信息",
+        "tags": ["用户管理"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "用户ID",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "username": {
+                    "type": "string"
+                  },
+                  "email": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "更新成功"
+          },
+          "404": {
+            "description": "用户不存在"
+          }
+        }
+      },
+      "delete": {
+        "summary": "删除用户",
+        "description": "删除指定的用户",
+        "tags": ["用户管理"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "用户ID",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "删除成功"
+          },
+          "404": {
+            "description": "用户不存在"
+          }
+        }
+      }
+    },
+    "/api/projects": {
+      "get": {
+        "summary": "获取项目列表",
+        "description": "返回所有测试项目",
+        "tags": ["项目管理"],
+        "responses": {
+          "200": {
+            "description": "成功返回项目列表"
+          }
+        }
+      },
+      "post": {
+        "summary": "创建项目",
+        "description": "创建新的测试项目",
+        "tags": ["项目管理"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "项目名称"
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "项目描述"
+                  }
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "项目创建成功"
+          }
+        }
+      }
+    },
+    "/api/testcases": {
+      "get": {
+        "summary": "获取测试用例列表",
+        "description": "返回所有测试用例",
+        "tags": ["测试用例"],
+        "parameters": [
+          {
+            "name": "module",
+            "in": "query",
+            "description": "模块名称",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "priority",
+            "in": "query",
+            "description": "优先级",
+            "schema": {
+              "type": "string",
+              "enum": ["high", "medium", "low"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功返回测试用例列表"
+          }
+        }
+      },
+      "post": {
+        "summary": "创建测试用例",
+        "description": "手动创建测试用例",
+        "tags": ["测试用例"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "description": "用例标题"
+                  },
+                  "module": {
+                    "type": "string",
+                    "description": "所属模块"
+                  },
+                  "priority": {
+                    "type": "string",
+                    "enum": ["high", "medium", "low"],
+                    "description": "优先级"
+                  },
+                  "steps": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "测试步骤"
+                  },
+                  "expected": {
+                    "type": "string",
+                    "description": "预期结果"
+                  }
+                },
+                "required": ["title", "module", "priority"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "测试用例创建成功"
+          }
+        }
+      }
+    },
+    "/api/testcases/generate": {
+      "post": {
+        "summary": "AI生成测试用例",
+        "description": "上传需求文档,AI自动生成测试用例",
+        "tags": ["测试用例"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "需求文档文件"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功生成测试用例"
+          },
+          "400": {
+            "description": "文件格式错误"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "用户管理",
+      "description": "用户相关的API"
+    },
+    {
+      "name": "项目管理",
+      "description": "测试项目管理"
+    },
+    {
+      "name": "测试用例",
+      "description": "测试用例管理和生成"
+    }
+  ]
+}

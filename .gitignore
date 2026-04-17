@@ -1,0 +1,90 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+.kiro/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Test outputs
+output/
+test_history/
+test_knowledge/
+demo_reports/
+uploads/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+chroma_db/
+
+# Node modules
+node_modules/
+ai-test-platform/frontend/node_modules/
+ai-test-platform/frontend/dist/
+
+# Environment
+.env
+*.env
+!.env.example
+
+# Temporary files
+~$*
+*.tmp
+*.bak
+*.corrupted.bak
+
+# Build artifacts
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# ChromaDB
+ai-test-platform/chroma_db/
+
+# Data files
+ai-test-platform/data/
+*.json.bak

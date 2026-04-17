@@ -1,0 +1,56 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "示例API - 旧版本",
+    "version": "1.0.0"
+  },
+  "basePath": "/api/v1",
+  "paths": {
+    "/users": {
+      "get": {
+        "summary": "获取用户列表",
+        "tags": ["用户管理"],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "type": "integer"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "users": {"type": "array"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orders": {
+      "post": {
+        "summary": "创建订单",
+        "tags": ["订单管理"],
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "user_id": {"type": "integer"},
+                "items": {"type": "array"}
+              }
+            }
+          }
+        ],
+        "responses": {
+          "201": {"description": "创建成功"}
+        }
+      }
+    }
+  }
+}

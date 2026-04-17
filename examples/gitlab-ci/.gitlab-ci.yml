@@ -1,0 +1,166 @@
+# GitLab CI/CD 配置文件
+# 自动触发AI测试平台执行测试
+
+# 定义阶段
+stages:
+  - test
+  - trigger-ai-test
+  - report
+
+# 全局变量
+variables:
+  AI_TEST_API: "http://your-ai-test-server:8000/api/trigger/git-push"
+  TRIGGER_TIMEOUT: "300"  # 5分钟超时
+
+# 基础测试（可选）
+unit-test:
+  stage: test
+  script:
+    - echo "Running unit tests..."
+    - python -m pytest tests/ || true
+  only:
+    - branches
+  tags:
+    - docker
+
+# 触发AI测试
+trigger-ai-test:
+  stage: trigger-ai-test
+  image: curlimages/curl:latest
+  script:
+    - echo "========================================="
+    - echo "Triggering AI Test Platform"
+    - echo "========================================="
+    - echo "Repo: $CI_PROJECT_PATH"
+    - echo "Branch: $CI_COMMIT_REF_NAME"
+    - echo "Commit: $CI_COMMIT_SHA"
+    - echo "Author: $CI_COMMIT_AUTHOR"
+    - echo "Message: $CI_COMMIT_MESSAGE"
+    - echo "========================================="
+    
+    # 获取变更文件列表
+    - |
+      if [ "$CI_COMMIT_BEFORE_SHA" != "0000000000000000000000000000000000000000" ]; then
+        CHANGED_FILES=$(git diff --name-only $CI_COMMIT_BEFORE_SHA $CI_COMMIT_SHA | jq -R -s -c 'split("\n")[:-1]')
+      else
+        CHANGED_FILES='[]'
+      fi
+    
+    # 构建JSON请求
+    - |
+      cat > payload.json <<EOF
+      {
+        "repo": "$CI_PROJECT_PATH",
+        "branch": "$CI_COMMIT_REF_NAME",
+        "commit_id": "$CI_COMMIT_SHA",
+        "commit_message": "$CI_COMMIT_MESSAGE",
+        "author": "$CI_COMMIT_AUTHOR",
+        "changed_files": $CHANGED_FILES
+      }
+      EOF
+    
+    - echo "Payload:"
+    - cat payload.json
+    
+    # 发送触发请求
+    - |
+      RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$AI_TEST_API" \
+        -H "Content-Type: application/json" \
+        -d @payload.json)
+    
+    - HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+    - BODY=$(echo "$RESPONSE" | sed '$d')
+    
+    - echo "HTTP Status: $HTTP_CODE"
+    - echo "Response: $BODY"
+    
+    # 检查响应
+    - |
+      if [ "$HTTP_CODE" = "200" ]; then
+        echo "✅ AI Test triggered successfully!"
+        TRIGGER_ID=$(echo "$BODY" | jq -r '.trigger_id')
+        echo "Trigger ID: $TRIGGER_ID"
+        echo "TRIGGER_ID=$TRIGGER_ID" >> trigger.env
+      else
+        echo "❌ Failed to trigger AI test"
+        exit 1
+      fi
+  
+  artifacts:
+    reports:
+      dotenv: trigger.env
+    expire_in: 1 hour
+  
+  only:
+    - branches
+  
+  tags:
+    - docker
+
+# 等待测试结果（可选）
+wait-for-results:
+  stage: report
+  image: curlimages/curl:latest
+  script:
+    - echo "Waiting for AI test results..."
+    - echo "Trigger ID: $TRIGGER_ID"
+    
+    # 轮询检查状态
+    - |
+      STATUS_API="http://your-ai-test-server:8000/api/trigger/status/$TRIGGER_ID"
+      MAX_WAIT=300  # 最多等待5分钟
+      WAIT_TIME=0
+      
+      while [ $WAIT_TIME -lt $MAX_WAIT ]; do
+        RESPONSE=$(curl -s "$STATUS_API")
+        STATUS=$(echo "$RESPONSE" | jq -r '.status')
+        
+        echo "Current status: $STATUS (waited ${WAIT_TIME}s)"
+        
+        if [ "$STATUS" = "success" ]; then
+          echo "✅ AI Test completed successfully!"
+          echo "$RESPONSE" | jq '.'
+          exit 0
+        elif [ "$STATUS" = "failed" ]; then
+          echo "❌ AI Test failed!"
+          echo "$RESPONSE" | jq '.'
+          exit 1
+        fi
+        
+        sleep 10
+        WAIT_TIME=$((WAIT_TIME + 10))
+      done
+      
+      echo "⏱️  Timeout waiting for test results"
+      exit 1
+  
+  dependencies:
+    - trigger-ai-test
+  
+  only:
+    - branches
+  
+  tags:
+    - docker
+  
+  allow_failure: true  # 允许失败，不阻塞流水线
+
+# 仅在主分支触发完整测试
+trigger-full-test:
+  stage: trigger-ai-test
+  image: curlimages/curl:latest
+  script:
+    - echo "Triggering full regression test on main branch"
+    - |
+      curl -X POST "http://your-ai-test-server:8000/api/trigger/manual" \
+        -H "Content-Type: application/json" \
+        -d '{
+          "requirement": "主分支完整回归测试",
+          "priority": "P0",
+          "user": "GitLab CI"
+        }'
+  only:
+    - main
+    - master
+  tags:
+    - docker

@@ -1,0 +1,219 @@
+{
+  "total": 27,
+  "passed": 4,
+  "failed": 23,
+  "results": [
+    {
+      "endpoint": "/",
+      "method": "GET",
+      "description": "根路径",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: / (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE29993110>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/health",
+      "method": "GET",
+      "description": "健康检查",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /health (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A271850>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/dashboard/stats",
+      "method": "GET",
+      "description": "Dashboard统计",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/dashboard/stats (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A273E10>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/projects",
+      "method": "GET",
+      "description": "获取项目列表",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/projects (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A272BD0>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/projects",
+      "method": "POST",
+      "description": "创建项目",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/projects (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A270DD0>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/apis",
+      "method": "GET",
+      "description": "获取API列表",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/apis (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A266C10>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/test-cases",
+      "method": "GET",
+      "description": "获取测试用例",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/test-cases (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A27EDD0>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/test-cases",
+      "method": "POST",
+      "description": "创建测试用例",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/test-cases (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A28D090>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/test-runs",
+      "method": "GET",
+      "description": "获取测试执行列表",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/test-runs (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A28F3D0>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/test-runs/start",
+      "method": "POST",
+      "description": "启动测试执行",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/test-runs/start (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A254450>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/reports",
+      "method": "GET",
+      "description": "获取报告列表",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/reports (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A27E0D0>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/ai/agents",
+      "method": "GET",
+      "description": "获取AI代理列表",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/ai/agents (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A27C9D0>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/ai/current",
+      "method": "GET",
+      "description": "获取当前AI配置",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/ai/current (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A2707D0>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/ai/providers/list",
+      "method": "GET",
+      "description": "获取AI提供商列表",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/ai/providers/list (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A28FCD0>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/agent/analyze",
+      "method": "POST",
+      "description": "Test Agent分析",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/agent/analyze (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A296090>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/strategy/generate",
+      "method": "POST",
+      "description": "Strategy Engine生成策略",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/strategy/generate (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A270C50>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/orchestrator/execute",
+      "method": "POST",
+      "description": "Orchestrator执行测试",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/orchestrator/execute (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A27D950>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/pipeline/run",
+      "method": "POST",
+      "description": "Pipeline完整流程",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/pipeline/run (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A222510>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/pipeline/health",
+      "method": "GET",
+      "description": "Pipeline健康检查",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/pipeline/health (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A28E050>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/test-data/generate",
+      "method": "POST",
+      "description": "生成测试数据",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/test-data/generate (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A2971D0>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/test-data/templates",
+      "method": "GET",
+      "description": "获取模板列表",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/test-data/templates (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A257A90>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "/api/test-data/datasets",
+      "method": "GET",
+      "description": "获取数据集列表",
+      "status": "❌ 异常",
+      "success": false,
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /api/test-data/datasets (Caused by NewConnectionError('<urllib3.connection.HTTPConnection object at 0x000001DE2A27C110>: Failed to establish a new connection: [WinError 10061] 由于目标计算机积极拒绝，无法连接。'))"
+    },
+    {
+      "endpoint": "AI配置",
+      "method": "CONFIG",
+      "description": "AI配置检查",
+      "status": "✅ 通过",
+      "success": true
+    },
+    {
+      "endpoint": "Ollama AI",
+      "method": "GENERATE",
+      "description": "Ollama模型调用",
+      "status": "✅ 通过",
+      "success": true
+    },
+    {
+      "endpoint": "DeepSeek AI",
+      "method": "GENERATE",
+      "description": "DeepSeek模型调用",
+      "status": "❌ 失败",
+      "success": false,
+      "error": "AI API请求失败: 400 Client Error: Bad Request for url: https://api.deepseek.com/chat/completions"
+    },
+    {
+      "endpoint": "LLM Client",
+      "method": "GENERATE",
+      "description": "LLM客户端调用",
+      "status": "✅ 通过",
+      "success": true
+    },
+    {
+      "endpoint": "Test Agent Service",
+      "method": "ANALYZE",
+      "description": "Test Agent服务调用",
+      "status": "✅ 通过",
+      "success": true
+    }
+  ]
+}

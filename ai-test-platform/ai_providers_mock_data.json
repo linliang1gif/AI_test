@@ -1,0 +1,57 @@
+{
+  "success": true,
+  "data": {
+    "providers": [
+      {
+        "id": "ollama",
+        "name": "Ollama",
+        "description": "本地AI模型服务",
+        "type": "local",
+        "status": "available",
+        "models": [
+          "qwen2.5:1.5b",
+          "qwen2.5-coder:latest"
+        ],
+        "default_model": "qwen2.5:1.5b",
+        "config": {
+          "base_url": "http://localhost:11434",
+          "timeout": 60
+        }
+      },
+      {
+        "id": "deepseek",
+        "name": "DeepSeek",
+        "description": "DeepSeek AI API服务",
+        "type": "cloud",
+        "status": "available",
+        "models": [
+          "deepseek-chat",
+          "deepseek-coder"
+        ],
+        "default_model": "deepseek-chat",
+        "config": {
+          "base_url": "https://api.deepseek.com",
+          "api_key": "sk-***"
+        }
+      },
+      {
+        "id": "openai",
+        "name": "OpenAI",
+        "description": "OpenAI GPT API服务",
+        "type": "cloud",
+        "status": "unavailable",
+        "models": [
+          "gpt-3.5-turbo",
+          "gpt-4"
+        ],
+        "default_model": "gpt-3.5-turbo",
+        "config": {
+          "base_url": "https://api.openai.com/v1",
+          "api_key": ""
+        }
+      }
+    ],
+    "current": "ollama"
+  },
+  "timestamp": 1773656097
+}

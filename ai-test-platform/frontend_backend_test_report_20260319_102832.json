@@ -1,0 +1,573 @@
+{
+  "test_time": "2026-03-19T10:28:32.389600",
+  "summary": {
+    "total": 17,
+    "passed": 17,
+    "failed": 0,
+    "pass_rate": 100.0
+  },
+  "results": [
+    {
+      "name": "获取仪表板统计",
+      "endpoint": "/api/dashboard/stats",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.022693,
+      "error": null,
+      "response_data": {
+        "totalTests": 156,
+        "passed": 142,
+        "failed": 14,
+        "coverage": 85,
+        "recentTests": [
+          {
+            "id": 1,
+            "name": "用户登录接口",
+            "status": "passed",
+            "time": "2分钟前"
+          },
+          {
+            "id": 2,
+            "name": "支付网关",
+            "status": "failed",
+            "time": "5分钟前"
+          }
+        ]
+      }
+    },
+    {
+      "name": "获取项目列表",
+      "endpoint": "/api/projects",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.002382,
+      "error": null,
+      "response_data": {
+        "projects": [
+          {
+            "id": 1,
+            "name": "电商平台接口",
+            "description": "电商平台API的完整测试套件",
+            "environment": "production",
+            "baseUrl": "https://api.ecommerce.com",
+            "testsCount": 45,
+            "lastRun": "2小时前",
+            "status": "active"
+          },
+          {
+            "id": 2,
+            "name": "支付网关",
+            "description": "支付处理和交易测试",
+            "environment": "staging",
+            "baseUrl": "https://staging-payment.com",
+            "testsCount": 23,
+            "lastRun": "1天前",
+            "status": "active"
+          }
+        ]
+      }
+    },
+    {
+      "name": "创建项目",
+      "endpoint": "/api/projects",
+      "method": "POST",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.00296,
+      "error": null,
+      "response_data": {
+        "success": true,
+        "project": {
+          "id": 3,
+          "name": "测试项目",
+          "description": "API测试创建的项目",
+          "environment": "development",
+          "baseUrl": "http://test.example.com",
+          "testsCount": 0,
+          "lastRun": "Never",
+          "status": "active"
+        }
+      }
+    },
+    {
+      "name": "获取API列表",
+      "endpoint": "/api/apis",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.021701,
+      "error": null,
+      "response_data": {
+        "apis": [
+          {
+            "id": 1,
+            "method": "POST",
+            "path": "/api/auth/login",
+            "description": "User authentication endpoint",
+            "parameters": [
+              "username",
+              "password"
+            ],
+            "status": "tested"
+          },
+          {
+            "id": 2,
+            "method": "GET",
+            "path": "/api/users/{id}",
+            "description": "Get user by ID",
+            "parameters": [
+              "id"
+            ],
+            "status": "pending"
+          }
+        ]
+      }
+    },
+    {
+      "name": "解析Swagger",
+      "endpoint": "/api/swagger/parse",
+      "method": "POST",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.002033,
+      "error": null,
+      "response_data": {
+        "success": true,
+        "message": "Successfully parsed 1 endpoints",
+        "apis": [
+          {
+            "id": 3,
+            "method": "GET",
+            "path": "/api/swagger-endpoint",
+            "description": "Endpoint from Swagger documentation",
+            "parameters": [
+              "param1",
+              "param2"
+            ],
+            "status": "pending"
+          }
+        ]
+      }
+    },
+    {
+      "name": "获取测试用例",
+      "endpoint": "/api/test-cases",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.003335,
+      "error": null,
+      "response_data": {
+        "testCases": [
+          {
+            "id": 1,
+            "title": "用户登录 - 有效凭证",
+            "steps": [
+              "打开登录页面",
+              "输入有效的用户名",
+              "输入有效的密码",
+              "点击登录按钮"
+            ],
+            "expected": "用户成功登录并跳转到仪表板",
+            "priority": "High",
+            "module": "用户认证",
+            "status": "passed",
+            "lastRun": "2小时前"
+          },
+          {
+            "id": 2,
+            "title": "用户登录 - 无效凭证",
+            "steps": [
+              "打开登录页面",
+              "输入无效的用户名或密码",
+              "点击登录按钮",
+              "验证错误提示"
+            ],
+            "expected": "显示错误提示信息",
+            "priority": "High",
+            "module": "用户认证",
+            "status": "passed",
+            "lastRun": "2小时前"
+          },
+          {
+            "id": 3,
+            "title": "商品搜索功能",
+            "steps": [
+              "进入商品页面",
+              "在搜索框输入关键词",
+              "点击搜索按钮",
+              "验证搜索结果"
+            ],
+            "expected": "显示匹配的商品列表",
+            "priority": "Medium",
+            "module": "商品管理",
+            "status": "passed",
+            "lastRun": "1天前"
+          },
+          {
+            "id": 4,
+            "title": "添加商品到购物车",
+            "steps": [
+              "选择商品",
+              "点击加入购物车",
+              "查看购物车",
+              "验证商品已添加"
+            ],
+            "expected": "商品成功添加到购物车",
+            "priority": "High",
+            "module": "购物车",
+            "status": "pending",
+            "lastRun": "从未运行"
+          },
+          {
+            "id": 5,
+            "title": "支付流程测试",
+            "steps": [
+              "进入购物车",
+              "点击结算",
+              "填写支付信息",
+              "确认支付"
+            ],
+            "expected": "支付成功并生成订单",
+            "priority": "High",
+            "module": "支付",
+            "status": "failed",
+            "lastRun": "5分钟前"
+          }
+        ]
+      }
+    },
+    {
+      "name": "创建测试用例",
+      "endpoint": "/api/test-cases",
+      "method": "POST",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.002727,
+      "error": null,
+      "response_data": {
+        "success": true,
+        "testCase": {
+          "id": 6,
+          "title": "API测试用例",
+          "steps": [
+            "步骤1",
+            "步骤2"
+          ],
+          "expected": "预期结果",
+          "priority": "High",
+          "module": "测试模块",
+          "status": "pending",
+          "lastRun": "Never"
+        }
+      }
+    },
+    {
+      "name": "获取测试执行列表",
+      "endpoint": "/api/test-runs",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.001994,
+      "error": null,
+      "response_data": {
+        "testRuns": [
+          {
+            "id": 1,
+            "name": "Full API Test Suite",
+            "status": "running",
+            "progress": 65,
+            "startTime": "2024-03-14 10:30:00",
+            "duration": "00:05:23",
+            "totalTests": 45,
+            "passed": 28,
+            "failed": 2,
+            "pending": 15,
+            "environment": "staging"
+          }
+        ]
+      }
+    },
+    {
+      "name": "启动测试执行",
+      "endpoint": "/api/test-runs",
+      "method": "POST",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.0019,
+      "error": null,
+      "response_data": {
+        "success": true,
+        "taskId": "run_1773887312",
+        "testRun": {
+          "id": 2,
+          "name": "Test Run 2",
+          "status": "running",
+          "progress": 0,
+          "startTime": "2026-03-19 10:28:32",
+          "duration": "00:00:00",
+          "totalTests": 20,
+          "passed": 0,
+          "failed": 0,
+          "pending": 20,
+          "environment": "staging"
+        }
+      }
+    },
+    {
+      "name": "获取报告列表",
+      "endpoint": "/api/reports",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.022341,
+      "error": null,
+      "response_data": {
+        "reports": [
+          {
+            "id": 1,
+            "name": "API Test Report - March 2024",
+            "type": "Comprehensive Report",
+            "date": "2024-03-14",
+            "size": "2.3 MB",
+            "format": "HTML",
+            "testRuns": 5,
+            "passRate": 89,
+            "status": "completed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "获取自动化脚本",
+      "endpoint": "/api/automation/scripts",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.001695,
+      "error": null,
+      "response_data": {
+        "scripts": [
+          {
+            "id": 1,
+            "name": "test_user_authentication.py",
+            "description": "用户登录和认证流程的自动化测试",
+            "framework": "pytest",
+            "status": "ready",
+            "lastGenerated": "2小时前",
+            "testCount": 12,
+            "language": "python"
+          },
+          {
+            "id": 2,
+            "name": "test_shopping_cart.py",
+            "description": "购物车功能的自动化测试脚本",
+            "framework": "pytest",
+            "status": "ready",
+            "lastGenerated": "1天前",
+            "testCount": 8,
+            "language": "python"
+          },
+          {
+            "id": 3,
+            "name": "test_payment_gateway.py",
+            "description": "支付网关接口测试",
+            "framework": "pytest",
+            "status": "ready",
+            "lastGenerated": "3天前",
+            "testCount": 15,
+            "language": "python"
+          },
+          {
+            "id": 4,
+            "name": "test_product_search.py",
+            "description": "商品搜索功能测试",
+            "framework": "pytest",
+            "status": "ready",
+            "lastGenerated": "5天前",
+            "testCount": 6,
+            "language": "python"
+          }
+        ]
+      }
+    },
+    {
+      "name": "获取AI代理状态",
+      "endpoint": "/api/ai/agents",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.00139,
+      "error": null,
+      "response_data": {
+        "agents": [
+          {
+            "id": "requirement",
+            "name": "Requirement Agent",
+            "status": "ready",
+            "description": "Analyzes requirements and extracts testable scenarios"
+          },
+          {
+            "id": "testcase",
+            "name": "TestCase Agent",
+            "status": "ready",
+            "description": "Generates comprehensive test cases from requirements"
+          }
+        ]
+      }
+    },
+    {
+      "name": "获取当前AI配置",
+      "endpoint": "/api/ai/current",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.00193,
+      "error": null,
+      "response_data": {
+        "current_provider": "ollama",
+        "current_model": "qwen2.5:1.5b",
+        "provider_name": "Ollama",
+        "provider_type": "local",
+        "status": "available"
+      }
+    },
+    {
+      "name": "获取AI提供商列表",
+      "endpoint": "/api/ai/providers/list",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.002327,
+      "error": null,
+      "response_data": {
+        "providers": [
+          {
+            "id": "ollama",
+            "name": "Ollama",
+            "description": "本地AI模型服务",
+            "type": "local",
+            "status": "available",
+            "models": [
+              "qwen2.5:1.5b",
+              "qwen2.5-coder:latest"
+            ],
+            "default_model": "qwen2.5:1.5b",
+            "config": {
+              "base_url": "http://localhost:11434",
+              "timeout": 60
+            }
+          },
+          {
+            "id": "deepseek",
+            "name": "DeepSeek",
+            "description": "DeepSeek AI API服务",
+            "type": "cloud",
+            "status": "available",
+            "models": [
+              "deepseek-chat",
+              "deepseek-coder"
+            ],
+            "default_model": "deepseek-chat",
+            "config": {
+              "base_url": "https://api.deepseek.com",
+              "api_key": "sk-***"
+            }
+          },
+          {
+            "id": "openai",
+            "name": "OpenAI",
+            "description": "OpenAI GPT API服务",
+            "type": "cloud",
+            "status": "unavailable",
+            "models": [
+              "gpt-3.5-turbo",
+              "gpt-4"
+            ],
+            "default_model": "gpt-3.5-turbo",
+            "config": {
+              "base_url": "https://api.openai.com/v1",
+              "api_key": ""
+            }
+          }
+        ],
+        "current": "ollama"
+      }
+    },
+    {
+      "name": "上传需求文档",
+      "endpoint": "/api/upload/requirement",
+      "method": "POST",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.029903,
+      "error": null,
+      "response_data": {
+        "success": true,
+        "message": "需求文档 test_requirement.txt 上传成功",
+        "filePath": "uploads\\test_requirement.txt",
+        "fileSize": 93
+      }
+    },
+    {
+      "name": "获取知识库统计",
+      "endpoint": "/api/knowledge/stats",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.047712,
+      "error": null,
+      "response_data": {
+        "available": true,
+        "bugs": {
+          "total": 2,
+          "by_type": {
+            "功能缺陷": 1,
+            "网络问题": 1
+          },
+          "fix_success_rate": 1.0,
+          "recent_7days": 2
+        },
+        "healing": {
+          "total": 2,
+          "hit_count": 4,
+          "avg_success_rate": 1.0
+        },
+        "testcases": {
+          "total": 11,
+          "by_module": {
+            "用户认证": 1,
+            "认证": 2,
+            "订单管理": 3,
+            "商品管理": 3,
+            "系统管理": 2
+          },
+          "avg_quality_score": 1.0
+        },
+        "business": {
+          "total_requirements": 2,
+          "total_rules": 2,
+          "coverage_rate": 1.0
+        }
+      }
+    },
+    {
+      "name": "获取覆盖率报告",
+      "endpoint": "/api/knowledge/coverage",
+      "method": "GET",
+      "status_code": 200,
+      "success": true,
+      "response_time": 0.003541,
+      "error": null,
+      "response_data": {
+        "total_reqs": 2,
+        "mapped_reqs": 2,
+        "unmapped_reqs": 0,
+        "coverage_rate": 1.0,
+        "unmapped_list": []
+      }
+    }
+  ]
+}

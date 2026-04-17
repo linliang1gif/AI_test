@@ -1,0 +1,131 @@
+[
+  {
+    "id": "TC_001",
+    "test_point_id": "TP_001",
+    "title": "获取用户列表 - 正常流程",
+    "precondition": "无",
+    "steps": [
+      "调用 GET /users"
+    ],
+    "expected": "返回200状态码，查询成功",
+    "priority": "P0",
+    "test_type": "api",
+    "module": "用户管理",
+    "execution_config": {
+      "method": "GET",
+      "url": "/users",
+      "timeout": 30,
+      "params": {
+        "page": 1,
+        "page_size": 1
+      }
+    },
+    "assertions": [
+      {
+        "type": "status_code",
+        "operator": "in",
+        "expected": [
+          200,
+          200,
+          201,
+          204
+        ]
+      },
+      {
+        "type": "json_path",
+        "field": "total",
+        "operator": "exists",
+        "expected": true
+      },
+      {
+        "type": "json_path",
+        "field": "total",
+        "operator": "type",
+        "expected": "integer"
+      },
+      {
+        "type": "json_path",
+        "field": "users",
+        "operator": "exists",
+        "expected": true
+      }
+    ],
+    "data_type": "valid",
+    "expected_behavior": "success",
+    "save_to_context": null
+  },
+  {
+    "id": "TC_002",
+    "test_point_id": "TP_002",
+    "title": "获取用户列表 - 边界测试(最小值/空值)",
+    "precondition": "无",
+    "steps": [
+      "调用 GET /users (使用最小值/空值)"
+    ],
+    "expected": "返回200状态码，查询成功",
+    "priority": "P1",
+    "test_type": "api",
+    "module": "用户管理",
+    "execution_config": {
+      "method": "GET",
+      "url": "/users",
+      "timeout": 30,
+      "params": {
+        "page": 1,
+        "page_size": 1
+      }
+    },
+    "assertions": [
+      {
+        "type": "status_code",
+        "operator": "in",
+        "expected": [
+          200,
+          200,
+          201,
+          204
+        ]
+      }
+    ],
+    "data_type": "boundary",
+    "expected_behavior": "success",
+    "save_to_context": null
+  },
+  {
+    "id": "TC_003",
+    "test_point_id": "TP_003",
+    "title": "获取用户列表 - 边界测试(最大值)",
+    "precondition": "无",
+    "steps": [
+      "调用 GET /users (使用最大值)"
+    ],
+    "expected": "返回200状态码，查询成功",
+    "priority": "P1",
+    "test_type": "api",
+    "module": "用户管理",
+    "execution_config": {
+      "method": "GET",
+      "url": "/users",
+      "timeout": 30,
+      "params": {
+        "page": 1000,
+        "page_size": 100
+      }
+    },
+    "assertions": [
+      {
+        "type": "status_code",
+        "operator": "in",
+        "expected": [
+          200,
+          200,
+          201,
+          204
+        ]
+      }
+    ],
+    "data_type": "boundary",
+    "expected_behavior": "success",
+    "save_to_context": null
+  }
+]

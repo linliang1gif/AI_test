@@ -1,0 +1,145 @@
+# AI Test Platform - Git忽略文件
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+venv/
+ENV/
+env/
+
+# 测试和覆盖率
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# 前端构建
+frontend/dist/
+frontend/build/
+frontend/.vite/
+
+# 数据文件
+data/
+uploads/
+output/
+logs/
+*.log
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
+knowledge/*.db
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 报告文件
+reports/
+*.html
+*.xml
+allure-results/
+
+# 密钥和证书
+*.pem
+*.key
+*.crt
+*.p12
+
+# 大文件
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# 测试数据
+test_data/
+mock_data/
+
+# 文档临时文件
+~$*.docx
+~$*.xlsx
+~$*.pptx
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# PyCharm
+.idea/
+*.iml
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# 本地配置
+local_config.py
+local_settings.py
+
+# 缓存
+.cache/
+*.cache
+
+# 编译文件
+*.pyc
+*.pyo
+*.pyd
+
+# 打包文件
+*.egg
+*.whl
+
+# 其他
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json

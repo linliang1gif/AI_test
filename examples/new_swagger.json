@@ -1,0 +1,97 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "示例API - 新版本",
+    "version": "2.0.0"
+  },
+  "basePath": "/api/v1",
+  "paths": {
+    "/users": {
+      "get": {
+        "summary": "获取用户列表",
+        "tags": ["用户管理"],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "type": "integer"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "type": "integer",
+            "description": "新增参数"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "schema": {
+              "type": "object",
+              "properties": {
+                "total": {"type": "integer"},
+                "users": {"type": "array"}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/orders": {
+      "post": {
+        "summary": "创建订单",
+        "tags": ["订单管理"],
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "required": ["user_id", "items", "amount"],
+              "properties": {
+                "user_id": {"type": "integer"},
+                "items": {"type": "array"},
+                "amount": {
+                  "type": "number",
+                  "description": "新增：订单金额"
+                },
+                "discount_code": {
+                  "type": "string",
+                  "description": "新增：优惠码"
+                }
+              }
+            }
+          }
+        ],
+        "responses": {
+          "201": {"description": "创建成功"}
+        }
+      }
+    },
+    "/payments": {
+      "post": {
+        "summary": "创建支付",
+        "tags": ["支付管理"],
+        "description": "新增API",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "schema": {
+              "type": "object",
+              "required": ["order_id", "amount", "payment_method"],
+              "properties": {
+                "order_id": {"type": "integer"},
+                "amount": {"type": "number"},
+                "payment_method": {"type": "string"}
+              }
+            }
+          }
+        ],
+        "responses": {
+          "201": {"description": "支付成功"}
+        }
+      }
+    }
+  }
+}

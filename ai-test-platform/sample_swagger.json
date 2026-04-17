@@ -1,0 +1,151 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "示例API",
+    "version": "1.0.0",
+    "description": "用于测试的示例API文档"
+  },
+  "host": "api.example.com",
+  "basePath": "/v1",
+  "schemes": [
+    "https"
+  ],
+  "paths": {
+    "/api/users": {
+      "post": {
+        "summary": "创建用户",
+        "description": "创建一个新用户账号",
+        "tags": [
+          "用户管理"
+        ],
+        "parameters": [
+          {
+            "name": "username",
+            "in": "query",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "email",
+            "in": "query",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "password",
+            "in": "query",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "age",
+            "in": "query",
+            "required": false,
+            "type": "integer"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/users/{id}": {
+      "get": {
+        "summary": "获取用户信息",
+        "description": "根据用户ID获取用户详细信息",
+        "tags": [
+          "用户管理"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "type": "integer"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/orders": {
+      "post": {
+        "summary": "创建订单",
+        "description": "创建一个新订单",
+        "tags": [
+          "订单管理"
+        ],
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": true,
+            "type": "integer"
+          },
+          {
+            "name": "product_id",
+            "in": "query",
+            "required": true,
+            "type": "integer"
+          },
+          {
+            "name": "quantity",
+            "in": "query",
+            "required": true,
+            "type": "integer"
+          },
+          {
+            "name": "total_price",
+            "in": "query",
+            "required": true,
+            "type": "number"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    },
+    "/api/products": {
+      "get": {
+        "summary": "获取产品列表",
+        "description": "获取所有产品列表",
+        "tags": [
+          "产品管理"
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "type": "integer"
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "type": "integer"
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,6 @@
+# API自动化测试依赖
+pytest>=7.0.0
+requests>=2.28.0
+pytest-html>=3.1.0
+pytest-xdist>=2.5.0
+allure-pytest>=2.10.0

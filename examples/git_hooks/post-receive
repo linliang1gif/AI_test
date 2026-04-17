@@ -1,0 +1,72 @@
+#!/bin/bash
+#
+# Git Post-Receive Hook
+# 当代码推送到Git仓库后自动触发测试
+#
+# 安装方法:
+# 1. 将此文件复制到 .git/hooks/post-receive
+# 2. chmod +x .git/hooks/post-receive
+# 3. 配置 TRIGGER_API_URL
+
+# 配置
+TRIGGER_API_URL="http://localhost:8000/api/trigger/git-push"
+REPO_NAME=$(basename `git rev-parse --show-toplevel`)
+
+# 读取推送信息
+while read oldrev newrev refname; do
+    # 提取分支名
+    BRANCH=$(echo $refname | sed 's/refs\/heads\///')
+    
+    # 获取提交信息
+    COMMIT_ID=$newrev
+    COMMIT_MESSAGE=$(git log -1 --pretty=%B $newrev)
+    AUTHOR=$(git log -1 --pretty=%an $newrev)
+    
+    # 获取变更文件列表
+    CHANGED_FILES=$(git diff --name-only $oldrev $newrev | jq -R -s -c 'split("\n")[:-1]')
+    
+    echo "========================================="
+    echo "Git Push Detected"
+    echo "========================================="
+    echo "Repo: $REPO_NAME"
+    echo "Branch: $BRANCH"
+    echo "Commit: $COMMIT_ID"
+    echo "Author: $AUTHOR"
+    echo "Message: $COMMIT_MESSAGE"
+    echo "========================================="
+    
+    # 构建JSON请求
+    JSON_DATA=$(cat <<EOF
+{
+  "repo": "$REPO_NAME",
+  "branch": "$BRANCH",
+  "commit_id": "$COMMIT_ID",
+  "commit_message": "$COMMIT_MESSAGE",
+  "author": "$AUTHOR",
+  "changed_files": $CHANGED_FILES
+}
+EOF
+)
+    
+    # 发送触发请求
+    echo "Triggering automated tests..."
+    RESPONSE=$(curl -s -X POST "$TRIGGER_API_URL" \
+        -H "Content-Type: application/json" \
+        -d "$JSON_DATA")
+    
+    # 解析响应
+    TRIGGER_ID=$(echo $RESPONSE | jq -r '.trigger_id')
+    STATUS=$(echo $RESPONSE | jq -r '.status')
+    
+    if [ "$TRIGGER_ID" != "null" ]; then
+        echo "✅ Test triggered successfully!"
+        echo "Trigger ID: $TRIGGER_ID"
+        echo "Status: $STATUS"
+        echo "Track at: http://localhost:8000/api/trigger/status/$TRIGGER_ID"
+    else
+        echo "❌ Failed to trigger tests"
+        echo "Response: $RESPONSE"
+    fi
+    
+    echo "========================================="
+done

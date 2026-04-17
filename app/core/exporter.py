@@ -41,7 +41,7 @@ def _is_file_locked(file_path: Path) -> bool:
         return False
 
 
-def export_cases(cases: List[dict], destination: Path, sheet_name: str | None = None) -> Path:
+def export_cases(cases: List[dict], destination: Path, sheet_name: str | None = None, coverage: dict | None = None) -> Path:
     """Export cases to an Excel file with basic highlighting."""
     if not cases:
         raise ValueError("没有可导出的测试用例")
@@ -74,6 +74,10 @@ def export_cases(cases: List[dict], destination: Path, sheet_name: str | None = 
                 df_to_write.to_excel(writer, index=False, sheet_name=sheet_name)
 
         _apply_formatting(destination, sheet_name)
+
+        # Write coverage summary sheet if provided
+        if coverage:
+            _write_coverage_sheet(destination, coverage)
     except PermissionError as e:
         raise PermissionError(
             f"文件写入失败：{destination}\n"
@@ -123,7 +127,7 @@ def _apply_formatting(file_path: Path, sheet_name: str) -> None:
             "项目名称": 15,
             "模块名称": 15,
             "子模块名称": 15,
-            "功能点": 30,
+            "测试点": 35,  # 新增字段
             "用例标题": 50,
             "前置条件": 40,
             "输入数据": 20,
@@ -162,3 +166,46 @@ def _apply_formatting(file_path: Path, sheet_name: str) -> None:
         pass
 
 
+
+
+def _write_coverage_sheet(file_path: Path, coverage: dict) -> None:
+    """Write a coverage summary sheet to the workbook."""
+    try:
+        summary_data = []
+
+        # Quality score
+        summary_data.append({"指标": "质量评分", "值": f"{coverage.get('quality_score', 0)}/100"})
+        summary_data.append({"指标": "用例总数", "值": str(coverage.get("total", 0))})
+
+        # Dimension coverage
+        dims = coverage.get("dimensions", {})
+        for dim, count in dims.items():
+            summary_data.append({"指标": f"维度-{dim}", "值": str(count)})
+
+        # Missing dimensions
+        missing = coverage.get("missing_dimensions", [])
+        if missing:
+            summary_data.append({"指标": "未覆盖维度", "值": "、".join(missing)})
+
+        # Priority distribution
+        pri = coverage.get("priority_dist", {})
+        for level, count in pri.items():
+            summary_data.append({"指标": f"优先级-{level}", "值": str(count)})
+
+        df = pd.DataFrame(summary_data)
+        with pd.ExcelWriter(file_path, engine="openpyxl", mode="a", if_sheet_exists="replace") as writer:
+            df.to_excel(writer, index=False, sheet_name="覆盖率统计")
+
+        # Format the summary sheet
+        wb = load_workbook(file_path)
+        if "覆盖率统计" in wb.sheetnames:
+            ws = wb["覆盖率统计"]
+            ws.column_dimensions["A"].width = 20
+            ws.column_dimensions["B"].width = 40
+            for row in ws.iter_rows():
+                for cell in row:
+                    cell.alignment = Alignment(wrap_text=True, vertical="top")
+            wb.save(file_path)
+        wb.close()
+    except Exception:
+        pass  # Coverage sheet is optional, don't fail the export

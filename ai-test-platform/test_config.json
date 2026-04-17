@@ -1,0 +1,93 @@
+{
+  "test_environments": {
+    "development": {
+      "base_url": "https://dev-recycle.szhibu.com",
+      "timeout": 15,
+      "retry_count": 3,
+      "description": "回收系统开发环境",
+      "merchant_id": "1014"
+    },
+    "staging": {
+      "base_url": "http://staging.example.com",
+      "timeout": 15,
+      "retry_count": 3,
+      "description": "测试环境"
+    },
+    "production": {
+      "base_url": "http://api.example.com",
+      "timeout": 20,
+      "retry_count": 5,
+      "description": "生产环境"
+    }
+  },
+  "test_data": {
+    "login": {
+      "valid_user": {
+        "username": "ldsit",
+        "password": "654321",
+        "merchant_id": "1014"
+      },
+      "valid_token": {
+        "token": "yJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdXBwbGllcklkIjoiIiwidXNlcl9uYW1lIjoibGRzaXQiLCJtb2JpbGUiOiIxMzU0MjY1ODk2MyIsImF2YXRhciI6bnVsbCwidXNlcklkIjoiMTE2ZDMyYTY0MGIwNGE1NWJkMTViMWI5MTBmY2Y3NzgiLCJ1dWlkIjoiMDg4ZWU1YjcwY2EyNDdiN2FiMWEyNDNlYTQ2NGM5MmEiLCJjbGllbnRfaWQiOiJkZXZfYmx1ZV9yZWN5Y2xlIiwidXJsIjpudWxsLCJyZWFsTmFtZSI6Imxkc2l0IiwiYXVkIjpbIkRFRkFVTFRfUkVTT1VSQ0VfSUQiXSwicGluIjoiMTAxNCIsInNjb3BlIjpbImFsbCJdLCJ3c3QiOiJ3c0xBQWN6TEFzREJ5QXZJd1FMS3lnc0J3c29Md2d2RHdzZ0FEQUROemNmT3dzakN3YzRQQWR3RDBjNEJDdENwQ3cvYUNxbmJDZ3pUREE4S3pzakh4d29LeWd2TnlBd0N5OEhOQzgwQ0M4SUN5OEhNQ2dMQndNRU13OHNDIiwiaWQiOjE5OTMxMzE3MjI5MTY4OTI2NzQsImV4cCI6MTc3NDI0NjgxOCwianRpIjoiMzc3MGM5MGEtMDZmOS00Y2E1LWJjZWYtMmU2ZTY4N2ZmNDUxIiwiZW1haWwiOiIxMzU0MjY1ODk2M0BxcS5jb20ifQ.vAnbvo_pUUfkmQcFUf8lpmktp6ZdY9mIYqqVc6M-4TrgllPsuREak8yMfC81Mvt5pL9nOu5PYMW0Idh7QIVZ-nGs-958__dTHLZ13RFjkPdt21_wIdxrj1pzfkAtuFyd-pETWiIIBIjsN0TmEFunODmy5zIAKQ5PBeTQbkOPNZU",
+        "user_id": "116d32a640b04a55bd15b1b910fcf778",
+        "username": "ldsit",
+        "merchant_id": "1014"
+      },
+      "invalid_user": {
+        "username": "invalid_user",
+        "password": "wrong_password"
+      }
+    },
+    "register": {
+      "new_user": {
+        "username": "new_user_{{timestamp}}",
+        "email": "test_{{timestamp}}@example.com",
+        "password": "password123"
+      }
+    },
+    "products": {
+      "search_keywords": ["回收物品", "废品", "金属"],
+      "product_ids": ["P001", "P002", "P003"]
+    },
+    "warehouse": {
+      "inbound": {
+        "product_id": "P001",
+        "quantity": 100,
+        "warehouse_id": "W001",
+        "supplier_id": "S001"
+      },
+      "outbound": {
+        "product_id": "P001",
+        "quantity": 50,
+        "warehouse_id": "W001",
+        "customer_id": "C001"
+      }
+    }
+  },
+  "api_endpoints": {
+    "auth": {
+      "login": "/api/login",
+      "logout": "/api/logout"
+    },
+    "recycle": {
+      "orders": "/api/recycle/orders",
+      "materials": "/api/recycle/materials",
+      "pricing": "/api/recycle/pricing"
+    },
+    "warehouse": {
+      "inbound": "/api/warehouse/inbound",
+      "outbound": "/api/warehouse/outbound",
+      "inventory": "/api/warehouse/inventory",
+      "stock": "/api/warehouse/stock/{product_id}"
+    }
+  },
+  "assertions": {
+    "response_time_threshold": 3000,
+    "success_status_codes": [200, 201, 202],
+    "required_fields": {
+      "login_response": ["token", "user_info"],
+      "recycle_orders": ["orders", "total_count"],
+      "warehouse_response": ["success", "data"]
+    }
+  }
+}

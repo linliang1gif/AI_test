@@ -1,7 +1,61 @@
 from __future__ import annotations
 
+import json
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
+
+
+def _extract_json(text: str) -> Optional[dict]:
+    """Extract JSON from AI output that may contain markdown code blocks."""
+    # Try code block first
+    json_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
+    if json_match:
+        try:
+            return json.loads(json_match.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+
+    # Try whole text
+    try:
+        return json.loads(text.strip())
+    except json.JSONDecodeError:
+        pass
+
+    # Try to find JSON object
+    json_match = re.search(r"\{[\s\S]*\"cases\"[\s\S]*\}", text)
+    if json_match:
+        try:
+            return json.loads(json_match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
+def parse_cases_json(ai_output: str) -> List[Dict[str, str]]:
+    """Parse JSON-structured AI output into test cases.
+
+    This is the primary parser for the new JSON prompt format.
+    """
+    data = _extract_json(ai_output)
+    if not data or "cases" not in data:
+        return []
+
+    cases: List[Dict[str, str]] = []
+    for item in data["cases"]:
+        case: Dict[str, str] = {
+            "功能点": str(item.get("function_point", "")).strip(),
+            "用例标题": str(item.get("title", "")).strip(),
+            "前置条件": str(item.get("precondition", "无")).strip(),
+            "测试步骤": str(item.get("steps", "")).strip(),
+            "预期结果": str(item.get("expected", "")).strip(),
+            "优先级": str(item.get("priority", "中")).strip(),
+            "覆盖维度": str(item.get("dimension", "")).strip(),
+        }
+        # Skip empty cases
+        if case["用例标题"]:
+            cases.append(case)
+    return cases
 
 
 def _strip_markup(text: str) -> str:
@@ -72,8 +126,8 @@ def normalize_output(ai_output: str) -> str:
     return "\n".join(fixed_lines)
 
 
-def parse_cases(ai_output: str) -> List[Dict[str, str]]:
-    """Parse normalized AI output into structured test cases."""
+def parse_cases_legacy(ai_output: str) -> List[Dict[str, str]]:
+    """Legacy parser for plain-text AI output (fallback)."""
     cases: List[Dict[str, str]] = []
     current: Dict[str, str] = {}
     in_expected_result = False
@@ -86,7 +140,7 @@ def parse_cases(ai_output: str) -> List[Dict[str, str]]:
         if not line:
             i += 1
             continue
-        
+
         if line.startswith("用例编号"):
             if current:
                 cases.append(current)
@@ -102,10 +156,7 @@ def parse_cases(ai_output: str) -> List[Dict[str, str]]:
         elif line.startswith("前置条件"):
             in_expected_result = False
             content = line.split("：", 1)[-1].strip().lstrip(":")
-            if content:
-                current["前置条件"] = content
-            else:
-                current["前置条件"] = ""
+            current["前置条件"] = content if content else ""
         elif re.match(r"^[0-9]+\.", line) and "前置条件" in current and "测试步骤" not in current:
             in_expected_result = False
             current["前置条件"] = current.get("前置条件", "") + "\n" + line
@@ -118,10 +169,7 @@ def parse_cases(ai_output: str) -> List[Dict[str, str]]:
         elif line.startswith("预期结果"):
             in_expected_result = True
             content = line.split("：", 1)[-1].strip().lstrip(":")
-            if content:
-                current["预期结果"] = content
-            else:
-                current["预期结果"] = ""
+            current["预期结果"] = content if content else ""
         elif in_expected_result:
             if line.startswith("用例编号"):
                 in_expected_result = False
@@ -143,9 +191,19 @@ def parse_cases(ai_output: str) -> List[Dict[str, str]]:
             in_expected_result = False
             current["优先级"] = line.split("：", 1)[-1].strip()
         i += 1
-    
+
     if current:
         cases.append(current)
     return cases
 
 
+def parse_cases(ai_output: str) -> List[Dict[str, str]]:
+    """Smart parser: try JSON first, fall back to legacy text parsing."""
+    # Try JSON parsing first (new format)
+    cases = parse_cases_json(ai_output)
+    if cases:
+        return cases
+
+    # Fallback to legacy text parsing
+    normalized = normalize_output(ai_output)
+    return parse_cases_legacy(normalized)
