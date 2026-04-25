@@ -2037,6 +2037,61 @@ async def get_report(report_id: int):
         "data": report
     }
 
+@app.post("/api/reports/generate")
+async def generate_report(data: Dict[str, Any] = {}):
+    """生成测试报告（基于测试运行数据）"""
+    from datetime import datetime
+    try:
+        run_id = data.get("run_id")
+        title = data.get("title", f"测试报告_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+
+        # 获取关联的测试运行数据
+        run_data = None
+        if run_id:
+            run_data = next((r for r in test_runs_db if str(r.get("id")) == str(run_id)), None)
+
+        # 计算统计数据
+        total = len(test_cases_db)
+        passed = sum(1 for tc in test_cases_db if tc.get("status") == "passed")
+        failed = sum(1 for tc in test_cases_db if tc.get("status") == "failed")
+        pending = total - passed - failed
+
+        report = {
+            "id": len(reports_db) + 1,
+            "title": title,
+            "run_id": run_id,
+            "generated_at": datetime.now().isoformat(),
+            "summary": {
+                "total": total,
+                "passed": passed,
+                "failed": failed,
+                "pending": pending,
+                "pass_rate": f"{(passed/total*100):.1f}%" if total > 0 else "0%"
+            },
+            "test_cases": test_cases_db,
+            "run_details": run_data
+        }
+
+        reports_db.append(report)
+        data_manager.set_data("reports", reports_db, save=True)
+
+        return {
+            "success": True,
+            "message": "报告生成成功",
+            "data": report,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "message": f"报告生成失败: {str(e)}",
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
 # ==================== AI API ====================
 
 @app.get("/api/ai/agents")
@@ -2638,6 +2693,110 @@ async def execute_test_case(testcase_id: str):
             "message": "测试执行失败"
         }
 
+
+@app.post("/api/testcases/{testcase_id}/manual-execute")
+async def manual_execute_test_case(testcase_id: str, data: Dict[str, Any] = {}):
+    """手动执行测试用例（支持自定义参数覆盖）"""
+    from datetime import datetime
+    try:
+        testcase = next((tc for tc in test_cases_db if str(tc.get("id")) == str(testcase_id)), None)
+        if not testcase:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "message": f"测试用例不存在: {testcase_id}",
+                    "data": None,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+
+        custom_url = data.get("url")
+        custom_method = data.get("method", "GET")
+        custom_headers = data.get("headers", {})
+        custom_body = data.get("body")
+        custom_params = data.get("params", {})
+        custom_timeout = data.get("timeout", 30)
+
+        exec_config = testcase.get("execution_config", {})
+        url = custom_url or exec_config.get("url", "")
+        method = custom_method or exec_config.get("method", "GET")
+        headers = {**exec_config.get("headers", {}), **custom_headers}
+
+        if not url:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "success": False,
+                    "message": "缺少请求URL",
+                    "data": None,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+
+        from modules.executor.real_execution_engine import get_execution_engine
+
+        engine = get_execution_engine()
+        test_case_input = {
+            "id": testcase_id,
+            "name": testcase.get("title", "未命名"),
+            "execution_type": "api",
+            "config": {
+                "url": url,
+                "method": method,
+                "headers": headers,
+                "body": custom_body if custom_body is not None else exec_config.get("data", {}),
+                "params": custom_params
+            },
+            "timeout": custom_timeout
+        }
+
+        result = engine.execute(test_case_input)
+
+        testcase["status"] = "passed" if result.success else "failed"
+        testcase["lastRun"] = datetime.now().isoformat()
+        data_manager.set_data("test_cases", test_cases_db, save=True)
+
+        test_run = {
+            "id": len(test_runs_db) + 1,
+            "testcase_id": testcase_id,
+            "testcase_title": testcase.get("title", "未命名"),
+            "trace_id": result.trace_id,
+            "status": result.status,
+            "duration": f"{int(result.duration * 1000)}ms",
+            "executed_at": result.end_time or datetime.now().isoformat(),
+            "status_code": result.status_code,
+            "response_time": int(result.duration * 1000),
+            "manual": True
+        }
+        test_runs_db.append(test_run)
+        data_manager.set_data("test_runs", test_runs_db, save=True)
+
+        return {
+            "success": result.success,
+            "message": "手动执行完成",
+            "data": {
+                "status": result.status,
+                "status_code": result.status_code,
+                "response_time": int(result.duration * 1000),
+                "trace_id": result.trace_id
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "message": f"手动执行失败: {str(e)}",
+                "data": None,
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
 def _generate_pytest_script(testcase: Dict[str, Any]) -> str:
     """生成pytest测试脚本"""
     import json
@@ -2769,13 +2928,162 @@ async def upload_requirement(file: UploadFile = File(...)):
     }
 
 @app.post("/api/upload/swagger")
-async def upload_swagger(file: UploadFile = File(...)):
-    """上传Swagger文档"""
-    return {
-        "success": True,
-        "filename": file.filename,
-        "message": "Swagger文档上传成功"
-    }
+async def upload_swagger_legacy(file: UploadFile = File(...)):
+    """[兼容别名] 上传Swagger文档 - 转发到 /api/swagger/upload"""
+    return await upload_swagger_main(file)
+
+@app.post("/api/swagger/upload")
+async def upload_swagger_main(file: UploadFile = File(...)):
+    """上传Swagger文档 - 真实解析并返回接口信息"""
+    from datetime import datetime
+    try:
+        if not file:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "message": "未选择文件",
+                    "data": None,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+
+        if not file.filename:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "message": "文件名为空",
+                    "data": None,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+
+        content = await file.read()
+        if not content:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "message": "文件内容为空",
+                    "data": None,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+
+        # 检查文件格式
+        filename_lower = file.filename.lower()
+        if not (filename_lower.endswith('.json') or filename_lower.endswith('.yaml') or filename_lower.endswith('.yml')):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "message": f"不支持的文件格式，请上传 JSON 或 YAML 文件",
+                    "data": None,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+
+        # 尝试解析 JSON
+        import json as _json
+        import tempfile
+        import yaml as _yaml
+
+        try:
+            swagger_data = _json.loads(content.decode('utf-8'))
+            detected_format = 'json'
+        except Exception:
+            try:
+                swagger_data = _yaml.safe_load(content)
+                detected_format = 'yaml'
+            except Exception as parse_err:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "success": False,
+                        "message": f"文件解析失败: {str(parse_err)}",
+                        "data": None,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                )
+
+        if not swagger_data or not isinstance(swagger_data, dict):
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "success": False,
+                    "message": "无效的Swagger/OpenAPI文档格式",
+                    "data": None,
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+
+        # 提取基本信息
+        info = swagger_data.get('info', {})
+        swagger_version = swagger_data.get('swagger', swagger_data.get('openapi', 'unknown'))
+        paths = swagger_data.get('paths', {})
+        api_count = 0
+        path_count = len(paths)
+        method_count = 0
+
+        # 提取API列表
+        apis = []
+        for path, methods in paths.items():
+            if isinstance(methods, dict):
+                for method, details in methods.items():
+                    if method.upper() in ('GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'):
+                        method_count += 1
+                        api_count += 1
+                        apis.append({
+                            "id": api_count,
+                            "name": details.get('summary', details.get('operationId', f"{method}_{path}")),
+                            "method": method.upper(),
+                            "path": path,
+                            "description": details.get('description', ''),
+                            "tags": details.get('tags', []),
+                            "status": "active",
+                            "parameters": details.get('parameters', []),
+                            "responses": details.get('responses', {})
+                        })
+
+        # 保存到数据库
+        if apis:
+            global apis_db
+            apis_db.clear()
+            apis_db.extend(apis)
+            data_manager.set_data("apis", apis_db, save=True)
+
+        result = {
+            "success": True,
+            "message": f"成功解析: {info.get('title', file.filename)}",
+            "data": {
+                "filename": file.filename,
+                "format": detected_format,
+                "title": info.get('title', ''),
+                "version": info.get('version', ''),
+                "swagger_version": swagger_version,
+                "path_count": path_count,
+                "method_count": method_count,
+                "api_count": api_count,
+                "apis": apis[:50]  # 限制返回前50个
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+
+        return result
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "message": f"上传处理失败: {str(e)}",
+                "data": None,
+                "timestamp": datetime.now().isoformat()
+            }
+        )
 
 # ==================== Knowledge API ====================
 

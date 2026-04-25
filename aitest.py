@@ -7,9 +7,10 @@ import re
 from openpyxl.styles import PatternFill, Alignment
 
 # ===== 配置 DeepSeek API Key =====
+import os as _os
 client = OpenAI(
-    api_key="sk-4452cc65eeae490f82c29fb5c7872d68",       # ⚠️ 换成你的 key
-    base_url="https://api.deepseek.com/v1"
+    api_key=_os.getenv("DEEPSEEK_API_KEY", ""),
+    base_url=_os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 )
 
 # ===== 读取 Word 文档 =====

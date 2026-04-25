@@ -5,7 +5,7 @@ import json
 url = "http://1.95.142.151:3000/chat/completions"
 headers = {
     "Content-Type": "application/json",
-    "Authorization": "Bearer sk-NDk3LTIxODA2OTg1MjMyLTE3NzQ1MTExMjYzMzY="
+    "Authorization": f"Bearer {__import__('os').getenv('ANTHROPIC_API_KEY', '')}"
 }
 
 payload = {

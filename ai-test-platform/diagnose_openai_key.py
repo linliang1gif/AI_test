@@ -10,7 +10,8 @@ import requests
 def diagnose_openai_key():
     """诊断OpenAI API Key"""
     
-    api_key = "sk-UYFCdPvyFxcpmt6RFHTt4snyxvecjLG53leemXMCUiPD7oL3"
+    import os as _os
+    api_key = _os.getenv("OPENAI_API_KEY", "")
     
     print("=" * 60)
     print("OpenAI API Key诊断")

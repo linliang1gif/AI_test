@@ -89,6 +89,10 @@ reports/
 *.xml
 allure-results/
 
+# 前端入口例外（index.html 是 Vite 构建入口，lib/ 包含 shadcn/ui 工具函数）
+!frontend/index.html
+!frontend/src/lib/
+
 # 密钥和证书
 *.pem
 *.key

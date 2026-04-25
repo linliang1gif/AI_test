@@ -60,8 +60,20 @@ ai-test-platform/frontend/dist/
 
 # Environment
 .env
+.env.local
+.env.production
+.env.development
 *.env
 !.env.example
+
+# Secrets / Certificates
+*.key
+*.pem
+*-service-account.json
+*-credentials.json
+
+# Claude Code
+.claude/
 
 # Temporary files
 ~$*

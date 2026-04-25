@@ -65,6 +65,14 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+    parseSwagger: (url) => request(`${API_BASE_URL}/swagger/parse`, {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
+    smokeRunFromKb: (data) => request(`${API_BASE_URL}/knowledge/testcases/search`, {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    }),
   },
 
   // ==================== Swagger ====================
@@ -72,7 +80,7 @@ export const api = {
     upload: (file) => {
       const formData = new FormData()
       formData.append('file', file)
-      return fetch(`${API_BASE_URL}/upload/swagger`, {
+      return fetch(`${API_BASE_URL}/swagger/upload`, {
         method: 'POST',
         body: formData,
       }).then(res => {
@@ -80,17 +88,10 @@ export const api = {
         return res.json()
       })
     },
-    parse: (file) => {
-      const formData = new FormData()
-      formData.append('file', file)
-      return fetch(`${API_BASE_URL}/swagger/parse`, {
-        method: 'POST',
-        body: formData,
-      }).then(res => {
-        if (!res.ok) throw new Error('解析失败')
-        return res.json()
-      })
-    },
+    parse: (url) => request(`${API_BASE_URL}/swagger/parse`, {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
   },
 
   // ==================== 测试用例 ====================
@@ -156,6 +157,10 @@ export const api = {
     getTemplates: () => request(`${API_BASE_URL}/test-data/templates`),
     getStats: () => request(`${API_BASE_URL}/test-data/stats`),
     getScenarios: (entityType) => request(`${API_BASE_URL}/test-data/scenarios/${entityType}`),
+    getDatasets: (params = {}) => {
+      const query = new URLSearchParams(params).toString()
+      return request(`${API_BASE_URL}/test-data/datasets${query ? '?' + query : ''}`)
+    },
   },
 
   // ==================== 数据集管理 ====================
@@ -211,6 +216,7 @@ export const api = {
   reports: {
     getAll: () => request(`${API_BASE_URL}/reports`),
     get: (id) => request(`${API_BASE_URL}/reports/${id}`),
+    getById: (id) => request(`${API_BASE_URL}/reports/${id}`),
     generate: (data) => request(`${API_BASE_URL}/reports/generate`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -225,9 +231,17 @@ export const api = {
       body: JSON.stringify(data),
     }),
     getProviders: () => request(`${API_BASE_URL}/ai/providers/list`),
-    switchProvider: (data) => request(`${API_BASE_URL}/ai/providers/switch`, {
+    getProviderStatus: (providerId) => request(`${API_BASE_URL}/ai/providers/${providerId}/status`),
+    testProvider: (providerId) => request(`${API_BASE_URL}/ai/providers/${providerId}/test`, {
       method: 'POST',
-      body: JSON.stringify(data),
+    }),
+    selectProvider: (providerId) => request(`${API_BASE_URL}/ai/providers/select`, {
+      method: 'POST',
+      body: JSON.stringify({ provider: providerId }),
+    }),
+    switchProvider: (providerId, model) => request(`${API_BASE_URL}/ai/providers/switch`, {
+      method: 'POST',
+      body: JSON.stringify({ provider: providerId, model }),
     }),
     getAgents: () => request(`${API_BASE_URL}/ai/agents`),
   },

@@ -10,7 +10,8 @@ import json
 def test_openrouter_api():
     """测试 OpenRouter API"""
     
-    api_key = "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"
+    import os as _os
+    api_key = _os.getenv("OPENROUTER_API_KEY", "")
     base_url = "https://openrouter.ai/api/v1"
     
     print("=" * 60)

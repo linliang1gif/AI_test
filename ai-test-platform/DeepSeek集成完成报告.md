@@ -6,7 +6,7 @@
 ## 解决方案
 
 ### 1. 恢复DeepSeek API配置
-- ✅ 确认`.env`文件中的DeepSeek API密钥存在：`sk-9cd1b59250de4aa19d8e644e655f0acf`
+- ✅ 确认`.env`文件中的DeepSeek API密钥存在：`[REDACTED]`
 - ✅ 修复AI客户端导入问题
 - ✅ 添加必要的依赖包：`fastapi`, `uvicorn`, `python-multipart`, `python-dotenv`, `PyPDF2`
 

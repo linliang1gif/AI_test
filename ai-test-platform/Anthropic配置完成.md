@@ -6,14 +6,14 @@
 - **提供商**: Anthropic Claude
 - **模型**: claude-sonnet-4-5-20250929
 - **Base URL**: http://1.95.142.151:3000
-- **API Key**: sk-UYFCdPvyFxcpmt6RFHTt4snyxvecjLG53leemXMCUiPD7oL3
+- **API Key**: [REDACTED]
 
 ### 配置文件
 **文件**: `ai测试/ai-test-platform/.env`
 
 ```env
 # AI API Configuration
-ANTHROPIC_API_KEY=sk-UYFCdPvyFxcpmt6RFHTt4snyxvecjLG53leemXMCUiPD7oL3
+ANTHROPIC_API_KEY=[REDACTED]
 
 # API Base URLs
 ANTHROPIC_BASE_URL=http://1.95.142.151:3000

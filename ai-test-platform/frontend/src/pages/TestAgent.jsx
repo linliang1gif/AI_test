@@ -18,7 +18,7 @@ export default function TestAgent() {
     setResult(null)
 
     try {
-      const response = await fetch('/agent/analyze', {
+      const response = await fetch('/api/agent/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -41,7 +41,7 @@ export default function TestAgent() {
 
   const loadHistory = async () => {
     try {
-      const response = await fetch('/agent/history?limit=10')
+      const response = await fetch('/api/agent/history?limit=10')
       const data = await response.json()
       setHistory(data.data || [])
     } catch (error) {

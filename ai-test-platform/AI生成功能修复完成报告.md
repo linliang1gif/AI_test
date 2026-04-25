@@ -190,7 +190,7 @@ def _generate_module_testcases(self, module: Dict[str, Any], scenarios: List[Dic
 **修改内容**:
 ```env
 # 配置真实的DeepSeek API Key
-DEEPSEEK_API_KEY=sk-a07e3fc5589342aebcacd05b6a8e0545
+DEEPSEEK_API_KEY=[REDACTED]
 DEFAULT_AI_PROVIDER=deepseek
 ```
 

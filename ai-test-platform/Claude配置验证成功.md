@@ -6,7 +6,7 @@
 ## ✅ 验证结果
 
 ### 1. 配置状态
-- ✅ API Key: `sk-UYFCdPvyFxcpmt6RFHTt4snyxvecjLG53leemXMCUiPD7oL3`
+- ✅ API Key: `[REDACTED]`
 - ✅ Base URL: `http://1.95.142.151:3000`
 - ✅ 模型: `claude-sonnet-4-5-20250929`
 - ✅ 默认提供商: `anthropic`
