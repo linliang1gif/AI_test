@@ -440,6 +440,15 @@ export const api = {
         body: JSON.stringify({ format }),
       }),
       downloadReport: (runId, format = 'html') => `${API_BASE_URL}/v2/test-runs/${runId}/report/download?format=${format}`,
+      generateAiAnalysis: (runId, force = false) => request(`${API_BASE_URL}/v2/test-runs/${runId}/ai-analysis`, {
+        method: 'POST',
+        body: JSON.stringify({ force }),
+      }),
+      getAiAnalysis: (runId) => request(`${API_BASE_URL}/v2/test-runs/${runId}/ai-analysis`),
+    },
+
+    dashboard: {
+      getSummary: () => request(`${API_BASE_URL}/v2/dashboard/summary`),
     },
 
     swagger: {
@@ -491,7 +500,22 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ case_ids: caseIds, ...data }),
       }),
+      batchExecutePreset: (preset, data = {}) => request(`${API_BASE_URL}/v2/test-cases/batch-execute`, {
+        method: 'POST',
+        body: JSON.stringify({ preset, skip_destructive: true, ...data }),
+      }),
       previewVariables: (caseId, datasetId) => request(`${API_BASE_URL}/v2/test-cases/${caseId}/preview-variables?dataset_id=${datasetId || ''}`),
+      // Phase 16: 治理
+      govern: (force = false) => request(`${API_BASE_URL}/v2/test-cases/govern`, {
+        method: 'POST',
+        body: JSON.stringify({ force }),
+      }),
+      governanceSummary: () => request(`${API_BASE_URL}/v2/test-cases/governance-summary`),
+      recommended: (preset, limit = 500) => request(`${API_BASE_URL}/v2/test-cases/recommended/${preset}?limit=${limit}`),
+      filtered: (params = {}) => {
+        const query = new URLSearchParams(params).toString()
+        return request(`${API_BASE_URL}/v2/test-cases/filtered${query ? '?' + query : ''}`)
+      },
     },
 
     execution: {
@@ -541,6 +565,13 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+    },
+
+    // ==================== Demo (Phase 17) ====================
+    demo: {
+      init: () => request(`${API_BASE_URL}/v2/demo/init`, { method: 'POST' }),
+      reset: () => request(`${API_BASE_URL}/v2/demo/reset`, { method: 'POST' }),
+      status: () => request(`${API_BASE_URL}/v2/demo/status`),
     },
   },
 }

@@ -560,7 +560,7 @@ class BatchRunService:
                 )
                 all_results.extend(write_results)
 
-            # 写入 RunCase 记录
+            # 写入 RunCase 记录 + Phase 16: 写回 TestCase 治理字段
             for r in all_results:
                 rc = RunCase(
                     run_id=batch_id,
@@ -578,6 +578,13 @@ class BatchRunService:
                     assertion_details=r.get("assertion_details"),
                 )
                 db.add(rc)
+
+                # Phase 16: 写回 TestCase.last_run_status / failure_category
+                tc = case_map.get(r["test_case_id"])
+                if tc:
+                    tc.status = r["status"]
+                    tc.last_run_status = r["status"]
+                    tc.failure_category = r.get("failure_category") or None
 
             # 更新 TestRun 统计
             test_run.status = "aborted" if progress.stopped else ("passed" if progress.failed == 0 else "failed")

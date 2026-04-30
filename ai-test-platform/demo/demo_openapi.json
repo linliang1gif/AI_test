@@ -1,0 +1,333 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "ERP Demo System API",
+    "version": "1.0.0",
+    "description": "Demo Mock API for AI Test Platform Phase 17"
+  },
+  "servers": [
+    { "url": "http://localhost:8000", "description": "Demo Local" }
+  ],
+  "paths": {
+    "/api/mock/login": {
+      "post": {
+        "operationId": "login",
+        "summary": "用户登录",
+        "tags": ["Auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["username", "password"],
+                "properties": {
+                  "username": { "type": "string", "example": "admin" },
+                  "password": { "type": "string", "example": "123456" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "登录成功，返回 token" },
+          "400": { "description": "缺少用户名或密码" },
+          "401": { "description": "用户名或密码错误" }
+        }
+      }
+    },
+    "/api/mock/users/profile": {
+      "get": {
+        "operationId": "getUserProfile",
+        "summary": "获取用户信息",
+        "tags": ["User"],
+        "parameters": [
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" }, "example": "Bearer demo-token" }
+        ],
+        "responses": {
+          "200": { "description": "返回用户信息" },
+          "401": { "description": "未授权" }
+        }
+      }
+    },
+    "/api/mock/products": {
+      "get": {
+        "operationId": "getProductList",
+        "summary": "商品列表查询",
+        "tags": ["Product"],
+        "parameters": [
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } },
+          { "name": "keyword", "in": "query", "schema": { "type": "string" }, "description": "搜索关键词" },
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "page_size", "in": "query", "schema": { "type": "integer", "default": 20 } }
+        ],
+        "responses": {
+          "200": { "description": "返回商品列表" },
+          "401": { "description": "未授权" }
+        }
+      },
+      "post": {
+        "operationId": "createProduct",
+        "summary": "新增商品",
+        "tags": ["Product"],
+        "parameters": [
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["name", "price"],
+                "properties": {
+                  "name": { "type": "string", "example": "测试商品" },
+                  "price": { "type": "number", "example": 199.9 },
+                  "stock": { "type": "integer", "example": 100 },
+                  "category": { "type": "string", "example": "软件" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "新增成功" },
+          "400": { "description": "缺少必填字段" },
+          "401": { "description": "未授权" }
+        }
+      }
+    },
+    "/api/mock/products/{product_id}": {
+      "get": {
+        "operationId": "getProductDetail",
+        "summary": "商品详情",
+        "tags": ["Product"],
+        "parameters": [
+          { "name": "product_id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "1" },
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "返回商品详情" },
+          "404": { "description": "商品不存在" },
+          "401": { "description": "未授权" }
+        }
+      },
+      "put": {
+        "operationId": "updateProduct",
+        "summary": "修改商品",
+        "tags": ["Product"],
+        "parameters": [
+          { "name": "product_id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "1" },
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" },
+                  "price": { "type": "number" },
+                  "stock": { "type": "integer" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "修改成功" },
+          "404": { "description": "商品不存在" },
+          "401": { "description": "未授权" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteProduct",
+        "summary": "删除商品",
+        "tags": ["Product"],
+        "parameters": [
+          { "name": "product_id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "1" },
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "删除成功" },
+          "404": { "description": "商品不存在" },
+          "401": { "description": "未授权" }
+        }
+      }
+    },
+    "/api/mock/orders": {
+      "get": {
+        "operationId": "getOrderList",
+        "summary": "订单列表查询",
+        "tags": ["Order"],
+        "parameters": [
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "string" }, "description": "订单状态筛选" },
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "page_size", "in": "query", "schema": { "type": "integer", "default": 20 } }
+        ],
+        "responses": {
+          "200": { "description": "返回订单列表" },
+          "401": { "description": "未授权" }
+        }
+      },
+      "post": {
+        "operationId": "createOrder",
+        "summary": "创建订单",
+        "tags": ["Order"],
+        "parameters": [
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["product_id", "quantity"],
+                "properties": {
+                  "product_id": { "type": "string", "example": "1" },
+                  "quantity": { "type": "integer", "example": 2 }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "创建成功" },
+          "400": { "description": "缺少必填字段" },
+          "404": { "description": "商品不存在" },
+          "401": { "description": "未授权" }
+        }
+      }
+    },
+    "/api/mock/orders/{order_id}": {
+      "get": {
+        "operationId": "getOrderDetail",
+        "summary": "订单详情",
+        "tags": ["Order"],
+        "parameters": [
+          { "name": "order_id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "1" },
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "返回订单详情" },
+          "404": { "description": "订单不存在" },
+          "401": { "description": "未授权" }
+        }
+      }
+    },
+    "/api/mock/orders/{order_id}/cancel": {
+      "post": {
+        "operationId": "cancelOrder",
+        "summary": "取消订单",
+        "tags": ["Order"],
+        "parameters": [
+          { "name": "order_id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "1" },
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "取消成功或业务错误" },
+          "404": { "description": "订单不存在" },
+          "401": { "description": "未授权" }
+        }
+      }
+    },
+    "/api/mock/payment-bills": {
+      "get": {
+        "operationId": "getPaymentBillList",
+        "summary": "付款单列表查询",
+        "tags": ["PaymentBill"],
+        "parameters": [
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "string" }, "description": "付款单状态" },
+          { "name": "page", "in": "query", "schema": { "type": "integer", "default": 1 } },
+          { "name": "page_size", "in": "query", "schema": { "type": "integer", "default": 20 } }
+        ],
+        "responses": {
+          "200": { "description": "返回付款单列表" },
+          "401": { "description": "未授权" }
+        }
+      }
+    },
+    "/api/mock/payment-bills/{bill_id}": {
+      "get": {
+        "operationId": "getPaymentBillDetail",
+        "summary": "付款单详情",
+        "tags": ["PaymentBill"],
+        "parameters": [
+          { "name": "bill_id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "1" },
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "返回付款单详情" },
+          "404": { "description": "付款单不存在" },
+          "401": { "description": "未授权" }
+        }
+      }
+    },
+    "/api/mock/payment-bills/{bill_id}/submit": {
+      "post": {
+        "operationId": "submitPaymentBill",
+        "summary": "提交付款单",
+        "tags": ["PaymentBill"],
+        "parameters": [
+          { "name": "bill_id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "1" },
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "提交成功或业务状态错误" },
+          "404": { "description": "付款单不存在" },
+          "401": { "description": "未授权" }
+        }
+      }
+    },
+    "/api/mock/payment-bills/{bill_id}/approve": {
+      "post": {
+        "operationId": "approvePaymentBill",
+        "summary": "审批付款单",
+        "tags": ["PaymentBill"],
+        "parameters": [
+          { "name": "bill_id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "2" },
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "审批成功或业务状态错误" },
+          "404": { "description": "付款单不存在" },
+          "401": { "description": "未授权" }
+        }
+      }
+    },
+    "/api/mock/payment-bills/{bill_id}/pay": {
+      "post": {
+        "operationId": "payPaymentBill",
+        "summary": "付款",
+        "tags": ["PaymentBill"],
+        "parameters": [
+          { "name": "bill_id", "in": "path", "required": true, "schema": { "type": "string" }, "example": "3" },
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "付款成功或业务状态错误" },
+          "404": { "description": "付款单不存在" },
+          "401": { "description": "未授权" }
+        }
+      }
+    },
+    "/api/mock/reports/summary": {
+      "get": {
+        "operationId": "getReportSummary",
+        "summary": "报表汇总数据",
+        "tags": ["Report"],
+        "parameters": [
+          { "name": "Authorization", "in": "header", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "返回汇总数据" },
+          "401": { "description": "未授权" }
+        }
+      }
+    }
+  }
+}

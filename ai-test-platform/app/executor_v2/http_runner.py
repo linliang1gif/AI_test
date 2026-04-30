@@ -86,8 +86,9 @@ class HttpRunner:
 
         # 发送请求
         try:
-            with httpx.Client(verify=self.verify_ssl) as client:
-                r = client.request(**request_kwargs)
+            if not hasattr(self, '_client') or self._client is None:
+                self._client = httpx.Client(verify=self.verify_ssl)
+            r = self._client.request(**request_kwargs)
 
             resp = HttpResponse(
                 status_code=r.status_code,

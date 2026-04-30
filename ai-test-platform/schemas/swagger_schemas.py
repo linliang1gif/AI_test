@@ -45,14 +45,25 @@ class TestCaseResponse(BaseModel):
     """测试用例响应"""
     id: str
     title: str
-    module: Optional[str]
-    priority: str
-    status: str
-    data_type: Optional[str]
-    expected_behavior: Optional[str]
-    source: Optional[str]
-    created_at: datetime
-    tags: Optional[List[str]]
+    module: Optional[str] = None
+    priority: str = 'medium'
+    status: str = 'pending'
+    data_type: Optional[str] = None
+    expected_behavior: Optional[str] = None
+    source: Optional[str] = None
+    created_at: Optional[datetime] = None
+    tags: Optional[List[str]] = None
+    # Phase 16: 治理字段
+    module_name: Optional[str] = None
+    api_pattern: Optional[str] = None
+    risk_level: Optional[str] = None
+    executable: Optional[bool] = None
+    requires_auth: Optional[bool] = None
+    requires_dependency: Optional[bool] = None
+    destructive: Optional[bool] = None
+    assertion_status: Optional[str] = None
+    last_run_status: Optional[str] = None
+    failure_category: Optional[str] = None
     
     class Config:
         from_attributes = True

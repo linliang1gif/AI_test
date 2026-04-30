@@ -243,6 +243,52 @@ async def startup_check_database():
         print(f"⚠️  服务器将继续启动，但数据库功能可能不可用")
         print("=" * 60 + "\n")
 
+    # Phase 16: 自动添加治理字段（兼容已有数据库）
+    try:
+        from database import get_db_session
+        from sqlalchemy import text as sa_text, inspect as sa_inspect
+        with get_db_session() as db:
+            inspector = sa_inspect(db.bind)
+            existing_cols = {c['name'] for c in inspector.get_columns('test_cases')}
+            new_cols = {
+                'module_name': 'VARCHAR(200)',
+                'api_pattern': 'VARCHAR(50)',
+                'risk_level': 'VARCHAR(10)',
+                'executable': 'BOOLEAN DEFAULT 1',
+                'requires_auth': 'BOOLEAN DEFAULT 0',
+                'requires_dependency': 'BOOLEAN DEFAULT 0',
+                'destructive': 'BOOLEAN DEFAULT 0',
+                'assertion_status': 'VARCHAR(50)',
+                'last_run_status': 'VARCHAR(50)',
+                'failure_category': 'VARCHAR(50)',
+            }
+            added = []
+            for col, col_type in new_cols.items():
+                if col not in existing_cols:
+                    db.execute(sa_text(f'ALTER TABLE test_cases ADD COLUMN {col} {col_type}'))
+                    added.append(col)
+            if added:
+                db.commit()
+                print(f"✅ Phase 16 迁移: 已添加 {len(added)} 个治理字段到 test_cases: {', '.join(added)}")
+            else:
+                print("✅ Phase 16 治理字段已存在，无需迁移")
+    except Exception as e:
+        print(f"⚠️  Phase 16 迁移失败（可忽略首次运行）: {e}")
+
+    # Phase 19: 自动创建 ai_report_analyses 表
+    try:
+        from database import get_db_session
+        from sqlalchemy import inspect as sa_inspect
+        with get_db_session() as db:
+            inspector = sa_inspect(db.bind)
+            if 'ai_report_analyses' not in inspector.get_table_names():
+                from database.models import AiReportAnalysis
+                AiReportAnalysis.__table__.create(db.bind)
+                print("✅ Phase 19 迁移: 已创建 ai_report_analyses 表")
+            else:
+                print("✅ Phase 19 ai_report_analyses 表已存在")
+    except Exception as e:
+        print(f"⚠️  Phase 19 迁移失败: {e}")
 
 if PILOT_BACKEND_AVAILABLE:
     init_pilot_database()
@@ -351,6 +397,24 @@ except ImportError as e:
     print(f"⚠️  执行触发路由导入失败: {e}")
     EXECUTION_TRIGGER_ROUTES_AVAILABLE = False
 
+# 🆕 用例治理路由（Phase 16） ── 必须在 Swagger 路由之前注册，避免 {test_case_id} 拦截
+try:
+    from routes.case_governance_routes import router as case_governance_router
+    app.include_router(case_governance_router)
+    print("✅ 用例治理路由已加载（Phase 16 治理）")
+except ImportError as e:
+    print(f"⚠️  用例治理路由导入失败: {e}")
+
+# 🆕 用例一键执行路由（Phase 11+12+13） ── 同上
+try:
+    from routes.case_execute_routes import router as case_execute_router
+    app.include_router(case_execute_router)
+    print("✅ 用例一键执行路由已加载（Phase 11+12+13）")
+    CASE_EXECUTE_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  用例一键执行路由导入失败: {e}")
+    CASE_EXECUTE_AVAILABLE = False
+
 # 🆕 导入并注册Swagger导入路由(P0-6)
 try:
     from routes.swagger_routes import router as swagger_router
@@ -371,16 +435,6 @@ except ImportError as e:
     print(f"⚠️  Executor V2 路由导入失败: {e}")
     EXECUTOR_V2_AVAILABLE = False
 
-# 🆕 导入并注册用例一键执行路由（Phase 11+12+13）
-try:
-    from routes.case_execute_routes import router as case_execute_router
-    app.include_router(case_execute_router)
-    print("✅ 用例一键执行路由已加载（Phase 11+12+13）")
-    CASE_EXECUTE_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  用例一键执行路由导入失败: {e}")
-    CASE_EXECUTE_AVAILABLE = False
-
 # 🆕 导入并注册测试报告路由（Phase 15）
 try:
     from routes.report_routes import router as report_router
@@ -396,6 +450,38 @@ try:
     print("✅ 批量执行中心路由已加载（Phase 16）")
 except ImportError as e:
     print(f"⚠️  批量执行中心路由导入失败: {e}")
+
+# 🆕 导入并注册 Mock API 路由（Phase 17 Demo）
+try:
+    from routes.mock_routes import router as mock_router
+    app.include_router(mock_router)
+    print("✅ Mock API 路由已加载（Phase 17 Demo）")
+except ImportError as e:
+    print(f"⚠️  Mock API 路由导入失败: {e}")
+
+# 🆕 导入并注册 Demo 初始化/重置路由（Phase 17）
+try:
+    from routes.demo_routes import router as demo_router
+    app.include_router(demo_router)
+    print("✅ Demo 路由已加载（Phase 17）")
+except ImportError as e:
+    print(f"⚠️  Demo 路由导入失败: {e}")
+
+# 🆕 导入并注册 Dashboard 路由（Phase 20）
+try:
+    from routes.dashboard_routes import router as dashboard_router
+    app.include_router(dashboard_router)
+    print("✅ Dashboard 路由已加载（Phase 20）")
+except ImportError as e:
+    print(f"⚠️  Dashboard 路由导入失败: {e}")
+
+# 🆕 导入并注册 AI 报告分析路由（Phase 19）
+try:
+    from routes.ai_report_routes import router as ai_report_router
+    app.include_router(ai_report_router)
+    print("✅ AI 报告分析路由已加载（Phase 19）")
+except ImportError as e:
+    print(f"⚠️  AI 报告分析路由导入失败: {e}")
 
 # ==================== 数据模型 ====================
 

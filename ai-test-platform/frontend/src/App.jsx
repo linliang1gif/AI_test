@@ -18,6 +18,7 @@ import ApiSpecList from './pages/ApiSpecList'
 import ApiSpecDetail from './pages/ApiSpecDetail'
 import AIConfigPage from './pages/AIConfigPage'
 import BatchRunCenter from './pages/BatchRunCenter'
+import Dashboard from './pages/Dashboard'
 
 const GLOBAL_ENV_STORAGE_KEY = 'ai_test_global_environment'
 
@@ -220,6 +221,7 @@ function App() {
                 </button>
               )}
               {expandedSections.projects && [
+                { to: '/dashboard', icon: '■', label: '仪表盘' },
                 { to: '/projects-v2', icon: '■', label: '项目列表' },
                 { to: '/test-cases', icon: '■', label: '测试用例' },
               ].map(item => (
@@ -504,7 +506,8 @@ function App() {
           {/* 页面内容 */}
           <div className="flex-1 overflow-auto">
             <Routes>
-              <Route path="/" element={<Navigate to="/projects-v2" replace />} />
+              <Route path="/" element={<Navigate to="/dashboard" replace />} />
+              <Route path="/dashboard" element={<Dashboard />} />
               
               {/* V2 可用页面 */}
               <Route path="/projects-v2" element={<ProjectsV2 />} />

@@ -61,8 +61,10 @@ class ExecuteResponse(BaseModel):
 
 
 class BatchExecuteRequest(ExecuteRequest):
-    case_ids: List[str] = Field(..., description="测试用例ID列表")
+    case_ids: Optional[List[str]] = Field(None, description="测试用例ID列表（与 preset 二选一）")
+    preset: Optional[str] = Field(None, description="推荐测试集: smoke/regression/query-safe/failed-rerun/p0")
     allow_write_operations: bool = Field(True, description="是否允许执行写操作接口（Dev环境默认允许）")
+    skip_destructive: bool = Field(False, description="跳过 destructive=true 的用例")
 
 
 class BatchExecuteResponse(BaseModel):
@@ -73,9 +75,13 @@ class BatchExecuteResponse(BaseModel):
     total_cases: int = 0
     passed_cases: int = 0
     failed_cases: int = 0
+    skipped_cases: int = 0
     no_assertion_cases: int = 0
     error_cases: int = 0
     duration_ms: float = 0
+    pass_rate: float = 0.0
+    failure_categories: Dict[str, int] = {}
+    skipped_reasons: Dict[str, int] = {}
     results: List[dict] = []
 
 
@@ -114,6 +120,39 @@ def _extract_uuid_from_response(body: dict) -> str:
     return ""
 
 
+# Phase 16+18: 失败分类 (8 类) ── 统一分类函数
+def _classify_failure_category(final_status: str, error_message: str, resp_snapshot: dict) -> str:
+    err = (error_message or '').lower()
+    sc = resp_snapshot.get('status_code', 0) if isinstance(resp_snapshot, dict) else 0
+    body = resp_snapshot.get('body', {}) if isinstance(resp_snapshot, dict) else {}
+    biz_code = body.get('code') if isinstance(body, dict) else None
+    # 1. auth_error
+    if sc in (401, 403) or 'unauthorized' in err or '401' in err or '403' in err:
+        return 'auth_error'
+    # 2. timeout_error
+    if 'timeout' in err or 'timed out' in err:
+        return 'timeout_error'
+    # 3. env_error
+    if 'connect' in err or 'connection' in err or 'dns' in err or 'refused' in err or (sc == 0 and err):
+        return 'env_error'
+    # 4. request_error
+    if sc in (400, 405, 406, 415) or 'required' in err or 'missing' in err:
+        return 'request_error'
+    # 5. response_error
+    if sc == 404 or sc >= 500:
+        return 'response_error'
+    # 6. dependency_error (biz code > 40000 = business status error)
+    if isinstance(biz_code, int) and biz_code >= 40000:
+        return 'dependency_error'
+    if 'dependency' in err or '前置' in err or '依赖' in err or 'status not allowed' in err:
+        return 'dependency_error'
+    # 7. assertion_error
+    if 'assert' in err or final_status == 'failed':
+        return 'assertion_error'
+    # 8. unknown_error
+    return 'unknown_error'
+
+
 def _detect_write_api(method: str, url: str) -> bool:
     method = (method or "").upper()
     url = (url or "").lower()
@@ -125,7 +164,7 @@ def _detect_write_api(method: str, url: str) -> bool:
 # ---------- 路由 ----------
 
 @router.post("/batch-execute", response_model=BatchExecuteResponse)
-async def batch_execute_test_cases(
+def batch_execute_test_cases(
     req: BatchExecuteRequest,
     db: Session = Depends(get_db),
 ):
@@ -134,8 +173,25 @@ async def batch_execute_test_cases(
 
     多个用例共用一个 TestRun，每个用例写入一条 RunCase。
     """
+    # Phase 16: 支持 preset 加载推荐测试集
+    if req.preset and not req.case_ids:
+        from services.case_governance_service import CaseGovernanceService
+        gov_svc = CaseGovernanceService(db)
+        preset_map = {
+            'smoke': gov_svc.recommend_smoke,
+            'regression': gov_svc.recommend_regression,
+            'query-safe': gov_svc.recommend_query_safe,
+            'failed-rerun': gov_svc.recommend_failed_rerun,
+            'p0': gov_svc.recommend_p0,
+        }
+        loader = preset_map.get(req.preset)
+        if not loader:
+            raise HTTPException(status_code=400, detail=f"未知推荐集: {req.preset}，可选: {', '.join(preset_map.keys())}")
+        preset_cases = loader(limit=2000)
+        req.case_ids = [tc.id for tc in preset_cases]
+
     if not req.case_ids:
-        raise HTTPException(status_code=400, detail="请选择要执行的测试用例")
+        raise HTTPException(status_code=400, detail="请选择要执行的测试用例或指定 preset")
 
     # 确定 base_url
     base_url = req.base_url or ""
@@ -163,6 +219,24 @@ async def batch_execute_test_cases(
         raise HTTPException(status_code=404, detail="未找到可执行的测试用例")
 
     skipped_write_cases = []
+    skipped_destructive_cases = []    # list of tc.id
+    skipped_destructive_info = []     # Phase 18: full info dicts
+    # Phase 16+18: 跳过 destructive 用例
+    if req.skip_destructive:
+        safe = []
+        for tc in cases:
+            if getattr(tc, 'destructive', False):
+                skipped_destructive_cases.append(tc.id)
+                skipped_destructive_info.append({
+                    "case_id": tc.id,
+                    "case_name": tc.title,
+                    "module_name": getattr(tc, 'module_name', '') or tc.module or '',
+                    "risk_level": getattr(tc, 'risk_level', '') or '',
+                })
+            else:
+                safe.append(tc)
+        cases = safe
+
     if not req.allow_write_operations:
         safe_cases = []
         for tc in cases:
@@ -172,8 +246,12 @@ async def batch_execute_test_cases(
             else:
                 safe_cases.append(tc)
         cases = safe_cases
-        if not cases:
-            raise HTTPException(status_code=400, detail=f"所选用例均为写操作接口，已阻止执行: {', '.join(skipped_write_cases)}")
+
+    if not cases:
+        raise HTTPException(
+            status_code=400,
+            detail=f"无可执行用例。跳过写操作: {len(skipped_write_cases)}，跳过破坏性: {len(skipped_destructive_cases)}"
+        )
 
     # ---- 智能排序：查询类先执行，写操作类后执行 ----
     _PATTERN_ORDER = {"page": 0, "list": 1, "detail": 2, "other": 3, "save": 4, "update": 5, "delete": 6}
@@ -190,7 +268,7 @@ async def batch_execute_test_cases(
     run_id = f"RUN_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
     trace_id = f"TRACE_{uuid.uuid4().hex}"
     start_time = datetime.now()
-    engine = ExecutionEngineV2(base_url=base_url, auth_env_key=auth_context["env_key"])
+    engine = ExecutionEngineV2(base_url=base_url, auth_env_key=auth_context["env_key"], default_timeout=5.0)
     results = []
     counters = {"passed": 0, "failed": 0, "no_assertion": 0, "error": 0}
 
@@ -202,9 +280,10 @@ async def batch_execute_test_cases(
         status='running',
         trace_id=trace_id,
         start_time=start_time,
-        total_cases=len(cases) + len(skipped_write_cases),
+        total_cases=len(cases) + len(skipped_write_cases) + len(skipped_destructive_cases),
         passed_cases=0,
         failed_cases=0,
+        skipped_cases=len(skipped_write_cases) + len(skipped_destructive_cases),
     )
     db.add(test_run)
     db.flush()
@@ -218,6 +297,21 @@ async def batch_execute_test_cases(
             end_time=start_time,
             duration=0,
             error_message="写操作接口默认阻止执行",
+            error_type="write_blocked",
+            assertion_details=[],
+        ))
+
+    # Phase 18: 为 skipped destructive 用例写入 RunCase
+    for skipped_case_id in skipped_destructive_cases:
+        db.add(RunCase(
+            run_id=run_id,
+            test_case_id=skipped_case_id,
+            status="skipped",
+            start_time=start_time,
+            end_time=start_time,
+            duration=0,
+            error_message="已跳过破坏性接口，避免修改或删除数据",
+            error_type="destructive",
             assertion_details=[],
         ))
 
@@ -333,6 +427,15 @@ async def batch_execute_test_cases(
 
         tc.status = final_status
         tc.updated_at = datetime.now()
+        # Phase 16: 写回治理字段
+        tc.last_run_status = final_status
+        if final_status in ('failed', 'error'):
+            tc.failure_category = _classify_failure_category(
+                final_status, error_message,
+                resp_snapshot if isinstance(resp_snapshot, dict) else {}
+            )
+        else:
+            tc.failure_category = None
 
         results.append({
             "case_id": tc.id,
@@ -341,6 +444,7 @@ async def batch_execute_test_cases(
             "duration_ms": round(duration_ms, 2),
             "assertion_summary": assertion_summary,
             "error_message": error_message,
+            "failure_category": tc.failure_category,
         })
 
     end_time = datetime.now()
@@ -355,18 +459,40 @@ async def batch_execute_test_cases(
     elif counters["no_assertion"] > 0:
         overall_status = "passed"
 
+    # Phase 18: 聚合 failure_categories + skipped_reasons
+    fc_agg = {}
+    for r in results:
+        cat = r.get("failure_category")
+        if cat:
+            fc_agg[cat] = fc_agg.get(cat, 0) + 1
+    sk_reasons = {}
+    if skipped_destructive_cases:
+        sk_reasons["destructive"] = len(skipped_destructive_cases)
+    if skipped_write_cases:
+        sk_reasons["write_blocked"] = len(skipped_write_cases)
+
+    total_all = len(cases) + len(skipped_write_cases) + len(skipped_destructive_cases)
+    total_skipped = len(skipped_write_cases) + len(skipped_destructive_cases)
+    executed_count = counters["passed"] + counters["failed"] + counters["error"] + counters["no_assertion"]
+    pass_rate_val = round(counters["passed"] / max(executed_count, 1) * 100, 1)
+
     test_run.status = overall_status
     test_run.end_time = end_time
     test_run.duration = total_duration
-    test_run.total_cases = len(cases) + len(skipped_write_cases)
+    test_run.total_cases = total_all
     test_run.passed_cases = counters["passed"]
     test_run.failed_cases = counters["failed"] + counters["error"]
-    test_run.skipped_cases = len(skipped_write_cases)
+    test_run.skipped_cases = total_skipped
     test_run.summary = json.dumps({
         "missing_case_ids": missing_ids,
         "skipped_write_case_ids": skipped_write_cases,
+        "skipped_destructive_case_ids": skipped_destructive_cases,
         "no_assertion_cases": counters["no_assertion"],
         "error_cases": counters["error"],
+        "preset": req.preset or None,
+        "failure_categories": fc_agg,
+        "skipped_reasons": sk_reasons,
+        "pass_rate": pass_rate_val,
     }, ensure_ascii=False)
 
     try:
@@ -375,22 +501,40 @@ async def batch_execute_test_cases(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"批量执行结果入库失败: {str(e)}")
 
+    # Phase 18: 在 results 中追加 skipped 条目
+    for info in skipped_destructive_info:
+        results.append({
+            "case_id": info["case_id"],
+            "case_name": info["case_name"],
+            "status": "skipped",
+            "duration_ms": 0,
+            "assertion_summary": {"total": 0, "passed": 0, "failed": 0},
+            "error_message": "已跳过破坏性接口，避免修改或删除数据",
+            "failure_category": None,
+            "skipped_reason": "destructive",
+            "skipped_message": "已跳过破坏性接口，避免修改或删除数据",
+        })
+
     return BatchExecuteResponse(
         success=overall_status in ("passed", "no_assertion"),
         run_id=run_id,
         status=overall_status,
-        message=f"批量执行完成：通过 {counters['passed']}，失败 {counters['failed']}，无断言 {counters['no_assertion']}，错误 {counters['error']}，跳过写操作 {len(skipped_write_cases)}",
-        total_cases=len(cases) + len(skipped_write_cases),
+        message=f"批量执行完成：通过 {counters['passed']}，失败 {counters['failed']}，跳过 {total_skipped}，通过率 {pass_rate_val}%",
+        total_cases=total_all,
         passed_cases=counters["passed"],
-        failed_cases=counters["failed"],
+        failed_cases=counters["failed"] + counters["error"],
+        skipped_cases=total_skipped,
         no_assertion_cases=counters["no_assertion"],
         error_cases=counters["error"],
         duration_ms=round(total_duration * 1000, 2),
+        pass_rate=pass_rate_val,
+        failure_categories=fc_agg,
+        skipped_reasons=sk_reasons,
         results=results,
     )
 
 @router.post("/{case_id}/execute", response_model=ExecuteResponse)
-async def execute_test_case(
+def execute_test_case(
     case_id: str,
     req: ExecuteRequest = ExecuteRequest(),
     db: Session = Depends(get_db),
@@ -557,6 +701,15 @@ async def execute_test_case(
         # 更新用例状态
         tc.status = final_status
         tc.updated_at = datetime.now()
+        # Phase 16: 写回治理字段
+        tc.last_run_status = final_status
+        if final_status in ('failed', 'error'):
+            tc.failure_category = _classify_failure_category(
+                final_status, result.error_message or '',
+                resp_snapshot if isinstance(resp_snapshot, dict) else {}
+            )
+        else:
+            tc.failure_category = None
 
         db.commit()
     except Exception as e:

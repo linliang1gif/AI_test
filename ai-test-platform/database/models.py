@@ -120,6 +120,18 @@ class TestCase(Base):
     dataset_id = Column(String(100))
     source = Column(String(100))  # swagger/manual/ai_generated
     
+    # Phase 16: 用例治理字段
+    module_name = Column(String(200))  # 模块名
+    api_pattern = Column(String(50))   # list/page/detail/save/modify/delete/unknown
+    risk_level = Column(String(10))    # P0/P1/P2
+    executable = Column(Boolean, default=True)        # 是否可自动执行
+    requires_auth = Column(Boolean, default=False)     # 是否需要认证
+    requires_dependency = Column(Boolean, default=False)  # 是否需要前置数据
+    destructive = Column(Boolean, default=False)       # 是否为破坏性操作
+    assertion_status = Column(String(50))  # has_assertion/no_assertion
+    last_run_status = Column(String(50))   # passed/failed/pending
+    failure_category = Column(String(50))  # auth_error/env_error/request_error/response_error/assertion_error/dependency_error/timeout_error/unknown_error
+    
     # 关联关系
     run_cases = relationship("RunCase", back_populates="test_case")
 
@@ -290,6 +302,26 @@ class SystemSettings(Base):
     
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class AiReportAnalysis(Base):
+    """AI 分析报告表 (Phase 19)"""
+    __tablename__ = 'ai_report_analyses'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(100), ForeignKey('test_runs.id'), nullable=False)
+    report_id = Column(Integer, ForeignKey('reports.id'), nullable=True)
+    health_score = Column(Integer, default=0)
+    release_recommendation = Column(String(20))  # pass/caution/block
+    summary = Column(Text)
+    key_findings_json = Column(JSON)
+    risk_points_json = Column(JSON)
+    failure_analysis_json = Column(JSON)
+    skipped_analysis_json = Column(JSON)
+    suggestions_json = Column(JSON)
+    next_actions_json = Column(JSON)
+    provider = Column(String(50), default='rule_based')  # rule_based/llm
+    created_at = Column(DateTime, default=datetime.now)
 
 
 class RunStatusHistory(Base):

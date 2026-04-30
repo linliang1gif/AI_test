@@ -36,6 +36,17 @@ export default function TestCases() {
   const [manualTestNotes, setManualTestNotes] = useState('')
   const [environments, setEnvironments] = useState([])
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState('')
+  // Phase 16: 治理筛选
+  const [govFilter, setGovFilter] = useState({ risk_level: '', api_pattern: '', destructive: '', assertion_status: '', failure_category: '', status: '' })
+  const [isGoverning, setIsGoverning] = useState(false)
+  const [govSummary, setGovSummary] = useState(null)
+  const [presetLoading, setPresetLoading] = useState('')
+  // Phase 17: Demo
+  const [demoLoading, setDemoLoading] = useState(false)
+  const [demoStatus, setDemoStatus] = useState(null)
+  // Phase 19: AI Analysis
+  const [aiAnalysis, setAiAnalysis] = useState(null)
+  const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false)
 
   useEffect(() => {
     loadTestCases()
@@ -238,6 +249,8 @@ export default function TestCases() {
       ai_generated: 'AI生成', 
       smart_generated: 'AI生成',
       swagger: 'Swagger导入',
+      demo_swagger: 'Demo',
+      demo_seed: 'Demo',
       manual: '人工', 
       knowledge_base: '知识库' 
     }
@@ -260,8 +273,9 @@ export default function TestCases() {
   const filteredTestCases = testCases.filter(tc => {
     if (selectedEnvironmentId && !isPetStoreEnvironment && isPetStoreSampleCase(tc)) return false
     // 来源筛选
-    if (sourceFilter === 'functional' && tc.source === 'swagger') return false
-    if (sourceFilter === 'api' && tc.source !== 'swagger') return false
+    const isApiSource = ['swagger', 'demo_swagger', 'demo_seed'].includes(tc.source)
+    if (sourceFilter === 'functional' && isApiSource) return false
+    if (sourceFilter === 'api' && !isApiSource) return false
     // 搜索筛选
     if (searchQuery && !(tc.title || '').toLowerCase().includes(searchQuery.toLowerCase())) return false
     return true
@@ -381,9 +395,9 @@ export default function TestCases() {
       return
     }
     const selectedCases = filteredTestCases.filter(tc => selectedIds.includes(tc.id))
-    const apiCases = selectedCases.filter(tc => tc.source === 'swagger')
+    const apiCases = selectedCases.filter(tc => tc.source === 'swagger' || tc.source === 'demo_swagger' || tc.source === 'demo_seed' || tc.execution_config)
     if (apiCases.length === 0) {
-      alert('请选择接口测试用例（Swagger来源）进行批量执行')
+      alert('请选择可执行的接口测试用例进行批量执行')
       return
     }
     if (!window.confirm(`确定要批量执行 ${apiCases.length} 个接口测试用例吗?`)) {
@@ -519,8 +533,109 @@ export default function TestCases() {
     setTestCases(prev => [...newTestCases, ...prev])
   }
 
+  // Phase 16: 治理操作
+  const handleGovern = async () => {
+    if (!window.confirm('将自动给所有用例打标签（api_pattern / risk_level / destructive 等），确定？')) return
+    setIsGoverning(true)
+    try {
+      const res = await api.v2.testCases.govern(true)
+      alert(`治理完成：共 ${res.total} 条，已更新 ${res.updated} 条`)
+      loadTestCases()
+      loadGovSummary()
+    } catch (e) { alert('治理失败: ' + e.message) }
+    finally { setIsGoverning(false) }
+  }
+
+  const loadGovSummary = async () => {
+    try { setGovSummary(await api.v2.testCases.governanceSummary()) } catch {}
+  }
+  // 首次加载治理概况 + Demo 状态
+  useEffect(() => { loadGovSummary(); loadDemoStatus() }, [])
+
+  // Phase 17: Demo 操作
+  const loadDemoStatus = async () => {
+    try {
+      const res = await api.v2.demo.status()
+      setDemoStatus(res?.data || null)
+    } catch {}
+  }
+
+  const handleDemoInit = async () => {
+    setDemoLoading(true)
+    try {
+      const res = await api.v2.demo.init()
+      if (res.code === 0) {
+        alert(`Demo 项目初始化成功！\n用例: ${res.data.test_case_count} 个\n治理: ${res.data.governed_count} 个`)
+        loadTestCases()
+        loadEnvironments()
+        loadGovSummary()
+        loadDemoStatus()
+      } else {
+        alert('初始化失败: ' + res.message)
+      }
+    } catch (e) { alert('初始化失败: ' + e.message) }
+    finally { setDemoLoading(false) }
+  }
+
+  const handleDemoReset = async () => {
+    if (!window.confirm('确定重置 Demo 项目？将清除所有 Demo 数据并重新初始化。')) return
+    setDemoLoading(true)
+    try {
+      const res = await api.v2.demo.reset()
+      if (res.code === 0) {
+        alert(`Demo 项目已重置！\n用例: ${res.data.test_case_count} 个`)
+        loadTestCases()
+        loadEnvironments()
+        loadGovSummary()
+        loadDemoStatus()
+      } else {
+        alert('重置失败: ' + res.message)
+      }
+    } catch (e) { alert('重置失败: ' + e.message) }
+    finally { setDemoLoading(false) }
+  }
+
+  const handlePresetExecute = async (preset) => {
+    if (!selectedEnvironmentId) { alert('请先选择执行环境'); return }
+    if (!window.confirm(`确定批量执行「${preset}」推荐测试集？将自动跳过破坏性用例。`)) return
+    setPresetLoading(preset)
+    try {
+      const result = await api.v2.testCases.batchExecutePreset(preset, { environment_id: Number(selectedEnvironmentId) })
+      setExecutionResult({ ...result, is_batch: true, preset })
+      setShowResultDialog(true)
+      loadTestCases()
+    } catch (e) {
+      let msg = e.message
+      try { const p = JSON.parse(msg.replace(/^API调用失败: \d+ /, '')); if (p.detail) msg = p.detail } catch {}
+      alert(`${preset} 执行失败: ` + msg)
+    } finally { setPresetLoading('') }
+  }
+
+  // Phase 16: 治理字段筛选
+  const govFilteredCases = filteredTestCases.filter(tc => {
+    if (govFilter.risk_level && tc.risk_level !== govFilter.risk_level) return false
+    if (govFilter.api_pattern && tc.api_pattern !== govFilter.api_pattern) return false
+    if (govFilter.destructive === 'true' && !tc.destructive) return false
+    if (govFilter.destructive === 'false' && tc.destructive) return false
+    if (govFilter.assertion_status && tc.assertion_status !== govFilter.assertion_status) return false
+    if (govFilter.failure_category && tc.failure_category !== govFilter.failure_category) return false
+    if (govFilter.status && tc.status !== govFilter.status) return false
+    return true
+  })
+  const hasGovFilter = Object.values(govFilter).some(v => v !== '')
+
   return (
     <div className="p-6">
+      {/* Phase 18: Demo 项目提示 */}
+      {demoStatus?.initialized && (
+        <div className="mb-4 p-3 bg-indigo-50 border border-indigo-200 rounded-lg flex items-center justify-between">
+          <div className="text-sm text-indigo-800">
+            <span className="font-semibold">Demo 模式</span> - 当前为 ERP Demo System，数据来自 Mock API。
+            用例 {demoStatus.test_case_count || 0} 个，执行 {demoStatus.run_count || 0} 次。
+          </div>
+          <button onClick={() => api.v2.demo.status().then(r => setDemoStatus(r?.data || null)).catch(() => {})} className="text-xs text-indigo-600 hover:underline">刷新</button>
+        </div>
+      )}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-3xl font-bold text-gray-900"> 测试用例</h1>
@@ -582,6 +697,24 @@ export default function TestCases() {
             <span></span>
             <span>导入需求文档</span>
           </button>
+          {/* Phase 17: Demo 按钮 */}
+          <button
+            onClick={handleDemoInit}
+            disabled={demoLoading}
+            className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 flex items-center space-x-2 transition-colors disabled:opacity-50"
+          >
+            <span>{demoLoading ? '' : ''}</span>
+            <span>{demoLoading ? '初始化中...' : '初始化Demo'}</span>
+          </button>
+          {demoStatus?.initialized && (
+            <button
+              onClick={handleDemoReset}
+              disabled={demoLoading}
+              className="px-3 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 text-sm transition-colors disabled:opacity-50"
+            >
+              重置Demo
+            </button>
+          )}
         </div>
       </div>
       
@@ -590,8 +723,8 @@ export default function TestCases() {
           <div className="flex gap-2">
             {[
               { key: 'all', label: '全部', count: testCases.length },
-              { key: 'functional', label: '功能测试', count: testCases.filter(tc => tc.source !== 'swagger').length },
-              { key: 'api', label: '接口测试 (Swagger)', count: testCases.filter(tc => tc.source === 'swagger').length },
+              { key: 'functional', label: '功能测试', count: testCases.filter(tc => !['swagger','demo_swagger','demo_seed'].includes(tc.source)).length },
+              { key: 'api', label: '接口测试', count: testCases.filter(tc => ['swagger','demo_swagger','demo_seed'].includes(tc.source)).length },
             ].map(tab => (
               <button
                 key={tab.key}
@@ -618,6 +751,92 @@ export default function TestCases() {
             placeholder="搜索测试用例..."
             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
+
+          {/* Phase 16: 推荐测试集快捷按钮（仅接口测试 tab） */}
+          {sourceFilter === 'api' && <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-sm text-gray-500 font-medium">推荐集:</span>
+            {[
+              { key: 'query-safe', label: '查询安全集', color: 'bg-green-100 text-green-700 hover:bg-green-200' },
+              { key: 'smoke', label: '冒烟测试集', color: 'bg-blue-100 text-blue-700 hover:bg-blue-200' },
+              { key: 'p0', label: 'P0测试集', color: 'bg-red-100 text-red-700 hover:bg-red-200' },
+              { key: 'failed-rerun', label: '失败重跑集', color: 'bg-orange-100 text-orange-700 hover:bg-orange-200' },
+              { key: 'regression', label: '回归测试集', color: 'bg-purple-100 text-purple-700 hover:bg-purple-200' },
+            ].map(p => (
+              <button
+                key={p.key}
+                disabled={!!presetLoading}
+                onClick={() => handlePresetExecute(p.key)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${p.color} disabled:opacity-50`}
+              >
+                {presetLoading === p.key ? '执行中...' : p.label}
+              </button>
+            ))}
+            <button
+              onClick={handleGovern}
+              disabled={isGoverning}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium bg-gray-200 text-gray-700 hover:bg-gray-300 disabled:opacity-50"
+            >
+              {isGoverning ? '治理中...' : '一键治理'}
+            </button>
+            {govSummary && (
+              <span className="text-xs text-gray-400">
+                已治理 {govSummary.governed}/{govSummary.total} | 破坏性 {govSummary.destructive_count} | 无断言 {govSummary.no_assertion_count} | 失败 {govSummary.failed_count}
+              </span>
+            )}
+          </div>}
+
+          {/* Phase 16: 治理字段筛选（仅接口测试 tab） */}
+          {sourceFilter === 'api' && <div className="flex flex-wrap gap-2 items-center">
+            <span className="text-sm text-gray-500 font-medium">筛选:</span>
+            <select value={govFilter.status} onChange={e => setGovFilter(f => ({...f, status: e.target.value}))} className="px-2 py-1 border rounded text-xs">
+              <option value="">状态</option>
+              <option value="passed">通过</option>
+              <option value="failed">失败</option>
+              <option value="error">错误</option>
+              <option value="no_assertion">无断言</option>
+              <option value="pending">待运行</option>
+            </select>
+            <select value={govFilter.risk_level} onChange={e => setGovFilter(f => ({...f, risk_level: e.target.value}))} className="px-2 py-1 border rounded text-xs">
+              <option value="">风险等级</option>
+              <option value="P0">P0</option>
+              <option value="P1">P1</option>
+              <option value="P2">P2</option>
+            </select>
+            <select value={govFilter.api_pattern} onChange={e => setGovFilter(f => ({...f, api_pattern: e.target.value}))} className="px-2 py-1 border rounded text-xs">
+              <option value="">接口类型</option>
+              <option value="list">list</option>
+              <option value="page">page</option>
+              <option value="detail">detail</option>
+              <option value="save">save</option>
+              <option value="modify">modify</option>
+              <option value="delete">delete</option>
+              <option value="unknown">unknown</option>
+            </select>
+            <select value={govFilter.destructive} onChange={e => setGovFilter(f => ({...f, destructive: e.target.value}))} className="px-2 py-1 border rounded text-xs">
+              <option value="">破坏性</option>
+              <option value="true">是</option>
+              <option value="false">否</option>
+            </select>
+            <select value={govFilter.assertion_status} onChange={e => setGovFilter(f => ({...f, assertion_status: e.target.value}))} className="px-2 py-1 border rounded text-xs">
+              <option value="">断言</option>
+              <option value="has_assertion">有断言</option>
+              <option value="no_assertion">无断言</option>
+            </select>
+            <select value={govFilter.failure_category} onChange={e => setGovFilter(f => ({...f, failure_category: e.target.value}))} className="px-2 py-1 border rounded text-xs">
+              <option value="">失败分类</option>
+              <option value="auth_error">认证失败</option>
+              <option value="env_error">环境错误</option>
+              <option value="request_error">请求错误</option>
+              <option value="response_error">服务端错误</option>
+              <option value="assertion_error">断言失败</option>
+              <option value="dependency_error">依赖错误</option>
+              <option value="timeout_error">超时</option>
+              <option value="unknown_error">未知错误</option>
+            </select>
+            {hasGovFilter && (
+              <button onClick={() => setGovFilter({ risk_level: '', api_pattern: '', destructive: '', assertion_status: '', failure_category: '', status: '' })} className="px-2 py-1 text-xs text-red-500 hover:text-red-700">清除筛选</button>
+            )}
+          </div>}
         </div>
         
         <div className="p-6">
@@ -633,28 +852,28 @@ export default function TestCases() {
                   <th className="py-3 px-4 text-gray-600 font-medium w-12">
                     <input
                       type="checkbox"
-                      checked={filteredTestCases.length > 0 && selectedIds.length === filteredTestCases.length}
+                      checked={govFilteredCases.length > 0 && selectedIds.length === govFilteredCases.length}
                       onChange={handleSelectAll}
                       className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
                     />
                   </th>
                   <th className="text-left py-3 px-4 text-gray-600 font-medium">用例名称</th>
                   <th className="text-left py-3 px-4 text-gray-600 font-medium">模块</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-medium">优先级</th>
+                  <th className="text-left py-3 px-4 text-gray-600 font-medium">风险</th>
+                  <th className="text-left py-3 px-4 text-gray-600 font-medium">接口类型</th>
                   <th className="text-left py-3 px-4 text-gray-600 font-medium">来源</th>
                   <th className="text-left py-3 px-4 text-gray-600 font-medium">状态</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-medium">最后运行</th>
                   <th className="text-left py-3 px-4 text-gray-600 font-medium">操作</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredTestCases.length === 0 ? (
+                {govFilteredCases.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-8 text-center text-gray-500">
-                      {searchQuery ? '未找到匹配的测试用例' : '暂无测试用例，请导入需求文档生成'}
+                    <td colSpan={10} className="py-8 text-center text-gray-500">
+                      {searchQuery || hasGovFilter ? '未找到匹配的测试用例' : '暂无测试用例，请导入需求文档生成'}
                     </td>
                   </tr>
-                ) : filteredTestCases.map((tc, index) => {
+                ) : govFilteredCases.map((tc, index) => {
                   const priorityMap = { 
                     high: { cls: 'bg-red-100 text-red-700', label: '高' }, 
                     medium: { cls: 'bg-yellow-100 text-yellow-700', label: '中' }, 
@@ -686,9 +905,19 @@ export default function TestCases() {
                       <td className="py-4 px-4 font-medium">
                         {tc.title?.replace(/^(测试用例标题|测试点|用例标题|标题)[:：]\s*/, '') || tc.title}
                       </td>
-                      <td className="py-4 px-4 text-gray-600">{tc.module || '-'}</td>
+                      <td className="py-4 px-4 text-gray-600">{tc.module_name || tc.module || '-'}</td>
                       <td className="py-4 px-4">
-                        <span className={`px-2 py-1 rounded text-sm ${p.cls}`}>{p.label}</span>
+                        {tc.risk_level ? (
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${
+                            tc.risk_level === 'P0' ? 'bg-red-100 text-red-700' :
+                            tc.risk_level === 'P1' ? 'bg-orange-100 text-orange-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>{tc.risk_level}</span>
+                        ) : <span className="text-gray-300 text-xs">-</span>}
+                        {tc.destructive && <span className="ml-1 px-1 bg-red-50 text-red-600 text-xs rounded border border-red-200" title="破坏性接口">破坏</span>}
+                      </td>
+                      <td className="py-4 px-4">
+                        <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs">{tc.api_pattern || '-'}</span>
                       </td>
                       <td className="py-4 px-4">
                         <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs">
@@ -697,8 +926,8 @@ export default function TestCases() {
                       </td>
                       <td className="py-4 px-4">
                         <span className={`px-2 py-1 rounded text-sm ${s.cls}`}>{s.label}</span>
+                        {tc.failure_category && <div className="text-xs text-red-400 mt-0.5">{tc.failure_category}</div>}
                       </td>
-                      <td className="py-4 px-4 text-gray-600">{tc.lastRun}</td>
                       <td className="py-4 px-4">
                         <div className="flex space-x-2">
                           <button
@@ -707,7 +936,7 @@ export default function TestCases() {
                           >
                             查看详情
                           </button>
-                          {tc.source === 'swagger' ? (
+                          {['swagger', 'demo_swagger', 'demo_seed'].includes(tc.source) ? (
                             <>
                               <button
                                 onClick={() => handleGenerateScript(tc)}
@@ -1097,32 +1326,81 @@ export default function TestCases() {
               {executionResult.run_id && <p className="text-xs text-blue-600 mt-1">Run ID: {executionResult.run_id}</p>}
             </div>
 
-            {/* 状态概览 */}
-            <div className="grid grid-cols-4 gap-3 mb-4">
-              <div className="p-3 bg-gray-50 rounded border text-center">
-                <div className="text-xs text-gray-500">状态</div>
-                <div className={`text-base font-bold ${
-                  executionResult.status === 'passed' ? 'text-green-600' :
-                  executionResult.status === 'no_assertion' ? 'text-yellow-600' : 'text-red-600'
-                }`}>
-                  {executionResult.status === 'passed' ? '通过' :
-                   executionResult.status === 'no_assertion' ? '无断言' :
-                   executionResult.status === 'failed' ? '失败' : '错误'}
+            {/* Phase 18: 增强状态概览 */}
+            {executionResult.is_batch ? (
+              <div className="mb-4">
+                <div className="grid grid-cols-6 gap-2 mb-3">
+                  <div className="p-2.5 bg-gray-50 rounded border text-center">
+                    <div className="text-xs text-gray-500">总用例</div>
+                    <div className="text-lg font-bold">{executionResult.total_cases || 0}</div>
+                  </div>
+                  <div className="p-2.5 bg-green-50 rounded border text-center">
+                    <div className="text-xs text-gray-500">通过</div>
+                    <div className="text-lg font-bold text-green-600">{executionResult.passed_cases || 0}</div>
+                  </div>
+                  <div className="p-2.5 bg-red-50 rounded border text-center">
+                    <div className="text-xs text-gray-500">失败</div>
+                    <div className="text-lg font-bold text-red-600">{executionResult.failed_cases || 0}</div>
+                  </div>
+                  <div className="p-2.5 bg-gray-50 rounded border text-center">
+                    <div className="text-xs text-gray-500">跳过</div>
+                    <div className="text-lg font-bold text-gray-500">{executionResult.skipped_cases || 0}</div>
+                  </div>
+                  <div className="p-2.5 bg-blue-50 rounded border text-center">
+                    <div className="text-xs text-gray-500">通过率</div>
+                    <div className="text-lg font-bold text-blue-600">{executionResult.pass_rate ?? '-'}%</div>
+                  </div>
+                  <div className="p-2.5 bg-gray-50 rounded border text-center">
+                    <div className="text-xs text-gray-500">耗时</div>
+                    <div className="text-lg font-bold">{(executionResult.duration_ms || 0).toFixed(0)}ms</div>
+                  </div>
+                </div>
+                {/* Phase 18: 失败分类统计 */}
+                {executionResult.failure_categories && Object.keys(executionResult.failure_categories).length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    <span className="text-xs text-gray-500 leading-6">失败分类:</span>
+                    {Object.entries(executionResult.failure_categories).map(([k, v]) => (
+                      <span key={k} className="px-2 py-0.5 bg-red-50 text-red-700 text-xs rounded border border-red-200">{k}: {v}</span>
+                    ))}
+                  </div>
+                )}
+                {/* Phase 18: 跳过原因统计 */}
+                {executionResult.skipped_reasons && Object.keys(executionResult.skipped_reasons).length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    <span className="text-xs text-gray-500 leading-6">跳过原因:</span>
+                    {Object.entries(executionResult.skipped_reasons).map(([k, v]) => (
+                      <span key={k} className="px-2 py-0.5 bg-gray-100 text-gray-700 text-xs rounded border border-gray-200">{k}: {v}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-4 gap-3 mb-4">
+                <div className="p-3 bg-gray-50 rounded border text-center">
+                  <div className="text-xs text-gray-500">状态</div>
+                  <div className={`text-base font-bold ${
+                    executionResult.status === 'passed' ? 'text-green-600' :
+                    executionResult.status === 'no_assertion' ? 'text-yellow-600' : 'text-red-600'
+                  }`}>
+                    {executionResult.status === 'passed' ? '通过' :
+                     executionResult.status === 'no_assertion' ? '无断言' :
+                     executionResult.status === 'failed' ? '失败' : '错误'}
+                  </div>
+                </div>
+                <div className="p-3 bg-gray-50 rounded border text-center">
+                  <div className="text-xs text-gray-500">耗时</div>
+                  <div className="text-base font-bold">{(executionResult.duration_ms || 0).toFixed(0)}ms</div>
+                </div>
+                <div className="p-3 bg-gray-50 rounded border text-center">
+                  <div className="text-xs text-gray-500">断言通过</div>
+                  <div className="text-base font-bold text-green-600">{executionResult.assertion_summary?.passed || 0}</div>
+                </div>
+                <div className="p-3 bg-gray-50 rounded border text-center">
+                  <div className="text-xs text-gray-500">断言失败</div>
+                  <div className="text-base font-bold text-red-600">{executionResult.assertion_summary?.failed || 0}</div>
                 </div>
               </div>
-              <div className="p-3 bg-gray-50 rounded border text-center">
-                <div className="text-xs text-gray-500">耗时</div>
-                <div className="text-base font-bold">{(executionResult.duration_ms || 0).toFixed(0)}ms</div>
-              </div>
-              <div className="p-3 bg-gray-50 rounded border text-center">
-                <div className="text-xs text-gray-500">{executionResult.is_batch ? '通过用例' : '断言通过'}</div>
-                <div className="text-base font-bold text-green-600">{executionResult.is_batch ? (executionResult.passed_cases || 0) : (executionResult.assertion_summary?.passed || 0)}</div>
-              </div>
-              <div className="p-3 bg-gray-50 rounded border text-center">
-                <div className="text-xs text-gray-500">{executionResult.is_batch ? '失败/错误' : '断言失败'}</div>
-                <div className="text-base font-bold text-red-600">{executionResult.is_batch ? ((executionResult.failed_cases || 0) + (executionResult.error_cases || 0)) : (executionResult.assertion_summary?.failed || 0)}</div>
-              </div>
-            </div>
+            )}
 
             {/* 提示信息 */}
             {executionResult.message && (
@@ -1144,26 +1422,36 @@ export default function TestCases() {
                         <th className="py-2 px-3 text-left">用例ID</th>
                         <th className="py-2 px-3 text-left">用例名称</th>
                         <th className="py-2 px-3 text-center">状态</th>
+                        <th className="py-2 px-3 text-center">失败分类</th>
                         <th className="py-2 px-3 text-right">耗时</th>
                         <th className="py-2 px-3 text-left">错误信息</th>
                       </tr>
                     </thead>
                     <tbody>
                       {executionResult.results.map((r) => (
-                        <tr key={r.case_id} className={`border-t ${r.status === 'failed' || r.status === 'error' ? 'bg-red-50' : r.status === 'no_assertion' ? 'bg-yellow-50' : ''}`}>
+                        <tr key={r.case_id} className={`border-t ${
+                          r.status === 'failed' || r.status === 'error' ? 'bg-red-50' :
+                          r.status === 'skipped' ? 'bg-gray-50' :
+                          r.status === 'no_assertion' ? 'bg-yellow-50' : ''
+                        }`}>
                           <td className="py-2 px-3 font-mono text-xs">{r.case_id}</td>
                           <td className="py-2 px-3 text-xs max-w-[260px] truncate">{r.case_name}</td>
                           <td className="py-2 px-3 text-center">
                             <span className={`px-2 py-0.5 rounded text-xs ${
                               r.status === 'passed' ? 'bg-green-100 text-green-700' :
+                              r.status === 'skipped' ? 'bg-gray-200 text-gray-600' :
                               r.status === 'no_assertion' ? 'bg-yellow-100 text-yellow-700' :
                               'bg-red-100 text-red-700'
                             }`}>
-                              {r.status === 'passed' ? '通过' : r.status === 'no_assertion' ? '无断言' : r.status === 'failed' ? '失败' : '错误'}
+                              {r.status === 'passed' ? '通过' : r.status === 'skipped' ? '跳过' : r.status === 'no_assertion' ? '无断言' : r.status === 'failed' ? '失败' : '错误'}
                             </span>
                           </td>
+                          <td className="py-2 px-3 text-center text-xs">
+                            {r.failure_category ? <span className="px-1.5 py-0.5 bg-red-50 text-red-600 rounded">{r.failure_category}</span> :
+                             r.skipped_reason ? <span className="px-1.5 py-0.5 bg-gray-100 text-gray-600 rounded">{r.skipped_reason}</span> : '-'}
+                          </td>
                           <td className="py-2 px-3 text-right text-xs">{(r.duration_ms || 0).toFixed(0)}ms</td>
-                          <td className="py-2 px-3 text-xs text-red-600 max-w-[220px] truncate">{r.error_message || '-'}</td>
+                          <td className="py-2 px-3 text-xs text-red-600 max-w-[220px] truncate">{r.error_message || r.skipped_message || '-'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1240,16 +1528,107 @@ export default function TestCases() {
               </div>
             )}
 
+            {/* Phase 19: AI Analysis Display */}
+            {aiAnalysis && (
+              <div className="mt-4 p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-200">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-lg font-bold text-indigo-800">AI 质量分析</h3>
+                  <span className="text-xs px-2 py-1 bg-indigo-100 text-indigo-600 rounded">
+                    {aiAnalysis.provider === 'rule_based' ? '规则分析' : 'AI 大模型'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div className="text-center p-3 bg-white rounded-lg shadow-sm">
+                    <div className={`text-3xl font-bold ${aiAnalysis.health_score >= 85 ? 'text-green-600' : aiAnalysis.health_score >= 60 ? 'text-yellow-600' : 'text-red-600'}`}>
+                      {aiAnalysis.health_score}
+                    </div>
+                    <div className="text-xs text-gray-500">健康评分</div>
+                  </div>
+                  <div className="text-center p-3 bg-white rounded-lg shadow-sm">
+                    <div className={`text-lg font-bold ${aiAnalysis.release_recommendation === 'pass' ? 'text-green-600' : aiAnalysis.release_recommendation === 'caution' ? 'text-yellow-600' : 'text-red-600'}`}>
+                      {aiAnalysis.release_recommendation === 'pass' ? '✅ 可发布' : aiAnalysis.release_recommendation === 'caution' ? '⚠️ 谨慎发布' : '🚫 不建议发布'}
+                    </div>
+                    <div className="text-xs text-gray-500">发布建议</div>
+                  </div>
+                </div>
+                <p className="text-sm text-gray-700 mb-2">{aiAnalysis.summary}</p>
+                {aiAnalysis.key_findings && aiAnalysis.key_findings.length > 0 && (
+                  <details className="mb-2">
+                    <summary className="text-sm font-medium text-indigo-700 cursor-pointer">关键发现 ({aiAnalysis.key_findings.length})</summary>
+                    <ul className="text-xs text-gray-600 mt-1 ml-4 list-disc">
+                      {aiAnalysis.key_findings.map((f, i) => <li key={i}>{f}</li>)}
+                    </ul>
+                  </details>
+                )}
+                {aiAnalysis.risk_points && aiAnalysis.risk_points.length > 0 && (
+                  <details className="mb-2">
+                    <summary className="text-sm font-medium text-red-700 cursor-pointer">风险点 ({aiAnalysis.risk_points.length})</summary>
+                    <ul className="text-xs text-gray-600 mt-1 ml-4 list-disc">
+                      {aiAnalysis.risk_points.map((r, i) => <li key={i}><span className={`font-bold ${r.level === 'high' ? 'text-red-600' : r.level === 'medium' ? 'text-yellow-600' : 'text-blue-600'}`}>[{r.level.toUpperCase()}]</span> {r.description}</li>)}
+                    </ul>
+                  </details>
+                )}
+                {aiAnalysis.suggestions && aiAnalysis.suggestions.length > 0 && (
+                  <details className="mb-2">
+                    <summary className="text-sm font-medium text-green-700 cursor-pointer">修复建议 ({aiAnalysis.suggestions.length})</summary>
+                    <ul className="text-xs text-gray-600 mt-1 ml-4 list-disc">
+                      {aiAnalysis.suggestions.map((s, i) => <li key={i}>{s}</li>)}
+                    </ul>
+                  </details>
+                )}
+                {aiAnalysis.next_actions && aiAnalysis.next_actions.length > 0 && (
+                  <details>
+                    <summary className="text-sm font-medium text-blue-700 cursor-pointer">下一步行动 ({aiAnalysis.next_actions.length})</summary>
+                    <ul className="text-xs text-gray-600 mt-1 ml-4 list-disc">
+                      {aiAnalysis.next_actions.map((a, i) => <li key={i}><span className={`font-bold ${a.priority === 'high' ? 'text-red-600' : a.priority === 'medium' ? 'text-yellow-600' : 'text-blue-600'}`}>[{a.priority.toUpperCase()}]</span> {a.action}</li>)}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            )}
+
             <div className="mt-4 flex justify-between">
-              {executionResult.run_id && (
-                <button
-                  onClick={() => { setShowResultDialog(false); navigate('/test-runs-v2') }}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
-                >
-                  查看执行记录
-                </button>
-              )}
-              <button onClick={() => setShowResultDialog(false)} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">关闭</button>
+              <div className="flex space-x-2">
+                {executionResult.run_id && (
+                  <button
+                    onClick={() => { setShowResultDialog(false); navigate('/test-runs-v2') }}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+                  >
+                    查看执行记录
+                  </button>
+                )}
+                {executionResult.run_id && (
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api.v2.observability.generateReport(executionResult.run_id)
+                        window.open(`/api/v2/test-runs/${executionResult.run_id}/report/download?format=html`, '_blank')
+                      } catch (e) { alert('报告生成失败: ' + e.message) }
+                    }}
+                    className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm"
+                  >
+                    生成HTML报告
+                  </button>
+                )}
+                {executionResult.run_id && (
+                  <button
+                    disabled={aiAnalysisLoading}
+                    onClick={async () => {
+                      setAiAnalysisLoading(true)
+                      try {
+                        const force = !!aiAnalysis
+                        const res = await api.v2.observability.generateAiAnalysis(executionResult.run_id, force)
+                        setAiAnalysis(res.data || res)
+                      } catch (e) { alert('AI 分析失败: ' + e.message) }
+                      finally { setAiAnalysisLoading(false) }
+                    }}
+                    className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 text-sm disabled:opacity-50"
+                  >
+                    {aiAnalysisLoading ? '分析中...' : (aiAnalysis ? '🔄 重新分析(LLM)' : '生成AI分析')}
+                  </button>
+                )}
+              </div>
+              <button onClick={() => { setShowResultDialog(false); setAiAnalysis(null) }} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">关闭</button>
             </div>
           </div>
         </div>
