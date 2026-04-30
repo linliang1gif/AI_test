@@ -328,6 +328,45 @@ export default function TestCases() {
     }
   }
 
+  const handleBatchExecute = async () => {
+    const selectedCases = testCases.filter(tc => selectedIds.includes(tc.id))
+    const apiCases = selectedCases.filter(tc => tc.source === 'swagger')
+    if (apiCases.length === 0) {
+      alert('请选择接口测试用例（Swagger来源）进行批量执行')
+      return
+    }
+    if (!window.confirm(`确定要批量执行 ${apiCases.length} 个接口测试用例吗?`)) {
+      return
+    }
+
+    setIsExecuting(true)
+    try {
+      const result = await api.v2.testCases.batchExecute(apiCases.map(tc => tc.id), {})
+      setExecutionResult({ ...result, is_batch: true })
+      setShowResultDialog(true)
+      setSelectedIds([])
+
+      const statusById = {}
+      ;(result.results || []).forEach(r => {
+        statusById[r.case_id] = r.status
+      })
+      setTestCases(prev => prev.map(tc =>
+        statusById[tc.id]
+          ? { ...tc, status: statusById[tc.id], lastRun: new Date().toLocaleString() }
+          : tc
+      ))
+    } catch (error) {
+      let msg = error.message || '批量执行失败'
+      try {
+        const parsed = JSON.parse(msg.replace(/^API调用失败: \d+ /, ''))
+        if (parsed.detail) msg = parsed.detail
+      } catch {}
+      alert('批量执行失败: ' + msg)
+    } finally {
+      setIsExecuting(false)
+    }
+  }
+
   const handleDownloadScript = () => {
     const blob = new Blob([generatedScript], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
@@ -436,14 +475,23 @@ export default function TestCases() {
         </div>
         <div className="flex space-x-3">
           {selectedIds.length > 0 && (
-            <button
-              onClick={handleBatchDelete}
-              disabled={isDeleting}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center space-x-2 transition-colors disabled:opacity-50"
-            >
-              <span></span>
-              <span>{isDeleting ? '删除中...' : `删除 (${selectedIds.length})`}</span>
-            </button>
+            <>
+              <button
+                onClick={handleBatchExecute}
+                disabled={isExecuting}
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center space-x-2 transition-colors disabled:opacity-50"
+              >
+                <span>{isExecuting ? '执行中...' : `批量执行 (${selectedIds.length})`}</span>
+              </button>
+              <button
+                onClick={handleBatchDelete}
+                disabled={isDeleting}
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center space-x-2 transition-colors disabled:opacity-50"
+              >
+                <span></span>
+                <span>{isDeleting ? '删除中...' : `删除 (${selectedIds.length})`}</span>
+              </button>
+            </>
           )}
           <button
             onClick={handleExportExcel}
@@ -542,6 +590,8 @@ export default function TestCases() {
                   const statusMap = { 
                     passed: { cls: 'bg-green-100 text-green-700', label: '通过' }, 
                     failed: { cls: 'bg-red-100 text-red-700', label: '失败' }, 
+                    error: { cls: 'bg-red-100 text-red-700', label: '错误' },
+                    no_assertion: { cls: 'bg-yellow-100 text-yellow-700', label: '无断言' },
                     pending: { cls: 'bg-gray-100 text-gray-700', label: '待运行' } 
                   }
                   const p = priorityMap[tc.priority] || { cls: 'bg-gray-100 text-gray-700', label: tc.priority || '-' }
@@ -957,18 +1007,20 @@ export default function TestCases() {
       )}
 
       {/* 测试执行结果对话框 (Phase 11+13) */}
-      {showResultDialog && executionResult && selectedTestCase && (
+      {showResultDialog && executionResult && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl p-6 w-[850px] max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold">
-                {executionResult.status === 'passed' ? '✅' : executionResult.status === 'no_assertion' ? '⚠️' : '❌'} 接口测试结果
+                {executionResult.status === 'passed' ? '✅' : executionResult.status === 'no_assertion' ? '⚠️' : '❌'} {executionResult.is_batch ? '批量执行结果' : '接口测试结果'}
               </h2>
               <button onClick={() => setShowResultDialog(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
             </div>
             
             <div className="mb-4 p-3 bg-blue-50 rounded border border-blue-200">
-              <p className="text-sm text-blue-800"><span className="font-medium">用例:</span> {selectedTestCase.title}</p>
+              <p className="text-sm text-blue-800">
+                <span className="font-medium">{executionResult.is_batch ? '批量执行:' : '用例:'}</span> {executionResult.is_batch ? `${executionResult.total_cases || 0} 个接口用例` : selectedTestCase?.title}
+              </p>
               {executionResult.run_id && <p className="text-xs text-blue-600 mt-1">Run ID: {executionResult.run_id}</p>}
             </div>
 
@@ -990,12 +1042,12 @@ export default function TestCases() {
                 <div className="text-base font-bold">{(executionResult.duration_ms || 0).toFixed(0)}ms</div>
               </div>
               <div className="p-3 bg-gray-50 rounded border text-center">
-                <div className="text-xs text-gray-500">断言通过</div>
-                <div className="text-base font-bold text-green-600">{executionResult.assertion_summary?.passed || 0}</div>
+                <div className="text-xs text-gray-500">{executionResult.is_batch ? '通过用例' : '断言通过'}</div>
+                <div className="text-base font-bold text-green-600">{executionResult.is_batch ? (executionResult.passed_cases || 0) : (executionResult.assertion_summary?.passed || 0)}</div>
               </div>
               <div className="p-3 bg-gray-50 rounded border text-center">
-                <div className="text-xs text-gray-500">断言失败</div>
-                <div className="text-base font-bold text-red-600">{executionResult.assertion_summary?.failed || 0}</div>
+                <div className="text-xs text-gray-500">{executionResult.is_batch ? '失败/错误' : '断言失败'}</div>
+                <div className="text-base font-bold text-red-600">{executionResult.is_batch ? ((executionResult.failed_cases || 0) + (executionResult.error_cases || 0)) : (executionResult.assertion_summary?.failed || 0)}</div>
               </div>
             </div>
 
@@ -1006,6 +1058,50 @@ export default function TestCases() {
                 executionResult.status === 'no_assertion' ? 'bg-yellow-50 border-yellow-200 text-yellow-800' :
                 'bg-red-50 border-red-200 text-red-800'
               }`}>{executionResult.message}</div>
+            )}
+
+            {/* 批量执行明细 */}
+            {executionResult.is_batch && executionResult.results && (
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold mb-2">用例执行明细</h3>
+                <div className="border rounded overflow-hidden max-h-72 overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-100 sticky top-0">
+                      <tr>
+                        <th className="py-2 px-3 text-left">用例ID</th>
+                        <th className="py-2 px-3 text-left">用例名称</th>
+                        <th className="py-2 px-3 text-center">状态</th>
+                        <th className="py-2 px-3 text-right">耗时</th>
+                        <th className="py-2 px-3 text-left">错误信息</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {executionResult.results.map((r) => (
+                        <tr key={r.case_id} className={`border-t ${r.status === 'failed' || r.status === 'error' ? 'bg-red-50' : r.status === 'no_assertion' ? 'bg-yellow-50' : ''}`}>
+                          <td className="py-2 px-3 font-mono text-xs">{r.case_id}</td>
+                          <td className="py-2 px-3 text-xs max-w-[260px] truncate">{r.case_name}</td>
+                          <td className="py-2 px-3 text-center">
+                            <span className={`px-2 py-0.5 rounded text-xs ${
+                              r.status === 'passed' ? 'bg-green-100 text-green-700' :
+                              r.status === 'no_assertion' ? 'bg-yellow-100 text-yellow-700' :
+                              'bg-red-100 text-red-700'
+                            }`}>
+                              {r.status === 'passed' ? '通过' : r.status === 'no_assertion' ? '无断言' : r.status === 'failed' ? '失败' : '错误'}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-right text-xs">{(r.duration_ms || 0).toFixed(0)}ms</td>
+                          <td className="py-2 px-3 text-xs text-red-600 max-w-[220px] truncate">{r.error_message || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {(executionResult.no_assertion_cases || 0) > 0 && (
+                  <div className="mt-2 text-xs text-yellow-700 bg-yellow-50 border border-yellow-200 rounded p-2">
+                    ⚠️ 无断言用例 {executionResult.no_assertion_cases} 个，未计入通过用例。
+                  </div>
+                )}
+              </div>
             )}
 
             {/* 断言详情 (Phase 13) */}

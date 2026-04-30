@@ -478,6 +478,10 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+      batchExecute: (caseIds, data = {}) => request(`${API_BASE_URL}/v2/test-cases/batch-execute`, {
+        method: 'POST',
+        body: JSON.stringify({ case_ids: caseIds, ...data }),
+      }),
       previewVariables: (caseId, datasetId) => request(`${API_BASE_URL}/v2/test-cases/${caseId}/preview-variables?dataset_id=${datasetId || ''}`),
     },
 

@@ -8,6 +8,7 @@ POST /api/v2/test-cases/{case_id}/execute
 
 import uuid
 import time
+import json
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -56,7 +57,230 @@ class ExecuteResponse(BaseModel):
     error_message: str = ""
 
 
+class BatchExecuteRequest(ExecuteRequest):
+    case_ids: List[str] = Field(..., description="测试用例ID列表")
+
+
+class BatchExecuteResponse(BaseModel):
+    success: bool
+    run_id: str = ""
+    status: str = ""
+    message: str = ""
+    total_cases: int = 0
+    passed_cases: int = 0
+    failed_cases: int = 0
+    no_assertion_cases: int = 0
+    error_cases: int = 0
+    duration_ms: float = 0
+    results: List[dict] = []
+
+
 # ---------- 路由 ----------
+
+@router.post("/batch-execute", response_model=BatchExecuteResponse)
+async def batch_execute_test_cases(
+    req: BatchExecuteRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    批量执行接口测试用例（Phase 16）。
+
+    多个用例共用一个 TestRun，每个用例写入一条 RunCase。
+    """
+    if not req.case_ids:
+        raise HTTPException(status_code=400, detail="请选择要执行的测试用例")
+
+    # 确定 base_url
+    base_url = req.base_url or ""
+    env_id = req.environment_id
+    if not base_url and env_id:
+        env = db.query(Environment).filter(Environment.id == env_id).first()
+        if env:
+            base_url = env.base_url
+    if not base_url:
+        envs = db.query(Environment).all()
+        if envs:
+            base_url = envs[0].base_url
+            env_id = envs[0].id
+    if not base_url:
+        raise HTTPException(
+            status_code=400,
+            detail="未配置测试环境地址。请在请求中传入 base_url 或先在项目中创建环境。"
+        )
+
+    cases = db.query(TestCase).filter(TestCase.id.in_(req.case_ids)).all()
+    found_ids = {tc.id for tc in cases}
+    missing_ids = [cid for cid in req.case_ids if cid not in found_ids]
+    if not cases:
+        raise HTTPException(status_code=404, detail="未找到可执行的测试用例")
+
+    run_id = f"RUN_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    trace_id = f"TRACE_{uuid.uuid4().hex}"
+    start_time = datetime.now()
+    engine = ExecutionEngineV2(base_url=base_url)
+    results = []
+    counters = {"passed": 0, "failed": 0, "no_assertion": 0, "error": 0}
+
+    test_run = TestRun(
+        id=run_id,
+        project_id=1,
+        environment_id=env_id,
+        trigger_type='manual_batch',
+        status='running',
+        trace_id=trace_id,
+        start_time=start_time,
+        total_cases=len(cases),
+        passed_cases=0,
+        failed_cases=0,
+    )
+    db.add(test_run)
+    db.flush()
+
+    variables = req.variables or (_load_dataset_variables(req.dataset_id, db) if req.dataset_id else {})
+
+    for tc in cases:
+        case_start = datetime.now()
+        final_status = "error"
+        error_message = ""
+        req_snapshot = {}
+        resp_snapshot = {}
+        assertion_detail_list = []
+        assertion_summary = {"total": 0, "passed": 0, "failed": 0}
+        duration_ms = 0
+
+        try:
+            exec_config = tc.execution_config or {}
+            if not exec_config.get('method') or not exec_config.get('url'):
+                raise ValueError(f"用例 {tc.id} 缺少执行配置(method/url)")
+
+            method = exec_config.get('method', 'GET').upper()
+            url_path = exec_config.get('url', '/')
+            headers = exec_config.get('headers', {})
+            query_params = exec_config.get('query_params', {})
+            body = exec_config.get('body')
+            timeout = exec_config.get('timeout', 30)
+
+            if variables:
+                url_path, m1 = resolve_variables(url_path, variables)
+                headers, m2 = resolve_variables(headers, variables)
+                query_params, m3 = resolve_variables(query_params, variables)
+                body, m4 = resolve_variables(body, variables) if body else (body, [])
+                missing_vars = list(dict.fromkeys(m1 + m2 + m3 + m4))
+                if missing_vars:
+                    raise ValueError(f"缺少变量: {', '.join(missing_vars)}")
+
+            assertions = _convert_assertions(tc.assertions or [])
+            has_assertions = len(assertions) > 0
+
+            case_v2 = TestCaseV2(
+                id=tc.id,
+                title=tc.title,
+                method=method,
+                path=url_path,
+                base_url=base_url,
+                headers=headers if isinstance(headers, dict) else {},
+                query_params=query_params if isinstance(query_params, dict) else {},
+                body=body,
+                timeout=timeout,
+                assertions=assertions,
+            )
+
+            result = engine.execute_case(case_v2, run_id=run_id)
+            final_status = result.status
+            if not has_assertions and result.status == ExecutionStatus.PASSED.value:
+                final_status = "no_assertion"
+
+            duration_ms = result.duration_ms
+            error_message = result.error_message or ""
+            resp_snapshot = result.response.to_dict() if result.response else {}
+            assertion_detail_list = [a.to_dict() for a in result.assertions] if result.assertions else []
+            assertion_summary = result.assertion_summary if result.assertions else assertion_summary
+
+            req_snapshot = {
+                "method": method,
+                "url": f"{base_url.rstrip('/')}/{url_path.lstrip('/')}",
+                "headers": sanitize_sensitive_data(headers) if isinstance(headers, dict) else {},
+                "query_params": query_params,
+                "body": sanitize_sensitive_data(body) if isinstance(body, dict) else body,
+            }
+        except Exception as e:
+            final_status = "error"
+            error_message = str(e)
+            duration_ms = (datetime.now() - case_start).total_seconds() * 1000
+
+        counters[final_status if final_status in counters else "error"] += 1
+        case_end = datetime.now()
+
+        db.add(RunCase(
+            run_id=run_id,
+            test_case_id=tc.id,
+            status=final_status,
+            start_time=case_start,
+            end_time=case_end,
+            duration=duration_ms / 1000,
+            error_message=error_message or None,
+            request_snapshot=_json_safe(req_snapshot),
+            response_snapshot=_json_safe(resp_snapshot),
+            assertions_passed=assertion_summary.get("passed", 0),
+            assertions_failed=assertion_summary.get("failed", 0),
+            assertion_details=_json_safe(assertion_detail_list),
+        ))
+
+        tc.status = final_status
+        tc.updated_at = datetime.now()
+
+        results.append({
+            "case_id": tc.id,
+            "case_name": tc.title,
+            "status": final_status,
+            "duration_ms": round(duration_ms, 2),
+            "assertion_summary": assertion_summary,
+            "error_message": error_message,
+        })
+
+    end_time = datetime.now()
+    total_duration = (end_time - start_time).total_seconds()
+    overall_status = "passed"
+    if counters["error"] > 0:
+        overall_status = "error"
+    elif counters["failed"] > 0:
+        overall_status = "failed"
+    elif counters["no_assertion"] > 0 and counters["passed"] == 0:
+        overall_status = "no_assertion"
+    elif counters["no_assertion"] > 0:
+        overall_status = "passed"
+
+    test_run.status = overall_status
+    test_run.end_time = end_time
+    test_run.duration = total_duration
+    test_run.total_cases = len(cases)
+    test_run.passed_cases = counters["passed"]
+    test_run.failed_cases = counters["failed"] + counters["error"]
+    test_run.summary = json.dumps({
+        "missing_case_ids": missing_ids,
+        "no_assertion_cases": counters["no_assertion"],
+        "error_cases": counters["error"],
+    }, ensure_ascii=False)
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"批量执行结果入库失败: {str(e)}")
+
+    return BatchExecuteResponse(
+        success=overall_status in ("passed", "no_assertion"),
+        run_id=run_id,
+        status=overall_status,
+        message=f"批量执行完成：通过 {counters['passed']}，失败 {counters['failed']}，无断言 {counters['no_assertion']}，错误 {counters['error']}",
+        total_cases=len(cases),
+        passed_cases=counters["passed"],
+        failed_cases=counters["failed"],
+        no_assertion_cases=counters["no_assertion"],
+        error_cases=counters["error"],
+        duration_ms=round(total_duration * 1000, 2),
+        results=results,
+    )
 
 @router.post("/{case_id}/execute", response_model=ExecuteResponse)
 async def execute_test_case(
@@ -309,6 +533,11 @@ def _load_dataset_variables(dataset_id: str, db: Session) -> Dict[str, Any]:
     except Exception:
         pass
     return {}
+
+
+def _json_safe(value):
+    """确保JSON字段在旧SQLite表结构中也能安全写入"""
+    return json.loads(json.dumps(value, ensure_ascii=False, default=str))
 
 
 def _convert_assertions(raw_assertions: list) -> list:
