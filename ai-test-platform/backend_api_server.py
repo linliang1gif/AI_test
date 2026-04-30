@@ -389,6 +389,14 @@ try:
 except ImportError as e:
     print(f"⚠️  测试报告路由导入失败: {e}")
 
+# 🆕 导入并注册批量执行中心路由（Phase 16）
+try:
+    from routes.batch_run_routes import router as batch_run_router
+    app.include_router(batch_run_router)
+    print("✅ 批量执行中心路由已加载（Phase 16）")
+except ImportError as e:
+    print(f"⚠️  批量执行中心路由导入失败: {e}")
+
 # ==================== 数据模型 ====================
 
 # 测试数据工厂相关模型

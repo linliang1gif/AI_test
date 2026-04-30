@@ -17,6 +17,7 @@ import SwaggerWorkbench from './pages/SwaggerWorkbench'
 import ApiSpecList from './pages/ApiSpecList'
 import ApiSpecDetail from './pages/ApiSpecDetail'
 import AIConfigPage from './pages/AIConfigPage'
+import BatchRunCenter from './pages/BatchRunCenter'
 
 const GLOBAL_ENV_STORAGE_KEY = 'ai_test_global_environment'
 
@@ -283,6 +284,7 @@ function App() {
               {expandedSections.scheduling && [
                 { to: '/test-runs-v2', icon: '■', label: '执行记录' },
                 { to: '/executor-v2', icon: '■', label: 'API测试执行' },
+                { to: '/batch-run', icon: '■', label: '批量执行中心' },
               ].map(item => (
                 <NavLink 
                   key={item.to}
@@ -518,6 +520,7 @@ function App() {
               <Route path="/test-data-factory" element={<TestDataFactory />} />
               <Route path="/ai-config" element={<AIConfigPage />} />
               <Route path="/executor-v2" element={<ExecutorV2 />} />
+              <Route path="/batch-run" element={<BatchRunCenter />} />
               
               {/* 旧版页面 - 重定向到V2或占位页 */}
               <Route path="/projects" element={<Navigate to="/projects-v2" replace />} />
