@@ -79,6 +79,7 @@ class ReportGenerator:
                 "total": total,
                 "passed": passed,
                 "failed": failed,
+                "error": 0,  # 添加error字段(兼容HTML模板)
                 "pass_rate": pass_rate,
                 "total_duration": round(total_duration, 2),
                 "avg_duration": round(avg_duration, 2),

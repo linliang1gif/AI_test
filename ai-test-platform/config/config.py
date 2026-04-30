@@ -33,6 +33,8 @@ class AIConfig:
     timeout: int = 60
     # Ollama支持的模型列表
     ollama_models: list = None
+    # 模块级别的 AI 配置
+    module_configs: Dict[str, Dict[str, str]] = None
 
 @dataclass
 class TestConfig:
@@ -74,6 +76,23 @@ class Config:
     
     def _load_ai_config(self) -> AIConfig:
         """加载AI配置"""
+        # 加载模块级别的配置
+        module_configs = {}
+        modules = ["TESTCASE_GENERATION", "SCRIPT_GENERATION", "SWAGGER_ANALYSIS", "TEST_OPTIMIZATION"]
+        
+        for module in modules:
+            provider_key = f"{module}_AI_PROVIDER"
+            model_key = f"{module}_AI_MODEL"
+            
+            provider = os.getenv(provider_key)
+            model = os.getenv(model_key)
+            
+            if provider or model:
+                module_configs[module.lower()] = {
+                    "provider": provider,
+                    "model": model
+                }
+        
         return AIConfig(
             deepseek_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
@@ -87,7 +106,8 @@ class Config:
             temperature=float(os.getenv("AI_TEMPERATURE", "0.2")),
             max_tokens=int(os.getenv("AI_MAX_TOKENS", "4000")),
             timeout=int(os.getenv("AI_TIMEOUT", "60")),
-            ollama_models=os.getenv("OLLAMA_MODELS", "deepseek-coder,qwen2.5,llama3").split(",")
+            ollama_models=os.getenv("OLLAMA_MODELS", "deepseek-coder,qwen2.5,llama3").split(","),
+            module_configs=module_configs
         )
     
     def _load_test_config(self) -> TestConfig:
@@ -134,15 +154,28 @@ class Config:
         for directory in directories:
             directory.mkdir(parents=True, exist_ok=True)
     
-    def get_ai_config_for_provider(self, provider: str = None) -> Dict[str, Any]:
-        """获取指定AI提供商的配置"""
+    def get_ai_config_for_provider(self, provider: str = None, module: str = None) -> Dict[str, Any]:
+        """获取指定AI提供商的配置
+        
+        Args:
+            provider: AI提供商名称，如果为None则使用默认或模块配置
+            module: 模块名称，用于获取模块级别的配置
+        """
+        # 如果指定了模块，优先使用模块配置
+        if module and module.lower() in self.ai.module_configs:
+            module_config = self.ai.module_configs[module.lower()]
+            provider = module_config.get("provider") or provider
+            model_override = module_config.get("model")
+        else:
+            model_override = None
+        
         provider = provider or self.ai.default_provider
         
         if provider == "deepseek":
             return {
                 "api_key": self.ai.deepseek_api_key,
                 "base_url": self.ai.deepseek_base_url,
-                "model": self.ai.default_model,
+                "model": model_override or self.ai.default_model,
                 "temperature": self.ai.temperature,
                 "max_tokens": self.ai.max_tokens,
                 "timeout": self.ai.timeout
@@ -151,7 +184,7 @@ class Config:
             return {
                 "api_key": self.ai.openai_api_key,
                 "base_url": self.ai.openai_base_url,
-                "model": self.ai.default_model,  # 使用环境变量配置的模型
+                "model": model_override or self.ai.default_model,
                 "temperature": self.ai.temperature,
                 "max_tokens": self.ai.max_tokens,
                 "timeout": self.ai.timeout
@@ -160,16 +193,17 @@ class Config:
             return {
                 "api_key": self.ai.anthropic_api_key,
                 "base_url": self.ai.anthropic_base_url,
-                "model": self.ai.default_model,
+                "model": model_override or self.ai.default_model,
                 "temperature": self.ai.temperature,
                 "max_tokens": self.ai.max_tokens,
                 "timeout": self.ai.timeout
             }
         elif provider == "ollama":
+            default_model = self.ai.default_model if self.ai.default_model in self.ai.ollama_models else self.ai.ollama_models[0]
             return {
                 "api_key": "",  # Ollama不需要API Key
                 "base_url": self.ai.ollama_base_url,
-                "model": self.ai.default_model if self.ai.default_model in self.ai.ollama_models else self.ai.ollama_models[0],
+                "model": model_override or default_model,
                 "temperature": self.ai.temperature,
                 "max_tokens": self.ai.max_tokens,
                 "timeout": self.ai.timeout,
@@ -185,11 +219,34 @@ class Config:
         if provider == "ollama":
             return self.ai.ollama_models
         elif provider == "deepseek":
-            return ["deepseek-chat", "deepseek-coder"]
+            return [
+                "deepseek-chat",        # 别名 → deepseek-v4-flash (非思考模式), 将于2026/07/24弃用
+                "deepseek-reasoner",    # 别名 → deepseek-v4-flash (思考模式), 将于2026/07/24弃用
+                "deepseek-v4-flash",    # V4 Flash: 快速高效, 推荐日常使用
+                "deepseek-v4-pro",      # V4 Pro: 更强能力, 适合复杂任务
+            ]
         elif provider == "openai":
-            return ["gpt-3.5-turbo", "gpt-4", "gpt-4-turbo"]
+            return ["glm-4-flash", "glm-4", "glm-3-turbo"]
         else:
             return []
+    
+    def get_module_ai_config(self, module: str) -> Dict[str, str]:
+        """获取模块的 AI 配置"""
+        if module.lower() in self.ai.module_configs:
+            config = self.ai.module_configs[module.lower()]
+            return {
+                "provider": config.get("provider") or self.ai.default_provider,
+                "model": config.get("model") or self.ai.default_model
+            }
+        return {
+            "provider": self.ai.default_provider,
+            "model": self.ai.default_model
+        }
+    
+    def get_all_module_configs(self) -> Dict[str, Dict[str, str]]:
+        """获取所有模块的 AI 配置"""
+        modules = ["testcase_generation", "script_generation", "swagger_analysis", "test_optimization"]
+        return {module: self.get_module_ai_config(module) for module in modules}
     
     def validate(self) -> bool:
         """验证配置是否完整"""

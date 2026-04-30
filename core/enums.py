@@ -94,6 +94,17 @@ class ExecutionMode(Enum):
     PARALLEL = "parallel"          # 并行执行
     DISTRIBUTED = "distributed"    # 分布式执行
 
+class RunStatus(Enum):
+    """测试执行状态"""
+    CREATED = "created"            # 已创建
+    QUEUED = "queued"              # 已排队
+    PREPARING = "preparing"        # 准备中
+    RUNNING = "running"            # 执行中
+    HEALING = "healing"            # 修复中
+    PASSED = "passed"              # 通过
+    FAILED = "failed"              # 失败
+    ABORTED = "aborted"            # 已中止
+
 # ==================== 报告相关 ====================
 
 class ReportFormat(Enum):

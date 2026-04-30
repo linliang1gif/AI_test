@@ -1,4 +1,4 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
 
 function AiTestConsole() {
   const [requirement, setRequirement] = useState('')
@@ -81,7 +81,7 @@ function AiTestConsole() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="space-y-1">
-          <h1 className="text-3xl font-bold text-gray-900">🚀 AI测试控制台</h1>
+          <h1 className="text-3xl font-bold text-gray-900"> AI测试控制台</h1>
           <p className="text-gray-600">
             {executionMode === 'decision-only' 
               ? '快速决策分析 - 仅判断是否需要测试' 
@@ -96,7 +96,7 @@ function AiTestConsole() {
           {/* 输入卡片 */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200">
             <div className="p-6 border-b border-gray-200">
-              <h2 className="text-lg font-semibold text-gray-900">📝 输入信息</h2>
+              <h2 className="text-lg font-semibold text-gray-900"> 输入信息</h2>
             </div>
             <div className="p-6 space-y-4">
             
@@ -116,8 +116,8 @@ function AiTestConsole() {
               </select>
               <p className="text-xs text-gray-500 mt-1">
                 {executionMode === 'decision-only' 
-                  ? '⚡ 快速模式: 2-5秒完成,适合代码提交前快速检查' 
-                  : '🔄 完整模式: 10-20秒完成,包含测试执行和自动修复'}
+                  ? ' 快速模式: 2-5秒完成,适合代码提交前快速检查' 
+                  : ' 完整模式: 10-20秒完成,包含测试执行和自动修复'}
               </p>
             </div>
             
@@ -188,12 +188,12 @@ function AiTestConsole() {
               >
                 {isRunning ? (
                   <>
-                    <span className="animate-spin">⚙️</span>
+                    <span className="animate-spin"></span>
                     <span>执行中...</span>
                   </>
                 ) : (
                   <>
-                    <span>{executionMode === 'decision-only' ? '⚡' : '🚀'}</span>
+                    <span>{executionMode === 'decision-only' ? '' : ''}</span>
                     <span>{executionMode === 'decision-only' ? '快速决策' : 'Run AI Test'}</span>
                   </>
                 )}
@@ -218,7 +218,7 @@ function AiTestConsole() {
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
               <div className="p-6 border-b border-gray-200">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-semibold text-gray-900">⚡ 执行进度</h2>
+                  <h2 className="text-lg font-semibold text-gray-900"> 执行进度</h2>
                   <span className="text-sm font-medium text-blue-600">
                     {(() => {
                       const stages = executionMode === 'decision-only' 
@@ -284,11 +284,11 @@ function AiTestConsole() {
                         <div className={`text-sm font-medium transition-colors ${
                           isCompleted || isCurrent ? 'text-gray-900' : 'text-gray-500'
                         }`}>
-                          {stage === 'agent' && '🤖 AI决策分析'}
-                          {stage === 'strategy' && '📋 生成测试策略'}
-                          {stage === 'orchestrator' && '⚡ 执行测试'}
-                          {stage === 'healing' && '🔧 自动修复'}
-                          {stage === 'report' && '📊 生成报告'}
+                          {stage === 'agent' && ' AI决策分析'}
+                          {stage === 'strategy' && ' 生成测试策略'}
+                          {stage === 'orchestrator' && ' 执行测试'}
+                          {stage === 'healing' && ' 自动修复'}
+                          {stage === 'report' && ' 生成报告'}
                         </div>
                       </div>
                       {isCompleted && (
@@ -311,7 +311,7 @@ function AiTestConsole() {
               {/* AI决策 */}
               <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
                 <div className="p-6 border-b border-gray-200">
-                  <h3 className="text-lg font-semibold text-gray-900">🤖 AI决策</h3>
+                  <h3 className="text-lg font-semibold text-gray-900"> AI决策</h3>
                 </div>
                 <div className="p-6">
                 <div className="space-y-3">
@@ -322,7 +322,7 @@ function AiTestConsole() {
                         ? 'bg-green-100 text-green-700'
                         : 'bg-gray-100 text-gray-700'
                     }`}>
-                      {result.decision.need_test ? '✅ 需要测试' : '⏭️ 跳过'}
+                      {result.decision.need_test ? ' 需要测试' : ' 跳过'}
                     </span>
                   </div>
                   
@@ -362,7 +362,7 @@ function AiTestConsole() {
               {result.mode === 'decision-only' && (
                 <div className="bg-yellow-50 rounded-xl border border-yellow-200 p-4">
                   <div className="flex items-start space-x-2">
-                    <span className="text-xl">⚡</span>
+                    <span className="text-xl"></span>
                     <div className="flex-1">
                       <div className="text-sm font-medium text-yellow-900 mb-1">快速决策模式</div>
                       <div className="text-sm text-yellow-800">
@@ -377,7 +377,7 @@ function AiTestConsole() {
               {result.strategy && (
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
                   <div className="p-6 border-b border-gray-200">
-                    <h3 className="text-lg font-semibold text-gray-900">📋 测试策略</h3>
+                    <h3 className="text-lg font-semibold text-gray-900"> 测试策略</h3>
                   </div>
                   <div className="p-6">
                   <div className="space-y-3">
@@ -409,7 +409,7 @@ function AiTestConsole() {
               {result.execution && (
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
                   <div className="p-6 border-b border-gray-200">
-                    <h3 className="text-lg font-semibold text-gray-900">⚡ 执行过程</h3>
+                    <h3 className="text-lg font-semibold text-gray-900"> 执行过程</h3>
                   </div>
                   <div className="p-6">
                   
@@ -462,7 +462,7 @@ function AiTestConsole() {
                                   ? 'bg-green-100 text-green-700'
                                   : 'bg-red-100 text-red-700'
                               }`}>
-                                {isSuccess ? '✅ 通过' : '❌ 失败'}
+                                {isSuccess ? ' 通过' : ' 失败'}
                               </span>
                             </div>
                           </div>
@@ -488,7 +488,7 @@ function AiTestConsole() {
               {result.healing && (
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
                   <div className="p-6 border-b border-gray-200">
-                    <h3 className="text-lg font-semibold text-gray-900">🔧 自愈过程</h3>
+                    <h3 className="text-lg font-semibold text-gray-900"> 自愈过程</h3>
                   </div>
                   <div className="p-6">
                   
@@ -520,7 +520,7 @@ function AiTestConsole() {
                               {caseName}
                             </span>
                             <span className="px-2 py-1 rounded text-xs font-medium bg-green-100 text-green-700">
-                              ✅ 已修复
+                               已修复
                             </span>
                           </div>
                           {task.error && (
@@ -545,7 +545,7 @@ function AiTestConsole() {
                               {caseName}
                             </span>
                             <span className="px-2 py-1 rounded text-xs font-medium bg-yellow-100 text-yellow-700">
-                              ⚠️ 未修复
+                               未修复
                             </span>
                           </div>
                           {task.error && (
@@ -568,7 +568,7 @@ function AiTestConsole() {
               {result.report && (
                 <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
                   <div className="p-6 border-b border-gray-200">
-                    <h3 className="text-lg font-semibold text-gray-900">📊 最终报告</h3>
+                    <h3 className="text-lg font-semibold text-gray-900"> 最终报告</h3>
                   </div>
                   <div className="p-6">
                   
@@ -581,10 +581,10 @@ function AiTestConsole() {
                   }`}>
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-lg font-bold">
-                        {result.report.summary.status === 'passed' && '✅ 测试通过'}
-                        {result.report.summary.status === 'failed' && '❌ 测试失败'}
-                        {result.report.summary.status === 'skipped' && '⏭️ 已跳过'}
-                        {result.report.summary.status === 'partial' && '⚠️ 部分通过'}
+                        {result.report.summary.status === 'passed' && ' 测试通过'}
+                        {result.report.summary.status === 'failed' && ' 测试失败'}
+                        {result.report.summary.status === 'skipped' && ' 已跳过'}
+                        {result.report.summary.status === 'partial' && ' 部分通过'}
                       </span>
                       <span className="text-sm text-gray-600">
                         {result.report.summary.passed}/{result.report.summary.total}
@@ -608,7 +608,7 @@ function AiTestConsole() {
                   {/* AI分析 */}
                   <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
                     <div className="flex items-start space-x-2">
-                      <span className="text-xl">🤖</span>
+                      <span className="text-xl"></span>
                       <div className="flex-1">
                         <div className="text-sm font-medium text-blue-900 mb-1">AI分析</div>
                         <div className="text-sm text-gray-700">
@@ -625,11 +625,11 @@ function AiTestConsole() {
                       {result.timeline?.map((step, index) => (
                         <div key={index} className="flex items-center justify-between text-sm">
                           <span className="text-gray-600">
-                            {step.stage === 'agent' && '🤖 Agent'}
-                            {step.stage === 'strategy' && '📋 Strategy'}
-                            {step.stage === 'orchestrator' && '⚡ Orchestrator'}
-                            {step.stage === 'healing' && '🔧 Healing'}
-                            {step.stage === 'report' && '📊 Report'}
+                            {step.stage === 'agent' && ' Agent'}
+                            {step.stage === 'strategy' && ' Strategy'}
+                            {step.stage === 'orchestrator' && ' Orchestrator'}
+                            {step.stage === 'healing' && ' Healing'}
+                            {step.stage === 'report' && ' Report'}
                           </span>
                           <span className="text-gray-900 font-medium">{step.duration}s</span>
                         </div>
@@ -658,7 +658,7 @@ function AiTestConsole() {
           {!isRunning && !result && (
             <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
               <div className="p-12 text-center">
-                <div className="text-6xl mb-4">🚀</div>
+                <div className="text-6xl mb-4"></div>
                 <h3 className="text-lg font-semibold text-gray-900 mb-2">准备就绪</h3>
                 <p className="text-gray-600 text-sm">
                   输入需求描述，点击按钮开始执行
@@ -672,7 +672,7 @@ function AiTestConsole() {
       {/* 底部说明 */}
       <div className="bg-blue-50 rounded-xl border border-blue-200">
         <div className="p-6">
-          <h3 className="text-sm font-semibold text-blue-900 mb-3">💡 使用说明</h3>
+          <h3 className="text-sm font-semibold text-blue-900 mb-3"> 使用说明</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className="flex items-start space-x-2">
               <span className="text-blue-600 mt-0.5">•</span>

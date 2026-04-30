@@ -1,0 +1,219 @@
+{
+  "source": "landian_project",
+  "type": "postman_collection",
+  "data": {
+    "info": {
+      "name": "付款单分账支付完整测试场景 v1.2.2",
+      "description": "完整测试付款单分账支付的所有场景：货款+平台服务费+代缴税费的各种组合",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "auth": {
+      "type": "bearer",
+      "bearer": [
+        {
+          "key": "token",
+          "value": "{{token}}",
+          "type": "string"
+        }
+      ]
+    },
+    "variable": [
+      {
+        "key": "baseUrl",
+        "value": "https://dev-recycle.szhibu.com/dev-api/recycle",
+        "type": "string"
+      },
+      {
+        "key": "token",
+        "value": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdXBwbGllcklkIjoiIiwidXNlcl9uYW1lIjoibGRzaXQiLCJtb2JpbGUiOiIxMzU0MjY1ODk2MyIsImF2YXRhciI6bnVsbCwidXNlcklkIjoiMTE2ZDMyYTY0MGIwNGE1NWJkMTViMWI5MTBmY2Y3NzgiLCJ1dWlkIjoiNTU0YTAxMmU2MjRlNDEyYWIyMTBkZTJiMDQ1MDc2YzMiLCJjbGllbnRfaWQiOiJkZXZfYmx1ZV9yZWN5Y2xlIiwidXJsIjpudWxsLCJyZWFsTmFtZSI6Imxkc2l0IiwiYXVkIjpbIkRFRkFVTFRfUkVTT1VSQ0VfSUQiXSwicGluIjoiMTAxNCIsInNjb3BlIjpbImFsbCJdLCJ3c3QiOiJ3c0xBQWN6TEFzREJ5QXZJd1FMS3lnc0J3c29Md2d2RHdzZ0FEQUROemNmT3dzakN3YzRQQWR3RDBjNEJDdENwQ3cvYUNxbmJDZ3pUREE4S3pzckt3UUxJd3NzS3dNdkJDc0hDeXdJTHk4TElBUXJMQzhqQnlzak53QXpNIiwiaWQiOjE5OTMxMzE3MjI5MTY4OTI2NzQsImV4cCI6MTc3NjEzNzgwMSwianRpIjoiN2Y2ZWJiY2QtYzRjNi00OTgzLTk0N2EtYWUxNWQyNjk1NzBkIiwiZW1haWwiOiIxMzU0MjY1ODk2M0BxcS5jb20ifQ.oRHxeouyiorygFZjDu-Hk8_4hMhafZrsdxManm9kz12NhV4YUHgCFLSzGo1T2bfKLFPpAycaL6GOWMyPf9YkEsezerMtlAap6Sr6deIX5XEYSmQ3XytZgufPvpglX9o5Bgy10DhjrOdZIQSdE1TfutqjKzuh-bP_W4E0TH9Ch5Q",
+        "type": "string"
+      },
+      {
+        "key": "authX",
+        "value": "222000d37be5e4384fc5afe48c5c1813705cd669b342e775613913ab9ee3679f",
+        "type": "string"
+      }
+    ],
+    "item": [
+      {
+        "name": "1. 心跳测试",
+        "request": {
+          "method": "POST",
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "key": "Authorization",
+              "value": "Bearer {{token}}"
+            },
+            {
+              "key": "authorization-x",
+              "value": "{{authX}}"
+            }
+          ],
+          "body": {
+            "mode": "raw",
+            "raw": "{}"
+          },
+          "url": {
+            "raw": "{{baseUrl}}/common/heart/beat",
+            "host": [
+              "{{baseUrl}}"
+            ],
+            "path": [
+              "common",
+              "heart",
+              "beat"
+            ]
+          },
+          "description": "测试后端服务连接"
+        }
+      },
+      {
+        "name": "2. 付款单支付-货款+平台服务费",
+        "request": {
+          "method": "POST",
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "key": "Authorization",
+              "value": "Bearer {{token}}"
+            },
+            {
+              "key": "authorization-x",
+              "value": "{{authX}}"
+            }
+          ],
+          "body": {
+            "mode": "raw",
+            "raw": "{\n  \"outTradeNo\": \"TEST_FKA20260408001\",\n  \"amount\": 100.00,\n  \"bankType\": \"CMB\",\n  \"bankUserId\": \"N002462505\",\n  \"busMode\": \"00001\",\n  \"title\": \"货款\",\n  \"content\": \"测试货款支付\",\n  \"payerAccount\": \"755915676910502\",\n  \"payeeAccount\": \"6214837811201866\",\n  \"payeeAccountName\": \"殷萌涵\",\n  \"payeeAccountBankName\": \"招商银行深圳分行\",\n  \"orderType\": \"ORDER_AMT\",\n  \"paymentBillUuid\": \"test-uuid-001\",\n  \"paymentBillNo\": \"TEST_FKA20260408001\",\n  \"bnkFlg\": \"Y\"\n}"
+          },
+          "url": {
+            "raw": "{{baseUrl}}/fmApPaymentBill/pay",
+            "host": [
+              "{{baseUrl}}"
+            ],
+            "path": [
+              "fmApPaymentBill",
+              "pay"
+            ]
+          },
+          "description": "测试场景1：货款支付\n\n预期结果：\n- 调用招行支付接口\n- 返回支付成功\n- 生成支付订单记录"
+        }
+      },
+      {
+        "name": "3. 付款单支付-平台服务费",
+        "request": {
+          "method": "POST",
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "key": "Authorization",
+              "value": "Bearer {{token}}"
+            },
+            {
+              "key": "authorization-x",
+              "value": "{{authX}}"
+            }
+          ],
+          "body": {
+            "mode": "raw",
+            "raw": "{\n  \"outTradeNo\": \"TEST_FKA20260408001_SERVICE\",\n  \"amount\": 20.00,\n  \"bankType\": \"CMB\",\n  \"bankUserId\": \"N002462505\",\n  \"busMode\": \"00001\",\n  \"title\": \"平台服务费\",\n  \"content\": \"测试平台服务费支付\",\n  \"payerAccount\": \"755915676910502\",\n  \"payeeAccount\": \"102100099996\",\n  \"payeeAccountName\": \"中国工商银行总行清算中心\",\n  \"payeeAccountBankNo\": \"102100099996\",\n  \"payeeAccountBankName\": \"中国工商银行总行清算中心\",\n  \"payeeAccountBankAddress\": \"北京市\",\n  \"orderType\": \"SERVICE_FEE\",\n  \"paymentBillUuid\": \"test-uuid-001\",\n  \"paymentBillNo\": \"TEST_FKA20260408001\",\n  \"bnkFlg\": \"N\"\n}"
+          },
+          "url": {
+            "raw": "{{baseUrl}}/fmApPaymentBill/pay",
+            "host": [
+              "{{baseUrl}}"
+            ],
+            "path": [
+              "fmApPaymentBill",
+              "pay"
+            ]
+          },
+          "description": "测试场景2：平台服务费支付\n\n预期结果：\n- 调用招行支付接口\n- 跨行转账\n- 返回支付成功"
+        }
+      },
+      {
+        "name": "4. 付款单支付-代缴税费",
+        "request": {
+          "method": "POST",
+          "header": [
+            {
+              "key": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "key": "Authorization",
+              "value": "Bearer {{token}}"
+            },
+            {
+              "key": "authorization-x",
+              "value": "{{authX}}"
+            }
+          ],
+          "body": {
+            "mode": "raw",
+            "raw": "{\n  \"outTradeNo\": \"TEST_FKA20260408001_TAX\",\n  \"amount\": 15.00,\n  \"bankType\": \"CMB\",\n  \"bankUserId\": \"N002462505\",\n  \"busMode\": \"00001\",\n  \"title\": \"代缴税费\",\n  \"content\": \"测试代缴税费支付\",\n  \"payerAccount\": \"755915676910502\",\n  \"payeeAccount\": \"102100099996\",\n  \"payeeAccountName\": \"税务机关\",\n  \"payeeAccountBankNo\": \"102100099996\",\n  \"payeeAccountBankName\": \"中国工商银行总行清算中心\",\n  \"payeeAccountBankAddress\": \"北京市\",\n  \"orderType\": \"INCOME_TAX\",\n  \"paymentBillUuid\": \"test-uuid-001\",\n  \"paymentBillNo\": \"TEST_FKA20260408001\",\n  \"bnkFlg\": \"N\"\n}"
+          },
+          "url": {
+            "raw": "{{baseUrl}}/fmApPaymentBill/pay",
+            "host": [
+              "{{baseUrl}}"
+            ],
+            "path": [
+              "fmApPaymentBill",
+              "pay"
+            ]
+          },
+          "description": "测试场景3：代缴税费支付\n\n注意：此功能当前可能未实现\n\n预期结果：\n- 调用招行支付接口\n- 跨行转账\n- 返回支付成功"
+        }
+      },
+      {
+        "name": "5. 查询付款单详情",
+        "request": {
+          "method": "GET",
+          "header": [
+            {
+              "key": "Authorization",
+              "value": "Bearer {{token}}"
+            },
+            {
+              "key": "authorization-x",
+              "value": "{{authX}}"
+            }
+          ],
+          "url": {
+            "raw": "{{baseUrl}}/fmApPaymentBill/info?uuid=test-uuid-001",
+            "host": [
+              "{{baseUrl}}"
+            ],
+            "path": [
+              "fmApPaymentBill",
+              "info"
+            ],
+            "query": [
+              {
+                "key": "uuid",
+                "value": "test-uuid-001"
+              }
+            ]
+          },
+          "description": "查询付款单详情，验证支付结果"
+        }
+      }
+    ]
+  },
+  "metadata": {
+    "project": "蓝点回收系统",
+    "collection_name": "Postman测试集合-付款单分账支付",
+    "imported_at": "2024-03-24"
+  }
+}

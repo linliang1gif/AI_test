@@ -1,0 +1,99 @@
+{
+  "source": "landian_project",
+  "type": "postman_collection",
+  "data": {
+    "info": {
+      "name": "多明细付款单测试",
+      "description": "测试3个应付单生成1个付款单，验证个税承担方逻辑",
+      "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+      {
+        "name": "场景1: 个税承担方一致",
+        "item": [
+          {
+            "name": "1.1 生成付款单（3个应付单）",
+            "request": {
+              "method": "POST",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}",
+                  "type": "text"
+                },
+                {
+                  "key": "Content-Type",
+                  "value": "application/json",
+                  "type": "text"
+                }
+              ],
+              "body": {
+                "mode": "raw",
+                "raw": "{\n  \"billNo\": [\n    \"CWYSA20260408101\",\n    \"CWYSA20260408102\",\n    \"CWYSA20260408103\"\n  ]\n}"
+              },
+              "url": {
+                "raw": "https://dev-recycle.szhibu.com/api/finance/payment-bill/batch-save",
+                "protocol": "https",
+                "host": [
+                  "dev-recycle",
+                  "szhibu",
+                  "com"
+                ],
+                "path": [
+                  "api",
+                  "finance",
+                  "payment-bill",
+                  "batch-save"
+                ]
+              },
+              "description": "从3个应付单生成付款单，个税承担方都是企业承担"
+            },
+            "response": []
+          },
+          {
+            "name": "1.2 查询付款单详情",
+            "request": {
+              "method": "GET",
+              "header": [
+                {
+                  "key": "Authorization",
+                  "value": "Bearer {{token}}",
+                  "type": "text"
+                }
+              ],
+              "url": {
+                "raw": "https://dev-recycle.szhibu.com/api/finance/payment-bill/info?billNo={{paymentBillNo}}",
+                "protocol": "https",
+                "host": [
+                  "dev-recycle",
+                  "szhibu",
+                  "com"
+                ],
+                "path": [
+                  "api",
+                  "finance",
+                  "payment-bill",
+                  "info"
+                ],
+                "query": [
+                  {
+                    "key": "billNo",
+                    "value": "{{paymentBillNo}}",
+                    "description": "付款单号（从上一步获取）"
+                  }
+                ]
+              },
+              "description": "验证付款单数据"
+            },
+            "response": []
+          }
+        ]
+      }
+    ]
+  },
+  "metadata": {
+    "project": "蓝点回收系统",
+    "collection_name": "Postman-多明细测试",
+    "imported_at": "2024-03-24"
+  }
+}

@@ -68,15 +68,13 @@ export default function Projects() {
     })
   }
 
-  const handleRunProject = (id) => {
-    fetch('/api/test-runs/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ project_id: id, environment: 'staging' })
-    })
-      .then(r => r.json())
-      .then(data => alert(data.message || '测试已启动'))
-      .catch(err => alert('启动失败: ' + err.message))
+  const handleRunProject = async (id) => {
+    try {
+      const data = await api.testRuns.start({ project_id: id, environment: 'staging' })
+      alert(data.message || '测试已启动')
+    } catch (err) {
+      alert('启动失败: ' + err.message)
+    }
   }
 
   const getStatusBadge = (status) => {

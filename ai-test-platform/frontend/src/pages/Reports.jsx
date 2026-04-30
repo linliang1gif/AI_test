@@ -1,5 +1,6 @@
 ﻿import React, { useState, useEffect } from 'react'
-import { reportsAPI } from '../services/api'
+import { useNavigate } from 'react-router-dom'
+import { reportsAPI, testRunsAPI } from '../services/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { 
@@ -15,6 +16,7 @@ import {
 } from 'lucide-react'
 
 export default function Reports() {
+  const navigate = useNavigate()
   const [reports, setReports] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -32,7 +34,14 @@ export default function Reports() {
   const loadReports = () => {
     reportsAPI.getAll()
       .then(data => {
-        const list = data.reports || []
+        const list = (data.reports || []).map(report => ({
+          ...report,
+          date: report.created_at || '-',
+          size: `${JSON.stringify(report.content || {}).length} B`,
+          format: 'JSON',
+          passRate: report.passRate || report.summary?.pass_rate || 0,
+          testRuns: report.testRuns || 1,
+        }))
         setReports(list)
         if (list.length > 0) setSelectedReport(list[0])
       })
@@ -41,30 +50,31 @@ export default function Reports() {
   }
 
   const loadTestRuns = () => {
-    fetch('/api/test-runs')
-      .then(res => {
-        if (!res.ok) throw new Error('HTTP error! status: ' + res.status)
-        return res.json()
-      })
+    testRunsAPI.getAll()
       .then(data => {
         const runs = data.testRuns || []
-        // 只显示已完成的测试运行
-        setTestRuns(runs.filter(r => r.status === 'completed'))
+        setTestRuns(runs.filter(r => r.status === 'passed' || r.status === 'failed'))
       })
       .catch(err => console.error('加载测试运行失败:', err))
   }
 
   const handleGenerateReport = async () => {
-    alert('当前后端未开放 /api/reports/generate 接口，请先通过测试执行流程自动生成报告。')
+    if (!selectedTestRun) return
+    try {
+      setGenerating(true)
+      await reportsAPI.generate({ run_id: selectedTestRun })
+      await loadReports()
+      setShowGenerateDialog(false)
+      setSelectedTestRun(null)
+    } catch (error) {
+      alert('生成报告失败: ' + error.message)
+    } finally {
+      setGenerating(false)
+    }
   }
 
   const handleViewReport = async (report) => {
-    try {
-      const data = await reportsAPI.getById(report.id)
-      alert(JSON.stringify(data.report || report, null, 2))
-    } catch (err) {
-      alert('获取报告详情失败: ' + err.message)
-    }
+    navigate(`/reports/${report.id}`)
   }
 
   const handleDownloadReport = async (report) => {

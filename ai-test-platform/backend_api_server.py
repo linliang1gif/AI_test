@@ -1943,6 +1943,38 @@ def _generate_smart_testcases(content: str, filename: str) -> List[Dict[str, Any
     
     return generated_cases
 
+def _load_project_knowledge() -> str:
+    """加载项目知识库上下文，供AI生成时参考"""
+    kb_path = Path(__file__).parent / "docs" / "蓝点后端知识库.md"
+    if not kb_path.exists():
+        return ""
+    try:
+        text = kb_path.read_text(encoding='utf-8')
+        # 提取关键段落，控制 token 消耗
+        sections = []
+        keep_headings = ['统一响应结构', '业务状态码', '认证鉴权', '业务模块与接口路由', '路由前缀常量',
+                         '通用接口命名模式', '测试断言规则', '多租户体系']
+        current_section = []
+        current_heading = ''
+        for line in text.split('\n'):
+            if line.startswith('## ') or line.startswith('### '):
+                if current_heading and any(kw in current_heading for kw in keep_headings):
+                    sections.extend(current_section)
+                current_section = [line]
+                current_heading = line
+            else:
+                current_section.append(line)
+        if current_heading and any(kw in current_heading for kw in keep_headings):
+            sections.extend(current_section)
+        result = '\n'.join(sections).strip()
+        if result:
+            return f"\n\n## 项目知识库（蓝点回收系统）:\n{result[:3000]}"
+        return ""
+    except Exception as e:
+        print(f"⚠️  加载项目知识库失败: {e}")
+        return ""
+
+
 async def _generate_testcases_with_ai(content: str, filename: str, provider: str) -> List[Dict[str, Any]]:
     """使用真实AI分批生成测试用例 — 先提取模块，再按模块逐个生成"""
     from ai.ai_client import AIClient
@@ -1952,6 +1984,11 @@ async def _generate_testcases_with_ai(content: str, filename: str, provider: str
     ai_client = AIClient(provider=provider)
     content_length = len(content)
     print(f"📊 需求文档长度: {content_length} 字符")
+    
+    # 加载项目知识库上下文
+    project_knowledge = _load_project_knowledge()
+    if project_knowledge:
+        print(f"📚 已加载项目知识库 ({len(project_knowledge)} 字符)")
     
     # ========== 第1步：让AI提取模块列表 ==========
     print(f"\n{'='*50}")
@@ -1995,12 +2032,16 @@ async def _generate_testcases_with_ai(content: str, filename: str, provider: str
     
     # ========== 第2步：按模块逐个生成测试用例 ==========
     all_cases = []
-    system_prompt = """你是一个专业的测试工程师。严格按JSON数组格式返回测试用例。
+    system_prompt = f"""你是一个专业的测试工程师。严格按JSON数组格式返回测试用例。
 要求:
 1. 每个用例的测试步骤至少5步，步骤要详细具体可执行
 2. 测试数据用具体值（如: test@example.com），不要写"有效数据"
 3. 覆盖: 功能测试、边界测试、异常测试、安全测试
-4. 只返回JSON数组，不要其他文字"""
+4. 只返回JSON数组，不要其他文字
+5. 业务接口成功断言: HTTP 200 且 body.code==200
+6. 认证失败场景: body.code==401/402/405
+7. 参数校验失败: body.code==10000
+{project_knowledge}"""
 
     # 每个模块生成的目标数量
     per_module = max(8, min(20, 60 // len(modules)))
@@ -2311,8 +2352,12 @@ async def export_test_cases():
 
         # 返回文件
         from starlette.responses import StreamingResponse
+        from urllib.parse import quote
         filename = f"测试用例_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        headers = {'Content-Disposition': f'attachment; filename="{filename}"'}
+        ascii_filename = f"test_cases_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        headers = {
+            'Content-Disposition': f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{quote(filename)}"
+        }
         return StreamingResponse(
             output,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2436,17 +2481,19 @@ async def get_provider_status(provider_id: str):
 @app.get("/api/ai/providers/{provider}/models")
 async def get_provider_models(provider: str):
     """获取提供商模型列表"""
-    if provider == "anthropic":
-        return {
-            "success": True,
-            "models": [
-                os.getenv("DEFAULT_AI_MODEL", "openclaw-default-api-KWJxLGWf"),
-                "openclaw-default-api-KWJxLGWf"
-            ]
-        }
+    from config.config import get_config
+    config = get_config()
+    models = config.get_available_models(provider)
+    if not models:
+        if provider == "anthropic":
+            models = [os.getenv("DEFAULT_AI_MODEL", "openclaw-default-api-KWJxLGWf")]
+        elif provider == "mock":
+            models = ["mock-model"]
+        else:
+            models = []
     return {
         "success": True,
-        "models": ["qwen2.5:1.5b", "llama3.2:1b"]
+        "models": models
     }
 
 @app.post("/api/ai/providers/{provider}/test")
@@ -2471,7 +2518,7 @@ async def get_current_ai_config():
             "providers": {
                 "deepseek": {
                     "name": "DeepSeek",
-                    "models": ["deepseek-chat", "deepseek-coder"],
+                    "models": config.get_available_models("deepseek"),
                     "api_key_configured": bool(config.ai.deepseek_api_key),
                     "base_url": config.ai.deepseek_base_url
                 },

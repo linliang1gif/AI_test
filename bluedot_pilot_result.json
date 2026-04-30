@@ -1,0 +1,67 @@
+{
+  "pilot_name": "蓝点项目第一轮试点 - 币别管理（固定Token）",
+  "timestamp": "2026-04-21T13:51:52.262735",
+  "results": {
+    "查询列表": true,
+    "新增币别": true,
+    "查询详情": true,
+    "编辑币别": true,
+    "启用禁用": true,
+    "删除币别": true
+  },
+  "api_calls": [
+    {
+      "method": "POST",
+      "path": "/basic/basicCurrency/list",
+      "status": 200,
+      "elapsed": "0.09s"
+    },
+    {
+      "method": "POST",
+      "path": "/basic/basicCurrency/list",
+      "status": 200,
+      "elapsed": "0.06s"
+    },
+    {
+      "method": "POST",
+      "path": "/basic/basicCurrency/add",
+      "status": 200,
+      "elapsed": "0.11s"
+    },
+    {
+      "method": "POST",
+      "path": "/basic/basicCurrency/list",
+      "status": 200,
+      "elapsed": "0.06s"
+    },
+    {
+      "method": "POST",
+      "path": "/basic/basicCurrency/info",
+      "status": 200,
+      "elapsed": "0.07s"
+    },
+    {
+      "method": "POST",
+      "path": "/basic/basicCurrency/update",
+      "status": 200,
+      "elapsed": "0.10s"
+    },
+    {
+      "method": "POST",
+      "path": "/basic/basicCurrency/enabled",
+      "status": 200,
+      "elapsed": "0.07s"
+    },
+    {
+      "method": "POST",
+      "path": "/basic/basicCurrency/delete",
+      "status": 200,
+      "elapsed": "0.13s"
+    }
+  ],
+  "summary": {
+    "total": 6,
+    "passed": 6,
+    "failed": 0
+  }
+}

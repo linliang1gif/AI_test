@@ -1,0 +1,89 @@
+/* 企业级B端样式规范 */
+
+/* 统一圆角为6px */
+.rounded,
+.rounded-md,
+.rounded-lg {
+  border-radius: 6px !important;
+}
+
+.rounded-sm {
+  border-radius: 4px !important;
+}
+
+.rounded-full {
+  border-radius: 9999px !important;
+}
+
+/* 统一主色调 - 使用沉稳的灰蓝色系 */
+:root {
+  --primary-color: #334155; /* slate-700 */
+  --primary-hover: #1e293b; /* slate-800 */
+  --text-primary: #0f172a; /* slate-900 */
+  --text-secondary: #475569; /* slate-600 */
+  --border-color: #e2e8f0; /* slate-200 */
+  --bg-hover: #f8fafc; /* slate-50 */
+}
+
+/* 按钮样式优化 */
+button:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+}
+
+/* 输入框样式优化 */
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(51, 65, 85, 0.1);
+}
+
+/* 卡片阴影优化 */
+.card-shadow {
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1);
+}
+
+.card-shadow-hover:hover {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+}
+
+/* 表格样式优化 */
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+table th {
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* 滚动条样式 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* 响应式优化 */
+@media (max-width: 768px) {
+  .max-w-\[1400px\] {
+    max-width: 100%;
+  }
+}

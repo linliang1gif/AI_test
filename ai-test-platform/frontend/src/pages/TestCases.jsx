@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import SVNInput from '../components/SVNInput'
 
+const EXECUTION_ENV_STORAGE_KEY = 'ai_test_selected_execution_environment_id'
+
 export default function TestCases() {
   const navigate = useNavigate()
   const [showUploadDialog, setShowUploadDialog] = useState(false)
@@ -32,10 +34,13 @@ export default function TestCases() {
   const [manualTestSteps, setManualTestSteps] = useState([])
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
   const [manualTestNotes, setManualTestNotes] = useState('')
+  const [environments, setEnvironments] = useState([])
+  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState('')
 
   useEffect(() => {
     loadTestCases()
     loadDatasets()
+    loadEnvironments()
   }, [])
 
   const loadTestCases = async () => {
@@ -97,6 +102,25 @@ export default function TestCases() {
     }
   }
 
+  const loadEnvironments = async () => {
+    try {
+      const result = await api.v2.projects.getAll()
+      const projects = result.projects || []
+      const envLists = await Promise.all(
+        projects.map(project => api.v2.projects.getEnvironments(project.id).catch(() => []))
+      )
+      const allEnvironments = envLists.flat()
+      setEnvironments(allEnvironments)
+      if (allEnvironments.length > 0) {
+        const savedEnvironmentId = localStorage.getItem(EXECUTION_ENV_STORAGE_KEY)
+        const validSavedEnvironment = allEnvironments.find(env => String(env.id) === savedEnvironmentId)
+        setSelectedEnvironmentId(validSavedEnvironment ? savedEnvironmentId : String(allEnvironments[0].id))
+      }
+    } catch (error) {
+      console.error('加载环境列表失败:', error)
+    }
+  }
+
   const handleFileUpload = async () => {
     if (!uploadFile) return
     
@@ -117,11 +141,11 @@ export default function TestCases() {
       }, 1000)
 
       // 更新步骤提示
-      setTimeout(() => setGenerationStep(' 解析需求文档...'), 500)
-      setTimeout(() => setGenerationStep('🔍 拆分功能模块...'), 3000)
-      setTimeout(() => setGenerationStep(' 生成测试点...'), 8000)
-      setTimeout(() => setGenerationStep('🎯 生成测试场景...'), 15000)
-      setTimeout(() => setGenerationStep('✨ 生成测试用例...'), 25000)
+      setTimeout(() => setGenerationStep('📚 加载项目知识库...'), 500)
+      setTimeout(() => setGenerationStep(' 解析需求文档...'), 2000)
+      setTimeout(() => setGenerationStep('🔍 拆分功能模块...'), 5000)
+      setTimeout(() => setGenerationStep('🎯 结合项目上下文生成测试场景...'), 12000)
+      setTimeout(() => setGenerationStep('✨ 生成测试用例（含业务断言）...'), 22000)
       
       const result = await api.testCases.generate(uploadFile)
       
@@ -220,7 +244,21 @@ export default function TestCases() {
     return map[src] || src || '-'
   }
 
+  const selectedEnvironment = environments.find(env => String(env.id) === String(selectedEnvironmentId))
+  const isPetStoreEnvironment = selectedEnvironment?.base_url?.toLowerCase().includes('petstore')
+  const isPetStoreSampleCase = (tc) => {
+    const moduleName = String(tc.module || '').toLowerCase()
+    const title = String(tc.title || '').toLowerCase()
+    return tc.source === 'swagger' && (
+      ['pet', 'store', 'user'].includes(moduleName) ||
+      title.includes('pet store') ||
+      title.includes('add a new pet') ||
+      title.includes('uploads an image')
+    )
+  }
+
   const filteredTestCases = testCases.filter(tc => {
+    if (selectedEnvironmentId && !isPetStoreEnvironment && isPetStoreSampleCase(tc)) return false
     // 来源筛选
     if (sourceFilter === 'functional' && tc.source === 'swagger') return false
     if (sourceFilter === 'api' && tc.source !== 'swagger') return false
@@ -228,6 +266,9 @@ export default function TestCases() {
     if (searchQuery && !(tc.title || '').toLowerCase().includes(searchQuery.toLowerCase())) return false
     return true
   })
+  const hiddenPetStoreSampleCount = selectedEnvironmentId && !isPetStoreEnvironment
+    ? testCases.filter(isPetStoreSampleCase).length
+    : 0
 
   const handleSelectAll = (e) => {
     if (e.target.checked) {
@@ -296,6 +337,10 @@ export default function TestCases() {
   }
 
   const handleExecuteTest = async (testCase) => {
+    if (!selectedEnvironmentId) {
+      alert('请先选择执行环境')
+      return
+    }
     if (!window.confirm(`确定要执行接口测试: ${testCase.title}?`)) {
       return
     }
@@ -304,7 +349,9 @@ export default function TestCases() {
     setSelectedTestCase(testCase)
     try {
       // 调用新的一键执行接口 (Phase 11)
-      const result = await api.v2.testCases.execute(testCase.id, {})
+      const result = await api.v2.testCases.execute(testCase.id, {
+        environment_id: Number(selectedEnvironmentId),
+      })
       
       setExecutionResult(result)
       setShowResultDialog(true)
@@ -329,7 +376,11 @@ export default function TestCases() {
   }
 
   const handleBatchExecute = async () => {
-    const selectedCases = testCases.filter(tc => selectedIds.includes(tc.id))
+    if (!selectedEnvironmentId) {
+      alert('请先选择执行环境')
+      return
+    }
+    const selectedCases = filteredTestCases.filter(tc => selectedIds.includes(tc.id))
     const apiCases = selectedCases.filter(tc => tc.source === 'swagger')
     if (apiCases.length === 0) {
       alert('请选择接口测试用例（Swagger来源）进行批量执行')
@@ -341,7 +392,9 @@ export default function TestCases() {
 
     setIsExecuting(true)
     try {
-      const result = await api.v2.testCases.batchExecute(apiCases.map(tc => tc.id), {})
+      const result = await api.v2.testCases.batchExecute(apiCases.map(tc => tc.id), {
+        environment_id: Number(selectedEnvironmentId),
+      })
       setExecutionResult({ ...result, is_batch: true })
       setShowResultDialog(true)
       setSelectedIds([])
@@ -474,6 +527,21 @@ export default function TestCases() {
           <p className="text-gray-600 mt-1">管理和生成测试用例</p>
         </div>
         <div className="flex space-x-3">
+          <select
+            value={selectedEnvironmentId}
+            onChange={(e) => {
+              setSelectedEnvironmentId(e.target.value)
+              localStorage.setItem(EXECUTION_ENV_STORAGE_KEY, e.target.value)
+            }}
+            className="px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm"
+          >
+            <option value="">选择执行环境</option>
+            {environments.map(env => (
+              <option key={env.id} value={env.id}>
+                {env.name} - {env.base_url}
+              </option>
+            ))}
+          </select>
           {selectedIds.length > 0 && (
             <>
               <button
@@ -538,6 +606,11 @@ export default function TestCases() {
               </button>
             ))}
           </div>
+          {hiddenPetStoreSampleCount > 0 && (
+            <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
+              已根据当前执行环境隐藏 {hiddenPetStoreSampleCount} 条 PetStore 示例 Swagger 用例，避免误用蓝点环境执行示例接口。
+            </div>
+          )}
           <input
             type="text"
             value={searchQuery}
@@ -704,13 +777,13 @@ export default function TestCases() {
                 <div className="text-sm text-blue-800">
                   <p className="font-medium mb-1">AI将自动执行以下步骤:</p>
                   <ul className="list-disc list-inside space-y-1 text-xs">
-                    <li>解析需求文档内容</li>
-                    <li>拆分功能模块</li>
-                    <li>生成测试点和场景</li>
-                    <li>生成完整测试用例</li>
-                    <li>自动去重和质量评估</li>
+                    <li>加载项目知识库（接口路由、响应结构、鉴权方式）</li>
+                    <li>解析需求文档，拆分功能模块</li>
+                    <li>结合项目上下文生成测试点和场景</li>
+                    <li>生成完整测试用例（含业务断言 code==200）</li>
+                    <li>覆盖功能 / 边界 / 异常 / 安全测试</li>
                   </ul>
-                  <p className="mt-2 text-xs text-blue-600">⏱️ 预计需要 1-2 分钟</p>
+                  <p className="mt-2 text-xs text-blue-600">⏱️ 预计需要 1-2 分钟（AI模式），知识库已就绪</p>
                 </div>
               </div>
             </div>

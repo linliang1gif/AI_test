@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { apisAPI } from '../services/api'
 import TestDataGenerator from '../components/TestDataGenerator'
 import ApiExecutor from '../components/ApiExecutor'
@@ -62,14 +62,7 @@ function ApiExplorer() {
     }
 
     setLoading(true)
-    const formData = new FormData()
-    formData.append('file', file)
-
-    fetch('/api/swagger/upload', {
-      method: 'POST',
-      body: formData
-    })
-      .then(r => r.json())
+    api.swagger.upload(file)
       .then(data => {
         if (data.success) {
           alert(`成功解析 ${data.count || 0} 个API接口`)
@@ -116,17 +109,11 @@ function ApiExplorer() {
   // 保存执行结果为测试用例
   const handleSaveAsTestCase = async (executionResult, requestData) => {
     try {
-      const response = await fetch('/api/save-api-as-testcase', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          api_info: selectedApi,
-          execution_result: executionResult,
-          request_data: requestData
-        })
+      const result = await api.apis.saveAsTestCase({
+        api_info: selectedApi,
+        execution_result: executionResult,
+        request_data: requestData
       })
-
-      const result = await response.json()
       
       if (result.success) {
         alert(`✅ 测试用例保存成功！\n用例ID: ${result.test_case_id}\n\n可以在"测试用例"页面查看`)
@@ -270,7 +257,7 @@ function ApiExplorer() {
                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
           >
-            🔗 URL导入
+             URL导入
           </button>
           <button
             onClick={() => setUploadMode('file')}
@@ -280,7 +267,7 @@ function ApiExplorer() {
                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
             }`}
           >
-            📁 文件上传
+             文件上传
           </button>
         </div>
 
@@ -317,7 +304,7 @@ function ApiExplorer() {
                 disabled={loading}
               />
               <label htmlFor="swagger-file" className="cursor-pointer">
-                <div className="text-4xl mb-2">📄</div>
+                <div className="text-4xl mb-2"></div>
                 <p className="text-gray-700 font-medium mb-1">
                   点击选择或拖拽文件到此处
                 </p>
@@ -327,7 +314,7 @@ function ApiExplorer() {
               </label>
             </div>
             <div className="text-xs text-gray-500">
-              💡 提示: 支持 Swagger 2.0 和 OpenAPI 3.0 规范
+               提示: 支持 Swagger 2.0 和 OpenAPI 3.0 规范
             </div>
           </div>
         )}
@@ -346,7 +333,7 @@ function ApiExplorer() {
         <div className="divide-y divide-gray-200">
           {apis.length === 0 ? (
             <div className="p-8 text-center text-gray-500">
-              <div className="text-4xl mb-2">📭</div>
+              <div className="text-4xl mb-2"></div>
               <p>暂无API接口</p>
               <p className="text-sm mt-1">请导入Swagger文档</p>
             </div>
@@ -379,7 +366,7 @@ function ApiExplorer() {
                       className="px-3 py-1.5 text-sm bg-purple-50 text-purple-700 hover:bg-purple-100 rounded-lg transition-colors flex items-center space-x-1"
                       title="生成测试数据"
                     >
-                      <span>🏭</span>
+                      <span></span>
                       <span>测试数据</span>
                     </button>
                     <button 
@@ -387,7 +374,7 @@ function ApiExplorer() {
                       className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded"
                       title="执行API测试"
                     >
-                      ▶️
+                      
                     </button>
                     <button 
                       onClick={() => {
@@ -397,7 +384,7 @@ function ApiExplorer() {
                       className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded"
                       title="复制API信息"
                     >
-                      📋
+                      
                     </button>
                   </div>
                 </div>

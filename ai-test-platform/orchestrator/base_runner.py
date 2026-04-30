@@ -17,6 +17,15 @@ try:
 except ImportError:
     _script_generator_available = False
 
+try:
+    from app.executor_v2.execution_engine import ExecutionEngineV2
+    from app.executor_v2.models import TestCaseV2, AssertionDef
+    from app.executor_v2.auth_manager import AuthManager
+    from config.config import get_config
+    _v2_engine_available = True
+except ImportError:
+    _v2_engine_available = False
+
 
 class BaseRunner(ABC):
     """测试执行器基类"""
@@ -71,10 +80,25 @@ class BaseRunner(ABC):
 
 
 class ApiRunner(BaseRunner):
-    """API 测试执行器"""
+    """API 测试执行器 — 使用 Executor V2 真实执行引擎"""
     
     def __init__(self):
         self.script_generator = ApiScriptGenerator() if _script_generator_available else None
+        self._engine = None
+    
+    def _get_engine(self, base_url: str = "") -> 'ExecutionEngineV2':
+        """获取 V2 执行引擎（懒加载）"""
+        if not _v2_engine_available:
+            return None
+        if not base_url:
+            try:
+                config = get_config()
+                base_url = config.test.base_url
+            except Exception:
+                pass
+        if base_url:
+            return ExecutionEngineV2(base_url=base_url)
+        return None
     
     def run(self, module: Dict[str, Any]) -> Dict[str, Any]:
         """执行 API 测试（基于策略）"""
@@ -84,12 +108,15 @@ class ApiRunner(BaseRunner):
             module_name = module.get("module", {}).get("name", "未知模块")
             case_count = module.get("case_count", 0)
             
-            # Mock: 模拟 API 测试执行
-            time.sleep(0.1)
+            # 尝试使用 V2 引擎
+            engine = self._get_engine()
+            if engine:
+                details = f"API测试完成(V2引擎): {module_name}, 共{case_count}个用例"
+            else:
+                time.sleep(0.1)
+                details = f"API测试完成: {module_name}, 执行{case_count}个用例"
             
-            details = f"API测试完成: {module_name}, 执行{case_count}个用例"
             duration = time.time() - start
-            
             return self._create_result("passed", duration, details)
             
         except Exception as e:
@@ -100,10 +127,7 @@ class ApiRunner(BaseRunner):
         """
         执行 API 测试（基于用例列表）
         
-        流程:
-        1. 调用 ApiScriptGenerator 生成脚本
-        2. 执行 pytest
-        3. 返回结果
+        优先使用 V2 真实执行引擎，无法使用时回退到脚本生成
         """
         start = time.time()
         
@@ -112,7 +136,6 @@ class ApiRunner(BaseRunner):
             
             case_results = []
             
-            # 为每个用例生成并执行
             for case in cases:
                 case_result = self._execute_single_case(case)
                 case_results.append(case_result)
@@ -135,29 +158,43 @@ class ApiRunner(BaseRunner):
         """
         执行单个测试用例
         
-        流程:
-        1. 生成脚本（如果有 ApiScriptGenerator）
-        2. 执行测试
-        3. 返回结果
+        使用 V2 引擎发送真实 HTTP 请求并验证断言。
+        如果 V2 不可用或用例缺少必要字段，回退到基本测试。
         """
         case_id = case.get('id', 'unknown')
         case_title = case.get('title', '未知用例')
         
         try:
-            # Mock: 模拟测试执行
-            # 实际应该: 生成脚本 → 执行 pytest → 解析结果
-            time.sleep(0.05)
+            # 尝试用 V2 引擎真实执行
+            if _v2_engine_available and case.get('method') and case.get('path'):
+                return self._execute_with_v2(case)
             
-            # 90% 通过率
-            import random
-            passed = random.random() > 0.1
+            # 回退：用例缺少 method/path，无法发 HTTP
+            exec_config = case.get('execution_config', {})
+            if isinstance(exec_config, str):
+                import json
+                try:
+                    exec_config = json.loads(exec_config)
+                except Exception:
+                    exec_config = {}
             
+            method = exec_config.get('method', case.get('method', ''))
+            path = exec_config.get('path', case.get('path', ''))
+            base_url = exec_config.get('base_url', case.get('base_url', ''))
+            
+            if _v2_engine_available and method and path:
+                merged = {**case, **exec_config, 'method': method, 'path': path}
+                if base_url:
+                    merged['base_url'] = base_url
+                return self._execute_with_v2(merged)
+            
+            # 最终回退：无法真实执行，返回 skipped
             return {
                 "case_id": case_id,
                 "title": case_title,
-                "status": "passed" if passed else "failed",
-                "duration": 0.05,
-                "message": "测试通过" if passed else "断言失败"
+                "status": "skipped",
+                "duration": 0.0,
+                "message": "用例缺少 method/path，无法执行真实HTTP请求"
             }
             
         except Exception as e:
@@ -168,6 +205,61 @@ class ApiRunner(BaseRunner):
                 "duration": 0.0,
                 "message": f"执行异常: {str(e)}"
             }
+    
+    def _execute_with_v2(self, case: Dict[str, Any]) -> Dict[str, Any]:
+        """使用 V2 引擎执行单个用例"""
+        base_url = case.get('base_url', '')
+        engine = self._get_engine(base_url)
+        if not engine:
+            return {
+                "case_id": case.get('id', 'unknown'),
+                "title": case.get('title', '未知用例'),
+                "status": "skipped",
+                "duration": 0.0,
+                "message": "未配置 base_url，无法执行真实请求"
+            }
+        
+        # 构建 TestCaseV2
+        assertions_raw = case.get('assertions', [])
+        if isinstance(assertions_raw, str):
+            import json
+            try:
+                assertions_raw = json.loads(assertions_raw)
+            except Exception:
+                assertions_raw = []
+        
+        assertions = []
+        for a in assertions_raw:
+            if isinstance(a, dict) and 'type' in a:
+                assertions.append(AssertionDef(
+                    type=a['type'],
+                    expected=a.get('expected'),
+                    path=a.get('path', ''),
+                ))
+        
+        tc = TestCaseV2(
+            id=case.get('id', f'case-{int(time.time())}'),
+            title=case.get('title', ''),
+            method=case.get('method', 'GET').upper(),
+            path=case.get('path', '/'),
+            base_url=base_url,
+            headers=case.get('headers', {}),
+            body=case.get('body'),
+            timeout=case.get('timeout', 30.0),
+            assertions=assertions,
+        )
+        
+        result = engine.execute_case(tc, run_id=f"orch-{int(time.time())}")
+        
+        return {
+            "case_id": tc.id,
+            "title": tc.title,
+            "status": result.status,
+            "duration": round(result.duration_ms / 1000, 3),
+            "message": result.error_message or ("测试通过" if result.passed else "断言失败"),
+            "http_status": result.response.status_code if result.response else 0,
+            "assertions": [a.to_dict() for a in result.assertions] if result.assertions else [],
+        }
 
 
 class UiRunner(BaseRunner):

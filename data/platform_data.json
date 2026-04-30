@@ -1,0 +1,1486 @@
+{
+  "projects": [],
+  "apis": [],
+  "test_cases": [
+    {
+      "id": 1,
+      "title": "列表字段支持自定义设置显示字段 - 正常流程",
+      "module": "5. 列表字段支持自定义设置显示字段，原型里是初始化默...",
+      "priority": "high",
+      "status": "passed",
+      "lastRun": "2026-04-16 20:01:18",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-16T18:13:27.229462"
+    },
+    {
+      "id": 2,
+      "title": "列表字段支持自定义设置显示字段 - 参数校验",
+      "module": "5. 列表字段支持自定义设置显示字段，原型里是初始化默...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.231372"
+    },
+    {
+      "id": 3,
+      "title": "列表字段支持自定义设置显示字段 - 权限控制",
+      "module": "5. 列表字段支持自定义设置显示字段，原型里是初始化默...",
+      "priority": "medium",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 使用无权限或低权限账号登录",
+        "2. 尝试访问或操作受限资源",
+        "3. 验证系统拒绝访问",
+        "4. 检查审计日志记录"
+      ],
+      "expected": "系统正确拦截越权操作,返回权限不足提示",
+      "source": "ai_generated",
+      "type": "安全测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.232462"
+    },
+    {
+      "id": 4,
+      "title": "列表字段支持调整字段顺序（直接在列表拖动 - 正常流程",
+      "module": "6. 列表字段支持调整字段顺序（直接在列表拖动，或弹框...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-16T18:13:27.233002"
+    },
+    {
+      "id": 5,
+      "title": "列表字段支持调整字段顺序（直接在列表拖动 - 参数校验",
+      "module": "6. 列表字段支持调整字段顺序（直接在列表拖动，或弹框...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.234096"
+    },
+    {
+      "id": 6,
+      "title": "列表字段支持调整字段顺序（直接在列表拖动 - 权限控制",
+      "module": "6. 列表字段支持调整字段顺序（直接在列表拖动，或弹框...",
+      "priority": "medium",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 使用无权限或低权限账号登录",
+        "2. 尝试访问或操作受限资源",
+        "3. 验证系统拒绝访问",
+        "4. 检查审计日志记录"
+      ],
+      "expected": "系统正确拦截越权操作,返回权限不足提示",
+      "source": "ai_generated",
+      "type": "安全测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.234631"
+    },
+    {
+      "id": 7,
+      "title": "二、单据列表-查询条件： - 正常流程",
+      "module": "二、单据列表-查询条件：",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-16T18:13:27.235168"
+    },
+    {
+      "id": 8,
+      "title": "二、单据列表-查询条件： - 参数校验",
+      "module": "二、单据列表-查询条件：",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.235707"
+    },
+    {
+      "id": 9,
+      "title": "二、单据列表-查询条件： - 权限控制",
+      "module": "二、单据列表-查询条件：",
+      "priority": "medium",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 使用无权限或低权限账号登录",
+        "2. 尝试访问或操作受限资源",
+        "3. 验证系统拒绝访问",
+        "4. 检查审计日志记录"
+      ],
+      "expected": "系统正确拦截越权操作,返回权限不足提示",
+      "source": "ai_generated",
+      "type": "安全测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.236244"
+    },
+    {
+      "id": 10,
+      "title": "原型为默认可查询字段 - 正常流程",
+      "module": "1.  原型为默认可查询字段，支持用户条件更多查询字段...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-16T18:13:27.236780"
+    },
+    {
+      "id": 11,
+      "title": "原型为默认可查询字段 - 参数校验",
+      "module": "1.  原型为默认可查询字段，支持用户条件更多查询字段...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.237906"
+    },
+    {
+      "id": 12,
+      "title": "切换页签、刷新页面 - 正常流程",
+      "module": "2. 切换页签、刷新页面，均保留输入的查询内容",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-16T18:13:27.238439"
+    },
+    {
+      "id": 13,
+      "title": "切换页签、刷新页面 - 参数校验",
+      "module": "2. 切换页签、刷新页面，均保留输入的查询内容",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.239573"
+    },
+    {
+      "id": 14,
+      "title": "新建单据时 - 正常流程",
+      "module": "1.  新建单据时，默认带出一行空白行，支持用户在分录...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-16T18:13:27.240652"
+    },
+    {
+      "id": 15,
+      "title": "新建单据时 - 参数校验",
+      "module": "1.  新建单据时，默认带出一行空白行，支持用户在分录...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.241271"
+    },
+    {
+      "id": 1,
+      "title": "列表字段支持自定义设置显示字段 - 正常流程",
+      "module": "5. 列表字段支持自定义设置显示字段，原型里是初始化默...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-16T18:13:27.229462"
+    },
+    {
+      "id": 2,
+      "title": "列表字段支持自定义设置显示字段 - 参数校验",
+      "module": "5. 列表字段支持自定义设置显示字段，原型里是初始化默...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.231372"
+    },
+    {
+      "id": 3,
+      "title": "列表字段支持自定义设置显示字段 - 权限控制",
+      "module": "5. 列表字段支持自定义设置显示字段，原型里是初始化默...",
+      "priority": "medium",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 使用无权限或低权限账号登录",
+        "2. 尝试访问或操作受限资源",
+        "3. 验证系统拒绝访问",
+        "4. 检查审计日志记录"
+      ],
+      "expected": "系统正确拦截越权操作,返回权限不足提示",
+      "source": "ai_generated",
+      "type": "安全测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.232462"
+    },
+    {
+      "id": 4,
+      "title": "列表字段支持调整字段顺序（直接在列表拖动 - 正常流程",
+      "module": "6. 列表字段支持调整字段顺序（直接在列表拖动，或弹框...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-16T18:13:27.233002"
+    },
+    {
+      "id": 5,
+      "title": "列表字段支持调整字段顺序（直接在列表拖动 - 参数校验",
+      "module": "6. 列表字段支持调整字段顺序（直接在列表拖动，或弹框...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.234096"
+    },
+    {
+      "id": 6,
+      "title": "列表字段支持调整字段顺序（直接在列表拖动 - 权限控制",
+      "module": "6. 列表字段支持调整字段顺序（直接在列表拖动，或弹框...",
+      "priority": "medium",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 使用无权限或低权限账号登录",
+        "2. 尝试访问或操作受限资源",
+        "3. 验证系统拒绝访问",
+        "4. 检查审计日志记录"
+      ],
+      "expected": "系统正确拦截越权操作,返回权限不足提示",
+      "source": "ai_generated",
+      "type": "安全测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.234631"
+    },
+    {
+      "id": 7,
+      "title": "二、单据列表-查询条件： - 正常流程",
+      "module": "二、单据列表-查询条件：",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-16T18:13:27.235168"
+    },
+    {
+      "id": 8,
+      "title": "二、单据列表-查询条件： - 参数校验",
+      "module": "二、单据列表-查询条件：",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.235707"
+    },
+    {
+      "id": 9,
+      "title": "二、单据列表-查询条件： - 权限控制",
+      "module": "二、单据列表-查询条件：",
+      "priority": "medium",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 使用无权限或低权限账号登录",
+        "2. 尝试访问或操作受限资源",
+        "3. 验证系统拒绝访问",
+        "4. 检查审计日志记录"
+      ],
+      "expected": "系统正确拦截越权操作,返回权限不足提示",
+      "source": "ai_generated",
+      "type": "安全测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.236244"
+    },
+    {
+      "id": 10,
+      "title": "原型为默认可查询字段 - 正常流程",
+      "module": "1.  原型为默认可查询字段，支持用户条件更多查询字段...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-16T18:13:27.236780"
+    },
+    {
+      "id": 11,
+      "title": "原型为默认可查询字段 - 参数校验",
+      "module": "1.  原型为默认可查询字段，支持用户条件更多查询字段...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.237906"
+    },
+    {
+      "id": 12,
+      "title": "切换页签、刷新页面 - 正常流程",
+      "module": "2. 切换页签、刷新页面，均保留输入的查询内容",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-16T18:13:27.238439"
+    },
+    {
+      "id": 13,
+      "title": "切换页签、刷新页面 - 参数校验",
+      "module": "2. 切换页签、刷新页面，均保留输入的查询内容",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.239573"
+    },
+    {
+      "id": 14,
+      "title": "新建单据时 - 正常流程",
+      "module": "1.  新建单据时，默认带出一行空白行，支持用户在分录...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-16T18:13:27.240652"
+    },
+    {
+      "id": 15,
+      "title": "新建单据时 - 参数校验",
+      "module": "1.  新建单据时，默认带出一行空白行，支持用户在分录...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-16T18:13:27.241271"
+    },
+    {
+      "id": 31,
+      "created_at": "2026-04-16T19:54:04.256825",
+      "title": "用户登录功能测试",
+      "module": "用户认证",
+      "priority": "high",
+      "status": "passed",
+      "type": "API测试",
+      "steps": [
+        "发送POST请求到 /api/auth/login",
+        "传入用户名和密码",
+        "验证返回token"
+      ],
+      "expected": "返回状态码200，包含token",
+      "data_type": "valid",
+      "expected_behavior": "success"
+    },
+    {
+      "id": 31,
+      "created_at": "2026-04-16T19:54:04.256825",
+      "title": "用户登录功能测试",
+      "module": "用户认证",
+      "priority": "high",
+      "status": "passed",
+      "type": "API测试",
+      "steps": [
+        "发送POST请求到 /api/auth/login",
+        "传入用户名和密码",
+        "验证返回token"
+      ],
+      "expected": "返回状态码200，包含token",
+      "data_type": "valid",
+      "expected_behavior": "success"
+    },
+    {
+      "id": 33,
+      "created_at": "2026-04-16T19:54:07.160268",
+      "title": "获取用户信息测试",
+      "module": "用户管理",
+      "priority": "medium",
+      "status": "passed",
+      "type": "API测试",
+      "steps": [
+        "发送GET请求到 /api/user/info",
+        "携带认证token",
+        "验证返回用户信息"
+      ],
+      "expected": "返回状态码200，包含用户信息",
+      "data_type": "valid",
+      "expected_behavior": "success"
+    },
+    {
+      "id": 33,
+      "created_at": "2026-04-16T19:54:07.160268",
+      "title": "获取用户信息测试",
+      "module": "用户管理",
+      "priority": "medium",
+      "status": "passed",
+      "type": "API测试",
+      "steps": [
+        "发送GET请求到 /api/user/info",
+        "携带认证token",
+        "验证返回用户信息"
+      ],
+      "expected": "返回状态码200，包含用户信息",
+      "data_type": "valid",
+      "expected_behavior": "success"
+    },
+    {
+      "id": 35,
+      "created_at": "2026-04-16T19:54:10.064699",
+      "title": "创建订单测试",
+      "module": "订单管理",
+      "priority": "high",
+      "status": "passed",
+      "type": "API测试",
+      "steps": [
+        "发送POST请求到 /api/orders",
+        "传入订单信息",
+        "验证订单创建成功"
+      ],
+      "expected": "返回状态码201，包含订单ID",
+      "data_type": "valid",
+      "expected_behavior": "success"
+    },
+    {
+      "id": 35,
+      "created_at": "2026-04-16T19:54:10.064699",
+      "title": "创建订单测试",
+      "module": "订单管理",
+      "priority": "high",
+      "status": "passed",
+      "type": "API测试",
+      "steps": [
+        "发送POST请求到 /api/orders",
+        "传入订单信息",
+        "验证订单创建成功"
+      ],
+      "expected": "返回状态码201，包含订单ID",
+      "data_type": "valid",
+      "expected_behavior": "success"
+    },
+    {
+      "id": "TC_1776405896_36",
+      "title": "API测试 - None None",
+      "module": "default",
+      "priority": "medium",
+      "status": "failed",
+      "lastRun": "2026-04-16 20:04:56",
+      "steps": [
+        "发送 None 请求到 None",
+        "请求参数: {}"
+      ],
+      "expected": "返回状态码 None",
+      "source": "api_execution",
+      "type": "API测试",
+      "data_type": "valid",
+      "expected_behavior": "client_error",
+      "execution_config": {
+        "method": null,
+        "url": null,
+        "data": {},
+        "timeout": 30
+      },
+      "execution_result": {
+        "status_code": null,
+        "response_time": null,
+        "response_data": null
+      }
+    },
+    {
+      "id": 38,
+      "created_at": "2026-04-16T20:04:57.648842",
+      "title": "测试用例 38"
+    },
+    {
+      "id": 38,
+      "created_at": "2026-04-16T20:04:57.648842",
+      "title": "测试用例 38"
+    },
+    {
+      "id": "TC_1776406859_39",
+      "title": "测试API - GET /posts/1",
+      "module": "测试",
+      "priority": "medium",
+      "status": "passed",
+      "lastRun": "2026-04-16 20:20:59",
+      "steps": [
+        "发送 GET 请求到 /posts/1",
+        "请求参数: {}"
+      ],
+      "expected": "返回状态码 200",
+      "source": "api_execution",
+      "type": "API测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "execution_config": {
+        "method": "GET",
+        "url": "/posts/1",
+        "data": {},
+        "timeout": 30
+      },
+      "execution_result": {
+        "status_code": 200,
+        "response_time": 608,
+        "response_data": {
+          "userId": 1,
+          "id": 1,
+          "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+          "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
+        }
+      }
+    },
+    {
+      "id": "TC_1776407356_40",
+      "title": "测试API - GET /posts/1",
+      "module": "测试",
+      "priority": "medium",
+      "status": "passed",
+      "lastRun": "2026-04-16 20:29:16",
+      "steps": [
+        "发送 GET 请求到 /posts/1",
+        "请求参数: {}"
+      ],
+      "expected": "返回状态码 200",
+      "source": "api_execution",
+      "type": "API测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "execution_config": {
+        "method": "GET",
+        "url": "/posts/1",
+        "data": {},
+        "timeout": 30
+      },
+      "execution_result": {
+        "status_code": 200,
+        "response_time": 1316,
+        "response_data": {
+          "userId": 1,
+          "id": 1,
+          "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+          "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
+        }
+      }
+    },
+    {
+      "id": "TC_1776407565_41",
+      "title": "获取文章详情 - GET /posts/1",
+      "module": "测试",
+      "priority": "medium",
+      "status": "passed",
+      "lastRun": "2026-04-16 20:32:45",
+      "steps": [
+        "发送 GET 请求到 /posts/1",
+        "请求参数: {}"
+      ],
+      "expected": "返回状态码 200",
+      "source": "api_execution",
+      "type": "API测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "execution_config": {
+        "method": "GET",
+        "url": "/posts/1",
+        "data": {},
+        "timeout": 30
+      },
+      "execution_result": {
+        "status_code": 200,
+        "response_time": 1269,
+        "response_data": {
+          "userId": 1,
+          "id": 1,
+          "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+          "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
+        }
+      }
+    },
+    {
+      "id": "TC_1776407655_42",
+      "title": "获取文章详情 - GET /posts/1",
+      "module": "测试",
+      "priority": "medium",
+      "status": "passed",
+      "lastRun": "2026-04-16 20:34:19",
+      "steps": [
+        "发送 GET 请求到 /posts/1",
+        "请求参数: {}"
+      ],
+      "expected": "返回状态码 200",
+      "source": "api_execution",
+      "type": "API测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "execution_config": {
+        "method": "GET",
+        "url": "/posts/1",
+        "data": {},
+        "timeout": 30
+      },
+      "execution_result": {
+        "status_code": 200,
+        "response_time": 296,
+        "response_data": {
+          "userId": 1,
+          "id": 1,
+          "title": "sunt aut facere repellat provident occaecati excepturi optio reprehenderit",
+          "body": "quia et suscipit\nsuscipit recusandae consequuntur expedita et cum\nreprehenderit molestiae ut ut quas totam\nnostrum rerum est autem sunt rem eveniet architecto"
+        }
+      }
+    },
+    {
+      "id": "TC_1776479357_0",
+      "title": "付款单新增“不含税应付金额、个税税额、 平台服务... - 正常流程",
+      "module": "【【付款单】新增“不含税应付金额、个税税额、 平台服务...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-18T10:29:17.052643"
+    },
+    {
+      "id": "TC_1776479357_1",
+      "title": "付款单新增“不含税应付金额、个税税额、 平台服务... - 参数校验",
+      "module": "【【付款单】新增“不含税应付金额、个税税额、 平台服务...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.070649"
+    },
+    {
+      "id": "TC_1776479357_2",
+      "title": "付款单新增“不含税应付金额、个税税额、 平台服务... - 权限控制",
+      "module": "【【付款单】新增“不含税应付金额、个税税额、 平台服务...",
+      "priority": "medium",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 使用无权限或低权限账号登录",
+        "2. 尝试访问或操作受限资源",
+        "3. 验证系统拒绝访问",
+        "4. 检查审计日志记录"
+      ],
+      "expected": "系统正确拦截越权操作,返回权限不足提示",
+      "source": "ai_generated",
+      "type": "安全测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.071647"
+    },
+    {
+      "id": "TC_1776479357_3",
+      "title": "一、新增字段 - 正常流程",
+      "module": "一、新增字段",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-18T10:29:17.072650"
+    },
+    {
+      "id": "TC_1776479357_4",
+      "title": "一、新增字段 - 参数校验",
+      "module": "一、新增字段",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.073644"
+    },
+    {
+      "id": "TC_1776479357_5",
+      "title": "一、新增字段 - 权限控制",
+      "module": "一、新增字段",
+      "priority": "medium",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 使用无权限或低权限账号登录",
+        "2. 尝试访问或操作受限资源",
+        "3. 验证系统拒绝访问",
+        "4. 检查审计日志记录"
+      ],
+      "expected": "系统正确拦截越权操作,返回权限不足提示",
+      "source": "ai_generated",
+      "type": "安全测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.073644"
+    },
+    {
+      "id": "TC_1776479357_6",
+      "title": "付款单新增“不含税应付金额、个税承担方、个税税额、... - 正常流程",
+      "module": "1、付款单新增“不含税应付金额、个税承担方、个税税额、...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-18T10:29:17.074646"
+    },
+    {
+      "id": "TC_1776479357_7",
+      "title": "付款单新增“不含税应付金额、个税承担方、个税税额、... - 参数校验",
+      "module": "1、付款单新增“不含税应付金额、个税承担方、个税税额、...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.075663"
+    },
+    {
+      "id": "TC_1776479357_8",
+      "title": "付款单新增“不含税应付金额、个税承担方、个税税额、... - 权限控制",
+      "module": "1、付款单新增“不含税应付金额、个税承担方、个税税额、...",
+      "priority": "medium",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 使用无权限或低权限账号登录",
+        "2. 尝试访问或操作受限资源",
+        "3. 验证系统拒绝访问",
+        "4. 检查审计日志记录"
+      ],
+      "expected": "系统正确拦截越权操作,返回权限不足提示",
+      "source": "ai_generated",
+      "type": "安全测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.076648"
+    },
+    {
+      "id": "TC_1776479357_9",
+      "title": "导出、导入、设置显示字段同步新增（不含税应付金额为... - 正常流程",
+      "module": "2、导出、导入、设置显示字段同步新增（不含税应付金额为...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-18T10:29:17.077653"
+    },
+    {
+      "id": "TC_1776479357_10",
+      "title": "导出、导入、设置显示字段同步新增（不含税应付金额为... - 参数校验",
+      "module": "2、导出、导入、设置显示字段同步新增（不含税应付金额为...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.077653"
+    },
+    {
+      "id": "TC_1776479357_11",
+      "title": "付款单新增“付款信息确认”弹框 - 正常流程",
+      "module": "2、付款单新增“付款信息确认”弹框，点击“支付”跳出该...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-18T10:29:17.078647"
+    },
+    {
+      "id": "TC_1776479357_12",
+      "title": "付款单新增“付款信息确认”弹框 - 参数校验",
+      "module": "2、付款单新增“付款信息确认”弹框，点击“支付”跳出该...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.079646"
+    },
+    {
+      "id": "TC_1776479357_13",
+      "title": "分录含“明细”的字段 - 正常流程",
+      "module": "3、分录含“明细”的字段，将“明细”二字删除，字段过滤...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-18T10:29:17.080644"
+    },
+    {
+      "id": "TC_1776479357_14",
+      "title": "分录含“明细”的字段 - 参数校验",
+      "module": "3、分录含“明细”的字段，将“明细”二字删除，字段过滤...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.081647"
+    },
+    {
+      "id": "TC_1776479357_0",
+      "title": "付款单新增“不含税应付金额、个税税额、 平台服务... - 正常流程",
+      "module": "【【付款单】新增“不含税应付金额、个税税额、 平台服务...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-18T10:29:17.052643"
+    },
+    {
+      "id": "TC_1776479357_1",
+      "title": "付款单新增“不含税应付金额、个税税额、 平台服务... - 参数校验",
+      "module": "【【付款单】新增“不含税应付金额、个税税额、 平台服务...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.070649"
+    },
+    {
+      "id": "TC_1776479357_2",
+      "title": "付款单新增“不含税应付金额、个税税额、 平台服务... - 权限控制",
+      "module": "【【付款单】新增“不含税应付金额、个税税额、 平台服务...",
+      "priority": "medium",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 使用无权限或低权限账号登录",
+        "2. 尝试访问或操作受限资源",
+        "3. 验证系统拒绝访问",
+        "4. 检查审计日志记录"
+      ],
+      "expected": "系统正确拦截越权操作,返回权限不足提示",
+      "source": "ai_generated",
+      "type": "安全测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.071647"
+    },
+    {
+      "id": "TC_1776479357_3",
+      "title": "一、新增字段 - 正常流程",
+      "module": "一、新增字段",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-18T10:29:17.072650"
+    },
+    {
+      "id": "TC_1776479357_4",
+      "title": "一、新增字段 - 参数校验",
+      "module": "一、新增字段",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.073644"
+    },
+    {
+      "id": "TC_1776479357_5",
+      "title": "一、新增字段 - 权限控制",
+      "module": "一、新增字段",
+      "priority": "medium",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 使用无权限或低权限账号登录",
+        "2. 尝试访问或操作受限资源",
+        "3. 验证系统拒绝访问",
+        "4. 检查审计日志记录"
+      ],
+      "expected": "系统正确拦截越权操作,返回权限不足提示",
+      "source": "ai_generated",
+      "type": "安全测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.073644"
+    },
+    {
+      "id": "TC_1776479357_6",
+      "title": "付款单新增“不含税应付金额、个税承担方、个税税额、... - 正常流程",
+      "module": "1、付款单新增“不含税应付金额、个税承担方、个税税额、...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-18T10:29:17.074646"
+    },
+    {
+      "id": "TC_1776479357_7",
+      "title": "付款单新增“不含税应付金额、个税承担方、个税税额、... - 参数校验",
+      "module": "1、付款单新增“不含税应付金额、个税承担方、个税税额、...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.075663"
+    },
+    {
+      "id": "TC_1776479357_8",
+      "title": "付款单新增“不含税应付金额、个税承担方、个税税额、... - 权限控制",
+      "module": "1、付款单新增“不含税应付金额、个税承担方、个税税额、...",
+      "priority": "medium",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 使用无权限或低权限账号登录",
+        "2. 尝试访问或操作受限资源",
+        "3. 验证系统拒绝访问",
+        "4. 检查审计日志记录"
+      ],
+      "expected": "系统正确拦截越权操作,返回权限不足提示",
+      "source": "ai_generated",
+      "type": "安全测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.076648"
+    },
+    {
+      "id": "TC_1776479357_9",
+      "title": "导出、导入、设置显示字段同步新增（不含税应付金额为... - 正常流程",
+      "module": "2、导出、导入、设置显示字段同步新增（不含税应付金额为...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-18T10:29:17.077653"
+    },
+    {
+      "id": "TC_1776479357_10",
+      "title": "导出、导入、设置显示字段同步新增（不含税应付金额为... - 参数校验",
+      "module": "2、导出、导入、设置显示字段同步新增（不含税应付金额为...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.077653"
+    },
+    {
+      "id": "TC_1776479357_11",
+      "title": "付款单新增“付款信息确认”弹框 - 正常流程",
+      "module": "2、付款单新增“付款信息确认”弹框，点击“支付”跳出该...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-18T10:29:17.078647"
+    },
+    {
+      "id": "TC_1776479357_12",
+      "title": "付款单新增“付款信息确认”弹框 - 参数校验",
+      "module": "2、付款单新增“付款信息确认”弹框，点击“支付”跳出该...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.079646"
+    },
+    {
+      "id": "TC_1776479357_13",
+      "title": "分录含“明细”的字段 - 正常流程",
+      "module": "3、分录含“明细”的字段，将“明细”二字删除，字段过滤...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备符合规范的测试数据",
+        "2. 按照正常业务流程执行操作",
+        "3. 验证操作结果符合预期",
+        "4. 检查相关数据状态正确更新"
+      ],
+      "expected": "操作成功完成,数据正确保存,系统状态正常",
+      "source": "ai_generated",
+      "type": "功能测试",
+      "data_type": "valid",
+      "expected_behavior": "success",
+      "created_at": "2026-04-18T10:29:17.080644"
+    },
+    {
+      "id": "TC_1776479357_14",
+      "title": "分录含“明细”的字段 - 参数校验",
+      "module": "3、分录含“明细”的字段，将“明细”二字删除，字段过滤...",
+      "priority": "high",
+      "status": "pending",
+      "lastRun": "未运行",
+      "steps": [
+        "1. 准备包含非法参数的测试数据(空值/超长/特殊字符)",
+        "2. 尝试执行操作",
+        "3. 验证系统返回明确的参数错误提示",
+        "4. 确认数据未被错误修改"
+      ],
+      "expected": "系统正确拦截非法参数,返回友好错误提示,数据保持一致性",
+      "source": "ai_generated",
+      "type": "异常测试",
+      "data_type": "invalid",
+      "expected_behavior": "client_error",
+      "created_at": "2026-04-18T10:29:17.081647"
+    }
+  ],
+  "test_runs": [],
+  "reports": [],
+  "scripts": [],
+  "metadata": {
+    "created_at": "2026-04-18T13:21:10.375459",
+    "version": "1.0.0",
+    "updated_at": "2026-04-18T13:23:52.927342"
+  }
+}

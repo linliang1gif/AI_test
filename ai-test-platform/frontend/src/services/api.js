@@ -36,7 +36,16 @@ async function request(url, config = {}) {
       throw new Error(`API调用失败: ${response.status} ${errorText}`)
     }
     
-    return await response.json()
+    if (response.status === 204) {
+      return null
+    }
+
+    const responseText = await response.text()
+    if (!responseText) {
+      return null
+    }
+
+    return JSON.parse(responseText)
   } catch (error) {
     // 404错误静默处理,不在控制台重复输出
     if (!error.message.startsWith('404')) {

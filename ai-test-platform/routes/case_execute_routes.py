@@ -9,6 +9,7 @@ POST /api/v2/test-cases/{case_id}/execute
 import uuid
 import time
 import json
+import base64
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -22,13 +23,15 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database.session import get_db
 from database.models import TestCase, TestRun, RunCase, Environment
+from services.auth_service import AuthService
 from services.variable_resolver import (
     resolve_variables, extract_variables, has_unresolved_variables,
     sanitize_sensitive_data,
 )
 from app.executor_v2.execution_engine import ExecutionEngineV2
+from app.executor_v2.auth_manager import AuthManager
 from app.executor_v2.models import (
-    AssertionDef, AssertionType, TestCaseV2, ExecutionResult, ExecutionStatus,
+    AssertionDef, AssertionResult, AssertionType, TestCaseV2, ExecutionResult, ExecutionStatus,
 )
 
 router = APIRouter(prefix="/api/v2/test-cases", tags=["TestCase-Execute"])
@@ -59,6 +62,7 @@ class ExecuteResponse(BaseModel):
 
 class BatchExecuteRequest(ExecuteRequest):
     case_ids: List[str] = Field(..., description="测试用例ID列表")
+    allow_write_operations: bool = Field(True, description="是否允许执行写操作接口（Dev环境默认允许）")
 
 
 class BatchExecuteResponse(BaseModel):
@@ -73,6 +77,49 @@ class BatchExecuteResponse(BaseModel):
     error_cases: int = 0
     duration_ms: float = 0
     results: List[dict] = []
+
+
+def _extract_module_prefix(url_path: str) -> str:
+    """
+    从 URL 路径提取模块前缀。
+    例如: /basic/basicWarehouseInfo/list → /basic/basicWarehouseInfo
+          /basic/basicCurrency/page → /basic/basicCurrency
+    """
+    import re
+    # 去掉末尾的操作后缀
+    cleaned = re.sub(r'/(page|list|detail|get|info|query|save|add|create|insert|update|edit|modify|delete|remove)$', '', url_path, flags=re.I)
+    return cleaned
+
+
+def _extract_uuid_from_response(body: dict) -> str:
+    """
+    从 list/page 接口响应中提取第一条数据的 uuid。
+    支持格式:
+      - {"code":200, "data": [{"uuid":"..."}, ...]}           (list)
+      - {"code":200, "data": {"list": [{"uuid":"..."}, ...]}} (page)
+    """
+    if body.get("code") not in (200, "200", 0, "0"):
+        return ""
+    data = body.get("data")
+    if isinstance(data, dict):
+        items = data.get("list") or data.get("records") or data.get("rows") or []
+    elif isinstance(data, list):
+        items = data
+    else:
+        return ""
+    if items and isinstance(items, list) and len(items) > 0:
+        first = items[0]
+        if isinstance(first, dict):
+            return str(first.get("uuid") or first.get("id") or first.get("ID") or "")
+    return ""
+
+
+def _detect_write_api(method: str, url: str) -> bool:
+    method = (method or "").upper()
+    url = (url or "").lower()
+    if method in {"PUT", "PATCH", "DELETE"}:
+        return True
+    return any(key in url for key in ["/modify", "/update", "/save", "/add", "/create", "/delete", "/remove", "/import"])
 
 
 # ---------- 路由 ----------
@@ -108,16 +155,42 @@ async def batch_execute_test_cases(
             detail="未配置测试环境地址。请在请求中传入 base_url 或先在项目中创建环境。"
         )
 
+    auth_context = _prepare_environment_auth(db, env_id)
     cases = db.query(TestCase).filter(TestCase.id.in_(req.case_ids)).all()
     found_ids = {tc.id for tc in cases}
     missing_ids = [cid for cid in req.case_ids if cid not in found_ids]
     if not cases:
         raise HTTPException(status_code=404, detail="未找到可执行的测试用例")
 
+    skipped_write_cases = []
+    if not req.allow_write_operations:
+        safe_cases = []
+        for tc in cases:
+            exec_config = tc.execution_config or {}
+            if _detect_write_api(exec_config.get("method"), exec_config.get("url")):
+                skipped_write_cases.append(tc.id)
+            else:
+                safe_cases.append(tc)
+        cases = safe_cases
+        if not cases:
+            raise HTTPException(status_code=400, detail=f"所选用例均为写操作接口，已阻止执行: {', '.join(skipped_write_cases)}")
+
+    # ---- 智能排序：查询类先执行，写操作类后执行 ----
+    _PATTERN_ORDER = {"page": 0, "list": 1, "detail": 2, "other": 3, "save": 4, "update": 5, "delete": 6}
+    def _sort_key(tc):
+        cfg = tc.execution_config or {}
+        p = _detect_api_pattern_from_url(cfg.get("url", ""))
+        return _PATTERN_ORDER.get(p, 3)
+    cases.sort(key=_sort_key)
+
+    # uuid_pool: 按模块前缀存储从 list/page 接口提取的真实 uuid
+    # key = 模块前缀 (如 "/basic/basicWarehouse"), value = uuid
+    uuid_pool: Dict[str, str] = {}
+
     run_id = f"RUN_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
     trace_id = f"TRACE_{uuid.uuid4().hex}"
     start_time = datetime.now()
-    engine = ExecutionEngineV2(base_url=base_url)
+    engine = ExecutionEngineV2(base_url=base_url, auth_env_key=auth_context["env_key"])
     results = []
     counters = {"passed": 0, "failed": 0, "no_assertion": 0, "error": 0}
 
@@ -129,12 +202,24 @@ async def batch_execute_test_cases(
         status='running',
         trace_id=trace_id,
         start_time=start_time,
-        total_cases=len(cases),
+        total_cases=len(cases) + len(skipped_write_cases),
         passed_cases=0,
         failed_cases=0,
     )
     db.add(test_run)
     db.flush()
+
+    for skipped_case_id in skipped_write_cases:
+        db.add(RunCase(
+            run_id=run_id,
+            test_case_id=skipped_case_id,
+            status="skipped",
+            start_time=start_time,
+            end_time=start_time,
+            duration=0,
+            error_message="写操作接口默认阻止执行",
+            assertion_details=[],
+        ))
 
     variables = req.variables or (_load_dataset_variables(req.dataset_id, db) if req.dataset_id else {})
 
@@ -155,10 +240,22 @@ async def batch_execute_test_cases(
 
             method = exec_config.get('method', 'GET').upper()
             url_path = exec_config.get('url', '/')
-            headers = exec_config.get('headers', {})
+            headers = _merge_headers(auth_context["default_headers"], exec_config.get('headers', {}))
             query_params = exec_config.get('query_params', {})
             body = exec_config.get('body')
+            if isinstance(body, dict):
+                body = body.copy()
             timeout = exec_config.get('timeout', 30)
+
+            cur_pattern = _detect_api_pattern_from_url(url_path)
+
+            # ---- 数据关联：为写操作/详情接口注入真实 uuid ----
+            if cur_pattern in ("update", "delete", "detail") and isinstance(body, dict):
+                module_prefix = _extract_module_prefix(url_path)
+                real_uuid = uuid_pool.get(module_prefix)
+                if real_uuid:
+                    if "uuid" in body or not body:
+                        body["uuid"] = real_uuid
 
             if variables:
                 url_path, m1 = resolve_variables(url_path, variables)
@@ -186,6 +283,7 @@ async def batch_execute_test_cases(
             )
 
             result = engine.execute_case(case_v2, run_id=run_id)
+            _apply_business_code_assertion(result, url_path=url_path)
             final_status = result.status
             if not has_assertions and result.status == ExecutionStatus.PASSED.value:
                 final_status = "no_assertion"
@@ -196,7 +294,14 @@ async def batch_execute_test_cases(
             assertion_detail_list = [a.to_dict() for a in result.assertions] if result.assertions else []
             assertion_summary = result.assertion_summary if result.assertions else assertion_summary
 
-            req_snapshot = {
+            # ---- 数据关联：从 list/page 响应提取 uuid 存入池 ----
+            if cur_pattern in ("page", "list") and result.response and isinstance(result.response.body, dict):
+                module_prefix = _extract_module_prefix(url_path)
+                extracted = _extract_uuid_from_response(result.response.body)
+                if extracted and module_prefix:
+                    uuid_pool[module_prefix] = extracted
+
+            req_snapshot = result.request.to_dict() if result.request else {
                 "method": method,
                 "url": f"{base_url.rstrip('/')}/{url_path.lstrip('/')}",
                 "headers": sanitize_sensitive_data(headers) if isinstance(headers, dict) else {},
@@ -253,11 +358,13 @@ async def batch_execute_test_cases(
     test_run.status = overall_status
     test_run.end_time = end_time
     test_run.duration = total_duration
-    test_run.total_cases = len(cases)
+    test_run.total_cases = len(cases) + len(skipped_write_cases)
     test_run.passed_cases = counters["passed"]
     test_run.failed_cases = counters["failed"] + counters["error"]
+    test_run.skipped_cases = len(skipped_write_cases)
     test_run.summary = json.dumps({
         "missing_case_ids": missing_ids,
+        "skipped_write_case_ids": skipped_write_cases,
         "no_assertion_cases": counters["no_assertion"],
         "error_cases": counters["error"],
     }, ensure_ascii=False)
@@ -272,8 +379,8 @@ async def batch_execute_test_cases(
         success=overall_status in ("passed", "no_assertion"),
         run_id=run_id,
         status=overall_status,
-        message=f"批量执行完成：通过 {counters['passed']}，失败 {counters['failed']}，无断言 {counters['no_assertion']}，错误 {counters['error']}",
-        total_cases=len(cases),
+        message=f"批量执行完成：通过 {counters['passed']}，失败 {counters['failed']}，无断言 {counters['no_assertion']}，错误 {counters['error']}，跳过写操作 {len(skipped_write_cases)}",
+        total_cases=len(cases) + len(skipped_write_cases),
         passed_cases=counters["passed"],
         failed_cases=counters["failed"],
         no_assertion_cases=counters["no_assertion"],
@@ -327,11 +434,12 @@ async def execute_test_case(
             status_code=400,
             detail="未配置测试环境地址。请在请求中传入 base_url 或先在项目中创建环境。"
         )
+    auth_context = _prepare_environment_auth(db, env_id)
 
     # 3. 准备请求数据
     method = exec_config.get('method', 'GET').upper()
     url_path = exec_config.get('url', '/')
-    headers = exec_config.get('headers', {})
+    headers = _merge_headers(auth_context["default_headers"], exec_config.get('headers', {}))
     query_params = exec_config.get('query_params', {})
     body = exec_config.get('body')
     timeout = exec_config.get('timeout', 30)
@@ -386,9 +494,10 @@ async def execute_test_case(
     )
 
     try:
-        engine = ExecutionEngineV2(base_url=base_url)
+        engine = ExecutionEngineV2(base_url=base_url, auth_env_key=auth_context["env_key"])
         run_id = f"RUN_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
         result = engine.execute_case(case_v2, run_id=run_id)
+        _apply_business_code_assertion(result, url_path=url_path)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"执行引擎异常: {str(e)}")
 
@@ -417,7 +526,7 @@ async def execute_test_case(
         db.add(test_run)
 
         # 构建快照（脱敏）
-        req_snapshot = {
+        req_snapshot = result.request.to_dict() if result.request else {
             "method": method,
             "url": f"{base_url.rstrip('/')}/{url_path.lstrip('/')}",
             "headers": sanitize_sensitive_data(headers) if isinstance(headers, dict) else {},
@@ -540,6 +649,151 @@ def _json_safe(value):
     return json.loads(json.dumps(value, ensure_ascii=False, default=str))
 
 
+def _merge_headers(default_headers: Optional[Dict[str, str]], case_headers: Any) -> Dict[str, str]:
+    headers = {}
+    if isinstance(default_headers, dict):
+        headers.update(default_headers)
+    if isinstance(case_headers, dict):
+        headers.update(case_headers)
+    return headers
+
+
+def _prepare_environment_auth(db: Session, env_id: Optional[int]) -> Dict[str, Any]:
+    env_key = f"env_{env_id}" if env_id else "default"
+    context = {"env_key": env_key, "default_headers": {}}
+    if not env_id:
+        return context
+
+    try:
+        service = AuthService(db)
+        auth_profile = service.get_by_environment(env_id)
+        if not auth_profile:
+            AuthManager.clear_token(env_key)
+            return context
+
+        context["default_headers"] = auth_profile.default_headers or {}
+        auth_config = service.get_decrypted_config(auth_profile) or {}
+        if isinstance(auth_config, str):
+            auth_config = json.loads(auth_config)
+        auth_type = auth_profile.auth_type
+
+        if auth_type == "none":
+            AuthManager.clear_token(env_key)
+        elif auth_type == "bearer":
+            token = auth_config.get("token", "")
+            if token:
+                AuthManager.set_token(token=token, auth_type="bearer", env_key=env_key)
+        elif auth_type == "basic":
+            username = auth_config.get("username", "")
+            password = auth_config.get("password", "")
+            if username or password:
+                token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("utf-8")
+                AuthManager.set_token(token=token, auth_type="basic", env_key=env_key)
+        elif auth_type == "oauth2":
+            # 自动获取 OAuth2 Token（带缓存和自动刷新）
+            from app.executor_v2.oauth2_token_fetcher import fetch_oauth2_token
+            try:
+                access_token, token_type = fetch_oauth2_token(auth_config, env_key=env_key)
+                AuthManager.set_token(
+                    token=access_token,
+                    auth_type="custom",
+                    env_key=env_key,
+                    extra={"header_name": "Authorization", "prefix": f"{token_type} "},
+                )
+            except Exception as e:
+                print(f"⚠️  OAuth2 自动获取 Token 失败: {e}")
+                # 回退: 尝试使用配置中的静态 access_token
+                fallback_token = auth_config.get("access_token", "")
+                if fallback_token:
+                    token_type = auth_config.get("token_type", "Bearer")
+                    AuthManager.set_token(token=fallback_token, auth_type="custom", env_key=env_key, extra={"header_name": "Authorization", "prefix": f"{token_type} "})
+        elif auth_type == "apikey":
+            token = auth_config.get("key_value", "")
+            header_name = auth_config.get("key_name", "X-API-Key")
+            if token:
+                AuthManager.set_token(token=token, auth_type="api_key", env_key=env_key, extra={"header_name": header_name})
+        elif auth_type == "cookie":
+            token = auth_config.get("token") or auth_config.get("cookie_value", "")
+            cookie_name = auth_config.get("cookie_name", "session")
+            if token:
+                AuthManager.set_token(token=token, auth_type="cookie", env_key=env_key, extra={"cookie_name": cookie_name})
+        elif auth_type == "custom":
+            token = auth_config.get("token") or auth_config.get("value", "")
+            header_name = auth_config.get("header_name", "Authorization")
+            prefix = auth_config.get("prefix", "")
+            if token:
+                AuthManager.set_token(token=token, auth_type="custom", env_key=env_key, extra={"header_name": header_name, "prefix": prefix})
+    except Exception as e:
+        print(f"⚠️  加载环境鉴权配置失败: {e}")
+    return context
+
+
+def _detect_api_pattern_from_url(url: str) -> str:
+    """从 URL 路径检测接口模式"""
+    url_lower = (url or "").lower()
+    if url_lower.endswith("/page"):
+        return "page"
+    if url_lower.endswith("/list"):
+        return "list"
+    for suffix in ("/detail", "/get", "/info", "/query"):
+        if url_lower.endswith(suffix):
+            return "detail"
+    for suffix in ("/save", "/add", "/create", "/insert"):
+        if url_lower.endswith(suffix):
+            return "save"
+    for suffix in ("/update", "/edit", "/modify"):
+        if url_lower.endswith(suffix):
+            return "update"
+    for suffix in ("/delete", "/remove"):
+        if url_lower.endswith(suffix):
+            return "delete"
+    return "other"
+
+
+# 写操作接口允许的业务错误码（参数不全、数据不存在等属于正常连通性验证）
+_WRITE_ACCEPTABLE_CODES = {
+    400, 10000, 1100001, 1100002, 1100003, 1100004, 1100005,
+    "400", "10000", "1100001", "1100002", "1100003", "1100004", "1100005",
+}
+
+
+def _apply_business_code_assertion(result: ExecutionResult, url_path: str = "") -> None:
+    if not result.response or not isinstance(result.response.body, dict):
+        return
+    body = result.response.body
+    if "code" not in body:
+        return
+
+    actual = body.get("code")
+    pattern = _detect_api_pattern_from_url(url_path)
+    is_write_api = pattern in ("save", "update", "delete")
+
+    # 查询类：必须 code=200
+    # 写操作类：code=200 通过，业务错误码也算"连通性通过"
+    if actual in (0, 200, "0", "200"):
+        passed = True
+        message = ""
+    elif is_write_api and (actual in _WRITE_ACCEPTABLE_CODES or isinstance(actual, int) and actual > 1000):
+        passed = True
+        message = f"写操作连通性验证通过(业务码: code={actual}, message={body.get('message') or body.get('msg') or ''})"
+    else:
+        passed = False
+        message = f"业务响应码异常: code={actual}, message={body.get('message') or body.get('msg') or ''}"
+
+    expected_desc = [0, 200] if not is_write_api else [0, 200, "或业务错误码(连通性)"]
+    assertion = AssertionResult(
+        type="business_code",
+        passed=passed,
+        expected=expected_desc,
+        actual=actual,
+        path="code",
+        message=message,
+    )
+    result.assertions.append(assertion)
+    if not passed and result.status == ExecutionStatus.PASSED.value:
+        result.status = ExecutionStatus.FAILED.value
+
+
 def _convert_assertions(raw_assertions: list) -> list:
     """
     将数据库中的断言格式转换为 AssertionDef 列表。
@@ -634,3 +888,69 @@ def _status_message(status: str, has_assertions: bool) -> str:
         return "执行出错"
     else:
         return f"执行状态: {status}"
+
+
+# ---------- Token 快捷更新 ----------
+
+@router.post("/quick-token")
+async def update_quick_token(request: dict, db: Session = Depends(get_db)):
+    """
+    快捷更新环境 Bearer Token（前端一键粘贴）。
+    请求体: {"token": "eyJ...", "environment_id": 1}
+    """
+    token = (request.get("token") or "").strip()
+    env_id = request.get("environment_id", 1)
+    if not token:
+        raise HTTPException(status_code=400, detail="请提供 token")
+
+    # 更新 auth_profiles 表
+    service = AuthService(db)
+    auth_profile = service.get_by_environment(env_id)
+    if not auth_profile:
+        raise HTTPException(status_code=404, detail=f"未找到环境 {env_id} 的认证配置")
+
+    # 解析 JWT 提取 pin（如有）
+    pin = ""
+    try:
+        import base64 as b64
+        payload = token.split(".")[1]
+        payload += "=" * (4 - len(payload) % 4)
+        decoded = json.loads(b64.urlsafe_b64decode(payload))
+        pin = str(decoded.get("pin", ""))
+    except Exception:
+        pass
+
+    # 更新配置
+    new_config = {"token": token, "header_name": "Authorization", "prefix": "Bearer "}
+    encoded = base64.b64encode(json.dumps(new_config).encode()).decode()
+    auth_profile.auth_type = "custom"
+    auth_profile.auth_config = encoded
+
+    # 更新 default_headers 中的 pin
+    headers = auth_profile.default_headers or {}
+    if isinstance(headers, str):
+        try:
+            headers = json.loads(headers)
+        except Exception:
+            headers = {}
+    if pin:
+        headers["pin"] = pin
+    headers.setdefault("Content-Type", "application/json")
+    auth_profile.default_headers = headers
+
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(auth_profile, "auth_config")
+    flag_modified(auth_profile, "default_headers")
+    db.commit()
+
+    # 立即刷新内存中的 token
+    env_key = f"env_{env_id}"
+    AuthManager.set_token(token=token, auth_type="custom", env_key=env_key,
+                          extra={"header_name": "Authorization", "prefix": "Bearer "})
+
+    return {
+        "success": True,
+        "message": f"Token 已更新 (pin={pin or '未检测到'})",
+        "environment_id": env_id,
+        "pin": pin,
+    }

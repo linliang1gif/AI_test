@@ -16,10 +16,20 @@ from config.config import get_config
 class AIClient:
     """AI客户端类"""
     
-    def __init__(self, provider: str = None):
+    def __init__(self, provider: str = None, module: str = None):
         self.config = get_config()
+        self.module = module
         self.provider = provider or self.config.ai.default_provider
-        self.ai_config = self.config.get_ai_config_for_provider(self.provider)
+        
+        # 如果指定了模块，使用模块配置
+        if module:
+            module_config = self.config.get_module_ai_config(module)
+            self.provider = provider or module_config["provider"]
+            self.model_override = module_config["model"]
+        else:
+            self.model_override = None
+        
+        self.ai_config = self.config.get_ai_config_for_provider(self.provider, module)
         
     def _make_request(self, messages: List[Dict[str, str]], **kwargs) -> str:
         """发送AI请求"""
@@ -30,6 +40,11 @@ class AIClient:
         # Ollama 不需要 Authorization header
         if self.provider != "ollama":
             headers["Authorization"] = f"Bearer {self.ai_config['api_key']}"
+        
+        # OpenRouter 需要额外的请求头
+        if "openrouter.ai" in self.ai_config.get('base_url', ''):
+            headers["HTTP-Referer"] = "http://localhost:8000"
+            headers["X-Title"] = "AI Test Platform"
         
         payload = {
             "model": kwargs.get("model", self.ai_config["model"]),  # 支持动态指定模型
@@ -251,8 +266,15 @@ class AIClient:
 # 全局AI客户端实例
 _ai_client = None
 
-def get_ai_client(provider: str = None, use_mock: bool = None, use_ollama: bool = None) -> AIClient:
-    """获取AI客户端实例"""
+def get_ai_client(provider: str = None, module: str = None, use_mock: bool = None, use_ollama: bool = None) -> AIClient:
+    """获取AI客户端实例
+    
+    Args:
+        provider: AI提供商
+        module: 模块名称（testcase_generation, script_generation, swagger_analysis, test_optimization）
+        use_mock: 是否使用 Mock 客户端
+        use_ollama: 是否使用 Ollama
+    """
     global _ai_client
     
     # 检查环境变量和配置
@@ -301,7 +323,7 @@ def get_ai_client(provider: str = None, use_mock: bool = None, use_ollama: bool 
         from ai.mock_ai_client import MockAIClient
         return MockAIClient()
 
-    # 使用真实的AI客户端(DeepSeek/OpenAI)
-    if _ai_client is None or (provider and _ai_client.provider != provider):
-        _ai_client = AIClient(provider)
+    # 使用真实的AI客户端(DeepSeek/OpenAI)，支持模块配置
+    if _ai_client is None or (provider and _ai_client.provider != provider) or (module and getattr(_ai_client, 'module', None) != module):
+        _ai_client = AIClient(provider, module)
     return _ai_client

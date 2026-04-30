@@ -104,8 +104,21 @@ class DataManager:
             with open(temp_file, 'w', encoding='utf-8') as f:
                 json.dump(self._memory_data, f, ensure_ascii=False, indent=2)
             
-            # 原子替换
-            temp_file.replace(self.data_file)
+            # 原子替换 - Windows兼容处理
+            import os
+            if os.name == 'nt':  # Windows系统
+                # Windows下需要先删除目标文件
+                if self.data_file.exists():
+                    try:
+                        self.data_file.unlink()
+                    except PermissionError:
+                        # 如果删除失败,等待一小段时间后重试
+                        time.sleep(0.1)
+                        self.data_file.unlink()
+                temp_file.rename(self.data_file)
+            else:
+                # Unix系统可以直接替换
+                temp_file.replace(self.data_file)
             
             self._last_file_mtime = self.data_file.stat().st_mtime
             self._last_sync = time.time()

@@ -28,7 +28,13 @@ export default function TestRunsV2() {
       if (filter.status) params.status = filter.status
       
       const response = await api.v2.observability.getRuns(params)
-      setRuns(response.data || [])
+      const sortedRuns = [...(response.data || [])].sort((a, b) => {
+        const timeA = new Date(a.created_at || a.start_time || 0).getTime()
+        const timeB = new Date(b.created_at || b.start_time || 0).getTime()
+        if (timeA !== timeB) return timeB - timeA
+        return String(b.id || '').localeCompare(String(a.id || ''))
+      })
+      setRuns(sortedRuns)
     } catch (err) {
       console.error('加载执行记录失败:', err)
       setError(err.message)

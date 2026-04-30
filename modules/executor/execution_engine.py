@@ -323,6 +323,11 @@ class ExecutionEngine:
         # 转换状态字符串为枚举
         status_str = runner_result.get("status", "failed")
         
+        # 统计断言结果
+        assertion_details = runner_result.get("assertion_results", [])
+        assertions_passed = sum(1 for a in assertion_details if a.get('passed', False))
+        assertions_failed = sum(1 for a in assertion_details if not a.get('passed', True))
+        
         result = create_execution_result(
             test_case_id=test_case.id,
             status=status_str,
@@ -331,7 +336,9 @@ class ExecutionEngine:
             error=runner_result.get("error_message"),
             stack_trace=runner_result.get("stack_trace"),
             response=runner_result.get("actual_response"),
-            assertion_details=runner_result.get("assertion_results", [])
+            assertion_details=assertion_details,
+            assertions_passed=assertions_passed,
+            assertions_failed=assertions_failed
         )
         
         return result
@@ -366,6 +373,11 @@ class ExecutionEngine:
                 # 转换状态字符串为枚举
                 status_str = runner_result.get("status", "failed")
                 
+                # 统计断言结果
+                assertion_details = runner_result.get("assertion_results", [])
+                assertions_passed = sum(1 for a in assertion_details if a.get('passed', False))
+                assertions_failed = sum(1 for a in assertion_details if not a.get('passed', True))
+                
                 result = create_execution_result(
                     test_case_id=test_case.id,
                     status=status_str,
@@ -374,7 +386,9 @@ class ExecutionEngine:
                     error=runner_result.get("error_message"),
                     stack_trace=runner_result.get("stack_trace"),
                     response=runner_result.get("actual_response"),
-                    assertion_details=runner_result.get("assertion_results", [])
+                    assertion_details=assertion_details,
+                    assertions_passed=assertions_passed,
+                    assertions_failed=assertions_failed
                 )
                 
                 # 添加重试信息(通过直接赋值,因为dataclass允许)
