@@ -492,6 +492,14 @@ try:
 except ImportError as e:
     print(f"⚠️  真实项目快速接入路由导入失败: {e}")
 
+# 🆕 导入并注册 AI 用例评审路由（P1-8）
+try:
+    from routes.ai_case_review_routes import router as ai_case_review_router
+    app.include_router(ai_case_review_router)
+    print("✅ AI 用例评审路由已加载（P1-8）")
+except ImportError as e:
+    print(f"⚠️  AI 用例评审路由导入失败: {e}")
+
 # ==================== 数据模型 ====================
 
 # 测试数据工厂相关模型

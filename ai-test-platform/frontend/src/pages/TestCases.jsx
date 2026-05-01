@@ -50,6 +50,10 @@ export default function TestCases() {
   const [aiAnalysis, setAiAnalysis] = useState(null)
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false)
   const [appMode, setAppMode] = useState('mock')
+  // P1-8: AI 用例评审
+  const [reviewLoading, setReviewLoading] = useState(false)
+  const [reviewResult, setReviewResult] = useState(null)
+  const [showReviewDialog, setShowReviewDialog] = useState(false)
 
   useEffect(() => {
     loadProjects()
@@ -215,6 +219,34 @@ export default function TestCases() {
       ))
     } catch (error) {
       alert('绑定失败: ' + error.message)
+    }
+  }
+
+  // P1-8: AI 用例评审
+  const handleAiReview = async () => {
+    const hasSelection = selectedIds.length > 0
+    if (!hasSelection && !selectedProjectId && filteredTestCases.length === 0) {
+      alert('请先选择项目或勾选用例')
+      return
+    }
+    if (!hasSelection && !selectedProjectId && filteredTestCases.length > 200) {
+      if (!window.confirm(`当前有 ${filteredTestCases.length} 条用例，确定评审全部？`)) return
+    }
+    setReviewLoading(true)
+    try {
+      const payload = {}
+      if (hasSelection) {
+        payload.case_ids = selectedIds
+      } else if (selectedProjectId) {
+        payload.project_id = Number(selectedProjectId)
+      }
+      const data = await api.ai.reviewCases(payload)
+      setReviewResult(data)
+      setShowReviewDialog(true)
+    } catch (e) {
+      alert('AI 评审失败: ' + e.message)
+    } finally {
+      setReviewLoading(false)
     }
   }
 
@@ -748,6 +780,13 @@ export default function TestCases() {
               重置Demo
             </button>
           )}
+          <button
+            onClick={handleAiReview}
+            disabled={reviewLoading}
+            className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 flex items-center space-x-2 transition-colors disabled:opacity-50"
+          >
+            <span>{reviewLoading ? '评审中...' : `AI评审${selectedProjectId ? '(当前项目)' : selectedIds.length > 0 ? `(${selectedIds.length}条)` : '(全部)'}`}</span>
+          </button>
         </div>
       </div>
       
@@ -872,17 +911,17 @@ export default function TestCases() {
           </div>}
         </div>
         
-        <div className="p-6">
+        <div className="p-6 overflow-x-auto">
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
               <span className="ml-2 text-gray-500">加载中...</span>
             </div>
           ) : (
-            <table className="w-full">
+            <table className="w-full table-fixed min-w-[900px]">
               <thead>
                 <tr className="border-b">
-                  <th className="py-3 px-4 text-gray-600 font-medium w-12">
+                  <th className="py-3 px-4 text-gray-600 font-medium w-10">
                     <input
                       type="checkbox"
                       checked={govFilteredCases.length > 0 && selectedIds.length === govFilteredCases.length}
@@ -890,13 +929,13 @@ export default function TestCases() {
                       className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
                     />
                   </th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-medium">用例名称</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-medium">模块</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-medium">风险</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-medium">接口类型</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-medium">来源</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-medium">状态</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-medium">操作</th>
+                  <th className="text-left py-3 px-4 text-gray-600 font-medium w-[30%]">用例名称</th>
+                  <th className="text-left py-3 px-4 text-gray-600 font-medium w-[14%]">模块</th>
+                  <th className="text-left py-3 px-4 text-gray-600 font-medium w-[8%]">风险</th>
+                  <th className="text-left py-3 px-4 text-gray-600 font-medium w-[8%]">{sourceFilter === 'api' ? '接口类型' : sourceFilter === 'functional' ? '优先级' : '类型'}</th>
+                  <th className="text-left py-3 px-4 text-gray-600 font-medium w-[8%]">来源</th>
+                  <th className="text-left py-3 px-4 text-gray-600 font-medium w-[10%]">状态</th>
+                  <th className="text-left py-3 px-4 text-gray-600 font-medium w-[18%]">操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -935,7 +974,7 @@ export default function TestCases() {
                           className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
                         />
                       </td>
-                      <td className="py-4 px-4 font-medium">
+                      <td className="py-4 px-4 font-medium truncate" title={tc.title}>
                         {tc.title?.replace(/^(测试用例标题|测试点|用例标题|标题)[:：]\s*/, '') || tc.title}
                       </td>
                       <td className="py-4 px-4 text-gray-600">{tc.module_name || tc.module || '-'}</td>
@@ -950,7 +989,11 @@ export default function TestCases() {
                         {tc.destructive && <span className="ml-1 px-1 bg-red-50 text-red-600 text-xs rounded border border-red-200" title="破坏性接口">破坏</span>}
                       </td>
                       <td className="py-4 px-4">
-                        <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs">{tc.api_pattern || '-'}</span>
+                        {sourceFilter === 'functional' || (!['swagger','demo_swagger','demo_seed'].includes(tc.source) && sourceFilter === 'all') ? (
+                          <span className={`px-2 py-1 rounded text-xs font-medium ${p.cls}`}>{p.label}</span>
+                        ) : (
+                          <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs">{tc.api_pattern || '-'}</span>
+                        )}
                       </td>
                       <td className="py-4 px-4">
                         <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs">
@@ -1662,6 +1705,199 @@ export default function TestCases() {
                 )}
               </div>
               <button onClick={() => { setShowResultDialog(false); setAiAnalysis(null) }} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300">关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* P1-8: AI 评审结果弹窗 */}
+      {showReviewDialog && reviewResult && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-[800px] max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold">AI 用例评审报告</h2>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs px-2 py-1 rounded ${reviewResult.ai_enhanced ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
+                  {reviewResult.ai_enhanced ? '规则+AI' : '规则评审'}
+                </span>
+                <button onClick={() => setShowReviewDialog(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-6 mb-5 p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg">
+              <div className="text-center">
+                <div className={`text-4xl font-bold ${reviewResult.quality_score >= 80 ? 'text-green-600' : reviewResult.quality_score >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
+                  {reviewResult.quality_score}
+                </div>
+                <div className="text-xs text-gray-500 mt-1">质量评分</div>
+              </div>
+              <div className="flex-1 grid grid-cols-4 gap-3 text-center text-sm">
+                <div><div className="text-lg font-bold">{reviewResult.total_cases}</div><div className="text-xs text-gray-500">总用例</div></div>
+                <div><div className="text-lg font-bold text-green-600">{reviewResult.automatable_cases}</div><div className="text-xs text-gray-500">可自动化</div></div>
+                <div><div className="text-lg font-bold text-red-600">{reviewResult.missing_assertion_count}</div><div className="text-xs text-gray-500">缺少断言</div></div>
+                <div><div className="text-lg font-bold text-orange-600">{reviewResult.high_risk_count}</div><div className="text-xs text-gray-500">高风险接口</div></div>
+              </div>
+            </div>
+
+            {reviewResult.risk_summary && (
+              <div className="mb-4 flex gap-3">
+                <span className="px-3 py-1 bg-red-100 text-red-700 rounded text-sm font-medium">高风险 {reviewResult.risk_summary.high}</span>
+                <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded text-sm font-medium">中风险 {reviewResult.risk_summary.medium}</span>
+                <span className="px-3 py-1 bg-green-100 text-green-700 rounded text-sm font-medium">低风险 {reviewResult.risk_summary.low}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-3 gap-3 mb-4 text-sm">
+              <div className="p-3 bg-gray-50 rounded"><span className="text-gray-500">缺少预期:</span> <span className="font-bold">{reviewResult.missing_expected_count}</span></div>
+              <div className="p-3 bg-gray-50 rounded"><span className="text-gray-500">缺少步骤:</span> <span className="font-bold">{reviewResult.missing_steps_count}</span></div>
+              <div className="p-3 bg-gray-50 rounded"><span className="text-gray-500">重复用例:</span> <span className="font-bold">{reviewResult.duplicate_count}</span></div>
+            </div>
+
+            {reviewResult.improvement_suggestions?.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold mb-2">改进建议</h3>
+                <ul className="space-y-1">
+                  {reviewResult.improvement_suggestions.map((s, i) => (
+                    <li key={i} className="text-sm text-gray-700 bg-yellow-50 p-2 rounded">
+                      {typeof s === 'string' ? s : (
+                        <>
+                          <span>{s.suggestion}</span>
+                          {s.affected_cases?.length > 0 && <span className="ml-2 text-gray-500">[{s.affected_cases.join(', ')}]</span>}
+                          {s.impact && <span className={`ml-2 px-1 rounded text-xs ${s.impact === 'high' ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'}`}>{s.impact}</span>}
+                        </>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {reviewResult.ai_suggestions?.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold mb-2 text-purple-700">AI 补充建议</h3>
+                <ul className="space-y-1">
+                  {reviewResult.ai_suggestions.map((s, i) => (
+                    <li key={i} className="text-sm text-purple-700 bg-purple-50 p-2 rounded">{s}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {reviewResult.priority_recommendations?.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold mb-2">优先处理用例</h3>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {reviewResult.priority_recommendations.map((r, i) => (
+                    <div key={i} className="text-xs p-2 bg-red-50 rounded flex gap-2">
+                      <span className="font-mono font-bold text-red-700">{r.case_id}</span>
+                      <span className="text-gray-600">{r.reason}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {reviewResult.duplicate_groups?.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold mb-2">疑似重复用例</h3>
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  {reviewResult.duplicate_groups.map((g, i) => (
+                    <div key={i} className="text-xs p-2 bg-orange-50 rounded">
+                      <span className="font-mono">{g.signature}</span> x{g.count}: {g.case_ids.join(', ')}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* AI 总评 */}
+            {reviewResult.overall_assessment && (
+              <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded">
+                <h3 className="text-sm font-semibold mb-1 text-blue-800">AI 总评</h3>
+                <p className="text-sm text-blue-700">{reviewResult.overall_assessment}</p>
+              </div>
+            )}
+
+            {/* AI 逐条问题 */}
+            {reviewResult.ai_case_issues?.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold mb-2 text-red-700">问题用例（AI 诊断）</h3>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {reviewResult.ai_case_issues.map((c, i) => (
+                    <div key={i} className="text-xs p-2 bg-red-50 rounded border border-red-100">
+                      <div className="flex items-center justify-between">
+                        <span className="font-mono font-bold text-red-700">{c.case_id}</span>
+                        <button
+                          onClick={() => { setShowReviewDialog(false); setSearchQuery(c.case_id) }}
+                          className="text-blue-600 hover:underline text-xs"
+                        >定位</button>
+                      </div>
+                      {c.issues?.map((issue, j) => <div key={j} className="text-gray-600 mt-1">- {issue}</div>)}
+                      {c.fix_suggestion && <div className="mt-1 text-green-700 font-medium">修复: {c.fix_suggestion}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 覆盖缺口 */}
+            {reviewResult.coverage_gaps?.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold mb-2">覆盖缺口</h3>
+                <ul className="space-y-1">
+                  {reviewResult.coverage_gaps.map((g, i) => (
+                    <li key={i} className="text-sm text-gray-700 bg-amber-50 p-2 rounded">{g}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* 漏测场景 */}
+            {reviewResult.missing_scenarios?.length > 0 && (
+              <div className="mb-4">
+                <h3 className="text-sm font-semibold mb-2 text-purple-700">建议补充场景</h3>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {reviewResult.missing_scenarios.map((s, i) => (
+                    <div key={i} className="text-xs p-2 bg-purple-50 rounded">
+                      {typeof s === 'string' ? s : (
+                        <>
+                          <span className="font-medium">{s.scenario}</span>
+                          {s.api && <span className="ml-2 text-gray-500">[{s.api}]</span>}
+                          {s.priority && <span className={`ml-2 px-1 rounded ${s.priority === 'high' ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'}`}>{s.priority}</span>}
+                          {s.reason && <div className="text-gray-500 mt-0.5">{s.reason}</div>}
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 规则问题用例明细 */}
+            {reviewResult.case_details?.some(c => c.issues?.length > 0) && (
+              <details className="mb-4">
+                <summary className="text-sm font-semibold cursor-pointer text-gray-700">
+                  规则检出问题用例 ({reviewResult.case_details.filter(c => c.issues?.length > 0).length} 条)
+                </summary>
+                <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
+                  {reviewResult.case_details.filter(c => c.issues?.length > 0).map((c, i) => (
+                    <div key={i} className="text-xs p-2 bg-gray-50 rounded flex items-start gap-2">
+                      <span className={`px-1.5 py-0.5 rounded font-bold ${c.risk_level === 'high' ? 'bg-red-100 text-red-700' : c.risk_level === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>{c.score}</span>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-mono text-gray-500">{c.case_id}</span>
+                          <button onClick={() => { setShowReviewDialog(false); setSearchQuery(c.case_id) }} className="text-blue-600 hover:underline text-xs">定位</button>
+                        </div>
+                        <div className="text-gray-600">{c.issues.join(' | ')}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+
+            <div className="mt-4 flex justify-end">
+              <button onClick={() => setShowReviewDialog(false)} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm">关闭</button>
             </div>
           </div>
         </div>

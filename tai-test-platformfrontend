@@ -1,0 +1,41 @@
+[33mcommit 93f0d5760158a2c9edf56261c117227df8d5f9cf[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mfeature/phase17-20-dashboard[m[33m)[m
+Author: liolin <liolin@users.noreply.github.com>
+Date:   Fri May 1 17:14:46 2026 +0800
+
+    chore(p1): add local startup and quality guard scripts
+    
+    P1 Quality Guard System:
+    - Add startup scripts for backend and frontend
+    - Add environment readiness check script
+    - Add API contract validation script
+    - Add smoke test script for P0.7 validation
+    - Update README with local mock mode guide
+    - Add comprehensive FAQ section
+    
+    Changes:
+    - .env.example: Add mock/real mode configuration
+    - README.md: Add quick start guide and FAQ
+    - frontend/src/services/api.js: Fix pilot route to v2
+    - frontend/vite.config.js: Fix proxy to avoid /api-specs conflict
+    - routes/execution_trigger_routes.py: Remove httpbin hardcode
+    - routes/project_config_routes.py: Add GET /api/v2/environments
+    - docs/local_mock_mode.md: Add detailed local setup guide
+    - scripts/*: Add quality guard automation
+    
+    Validation:
+    - Smoke test: 100% pass (8/8)
+    - API contract: 100% match (23/23)
+    - Environment check: Ready for development
+
+ai-test-platform/.env.example
+ai-test-platform/README.md
+ai-test-platform/docs/local_mock_mode.md
+ai-test-platform/frontend/src/services/api.js
+ai-test-platform/frontend/vite.config.js
+ai-test-platform/routes/execution_trigger_routes.py
+ai-test-platform/routes/project_config_routes.py
+ai-test-platform/scripts/check_api_contract.py
+ai-test-platform/scripts/smoke_p0_7_local.py
+ai-test-platform/scripts/start_local_backend.bat
+ai-test-platform/scripts/start_local_frontend.bat
+ai-test-platform/scripts/verify_local_ready.py

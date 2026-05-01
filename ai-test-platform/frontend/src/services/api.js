@@ -330,6 +330,10 @@ export const api = {
       body: JSON.stringify(data),
     }),
     getAgents: () => request(`${API_BASE_URL}/ai/agents`),
+    reviewCases: (data) => request(`${PILOT_API_BASE_URL}/ai/test-cases/review`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   },
 
   // ==================== Agent ====================

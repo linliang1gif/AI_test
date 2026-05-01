@@ -260,6 +260,7 @@ const AIConfigPage = () => {
               <li>- 测试脚本生成：推荐 deepseek-v4-pro 或 deepseek-reasoner（带推理）</li>
               <li>- Swagger 分析：推荐 deepseek-v4-flash 或 deepseek-chat</li>
               <li>- 测试优化：使用本地模型节省成本（如 ollama）</li>
+              <li>- AI 用例评审：推荐 deepseek-chat 或 deepseek-v4-flash（快速评审大量用例）</li>
             </ul>
           </div>
         </CardContent>

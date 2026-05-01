@@ -474,6 +474,11 @@ async def get_ai_config():
                 "id": "test_optimization",
                 "name": "测试优化",
                 "description": "优化测试用例和测试策略"
+            },
+            {
+                "id": "case_review",
+                "name": "AI 用例评审",
+                "description": "对测试用例进行质量评审、漏测分析和优化建议"
             }
         ]
     }

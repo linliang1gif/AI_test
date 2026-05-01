@@ -78,7 +78,7 @@ class Config:
         """加载AI配置"""
         # 加载模块级别的配置
         module_configs = {}
-        modules = ["TESTCASE_GENERATION", "SCRIPT_GENERATION", "SWAGGER_ANALYSIS", "TEST_OPTIMIZATION"]
+        modules = ["TESTCASE_GENERATION", "SCRIPT_GENERATION", "SWAGGER_ANALYSIS", "TEST_OPTIMIZATION", "CASE_REVIEW"]
         
         for module in modules:
             provider_key = f"{module}_AI_PROVIDER"
