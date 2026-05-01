@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from database.models import ApiSpec, TestCase, Project
 from database.repository import ApiSpecRepository, TestCaseRepository
@@ -60,9 +61,13 @@ class SwaggerService:
         file_path = self.upload_dir / f"{file_id}_{filename}"
         file_path.write_bytes(file_content)
         
-        # 解析 Swagger
+        # 解析 Swagger（安全解码：支持 BOM 和编码容错）
         try:
-            swagger_data = json.loads(file_content.decode('utf-8'))
+            text = file_content.decode('utf-8-sig')
+        except UnicodeDecodeError:
+            text = file_content.decode('utf-8', errors='replace')
+        try:
+            swagger_data = json.loads(text)
         except Exception as e:
             raise ValueError(f"Swagger 文件解析失败: {str(e)}")
         
@@ -112,7 +117,8 @@ class SwaggerService:
         self,
         project_id: int,
         url: str,
-        generate_cases: bool = True
+        generate_cases: bool = True,
+        auth_headers: Optional[Dict[str, str]] = None
     ) -> Dict:
         """
         从 URL 导入 Swagger
@@ -121,30 +127,72 @@ class SwaggerService:
             project_id: 项目ID
             url: Swagger URL
             generate_cases: 是否自动生成测试用例
+            auth_headers: 可选鉴权请求头（不会存入数据库）
             
         Returns:
             导入结果
         """
-        import requests
+        import requests as _requests
         
         # 验证项目存在
         project = self.db.query(Project).filter(Project.id == project_id).first()
         if not project:
             raise ValueError(f"项目不存在: {project_id}")
         
-        # 下载 Swagger
+        # 下载 Swagger（带可选鉴权）
         try:
-            response = requests.get(url, timeout=30)
+            req_headers = {"User-Agent": "AI-Test-Platform/1.0", "Accept": "application/json"}
+            if auth_headers:
+                req_headers.update(auth_headers)
+            response = _requests.get(url, headers=req_headers, timeout=30, verify=False)
             response.raise_for_status()
             swagger_data = response.json()
         except Exception as e:
             raise ValueError(f"Swagger URL 访问失败: {str(e)}")
         
-        # 保存文件
+        return self._save_and_generate(project_id, url, swagger_data, 'url', generate_cases)
+
+    def import_from_data(
+        self,
+        project_id: int,
+        source_url: str,
+        swagger_data: dict,
+        source_type: str = 'yapi',
+        generate_cases: bool = True
+    ) -> Dict:
+        """
+        从已有的 Swagger/OpenAPI 数据直接导入（用于 YApi 转换后的数据）
+        
+        Args:
+            project_id: 项目ID
+            source_url: 来源标识URL
+            swagger_data: 已解析的 OpenAPI JSON dict
+            source_type: 来源类型 (yapi/openapi/swagger)
+            generate_cases: 是否自动生成测试用例
+        """
+        project = self.db.query(Project).filter(Project.id == project_id).first()
+        if not project:
+            raise ValueError(f"项目不存在: {project_id}")
+        
+        return self._save_and_generate(project_id, source_url, swagger_data, source_type, generate_cases)
+
+    def _save_and_generate(
+        self,
+        project_id: int,
+        source_url: str,
+        swagger_data: dict,
+        source_type: str,
+        generate_cases: bool
+    ) -> Dict:
+        """统一保存 Swagger 数据并生成用例"""
+        # 保存文件（ensure_ascii=True 避免编码问题）
         file_id = str(uuid.uuid4())
         filename = f"{file_id}_swagger.json"
         file_path = self.upload_dir / filename
-        file_path.write_text(json.dumps(swagger_data, indent=2, ensure_ascii=False))
+        file_path.write_text(
+            json.dumps(swagger_data, indent=2, ensure_ascii=False),
+            encoding='utf-8'
+        )
         
         # 提取基本信息
         info = swagger_data.get('info', {})
@@ -154,11 +202,11 @@ class SwaggerService:
         paths = swagger_data.get('paths', {})
         api_count = sum(len(methods) for methods in paths.values())
         
-        # 创建 ApiSpec 记录
+        # 创建 ApiSpec 记录（不存储 Token/auth 信息）
         api_spec = ApiSpec(
             project_id=project_id,
-            source_type='url',
-            source_url=url,
+            source_type=source_type,
+            source_url=source_url,
             version=version,
             raw_spec_path=str(file_path),
             api_count=api_count,
@@ -222,6 +270,12 @@ class SwaggerService:
                 # 检查是否已存在
                 existing = self.db.query(TestCase).filter(TestCase.id == core_tc.id).first()
                 if existing:
+                    # 确保已有用例也带上当前项目标签
+                    ptag = f'project:{project_id}'
+                    cur_tags = existing.tags if isinstance(existing.tags, list) else []
+                    if ptag not in cur_tags:
+                        existing.tags = list(set(cur_tags + [ptag]))
+                        flag_modified(existing, 'tags')
                     skipped_count += 1
                     continue
                 
@@ -240,7 +294,7 @@ class SwaggerService:
                     created_at=datetime.now(),
                     updated_at=datetime.now(),
                     created_by='swagger_import',
-                    tags=core_tc.tags if core_tc.tags else [],
+                    tags=list(set((core_tc.tags or []) + [f'project:{project_id}'])),
                     test_point_id=core_tc.test_point_id,
                     api_id=core_tc.api_id,
                     dataset_id=core_tc.dataset_id,

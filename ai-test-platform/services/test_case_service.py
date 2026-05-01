@@ -40,10 +40,13 @@ class TestCaseService:
         Returns:
             (测试用例列表, 总数)
         """
-        query = self.db.query(TestCase)
+        query = self.db.query(TestCase).filter(TestCase.status != 'deleted')
         
         # 应用过滤条件
         filters = []
+        if project_id:
+            # 通过 tags 字段 LIKE 匹配 project:N（tags 存储为 JSON 数组文本）
+            filters.append(TestCase.tags.like(f'%"project:{project_id}"%'))
         if source:
             filters.append(TestCase.source == source)
         if status:
@@ -61,8 +64,11 @@ class TestCaseService:
         return test_cases, total
     
     def get_test_case(self, test_case_id: str) -> Optional[TestCase]:
-        """获取测试用例详情"""
-        return self.repo.get_by_id(test_case_id)
+        """获取测试用例详情（排除已软删除）"""
+        tc = self.repo.get_by_id(test_case_id)
+        if tc and tc.status == 'deleted':
+            return None
+        return tc
     
     def create_test_case(self, test_case_data: dict) -> TestCase:
         """创建测试用例"""

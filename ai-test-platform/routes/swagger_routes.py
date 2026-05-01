@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from database import get_db
+from database.models import TestCase, ApiSpec
 from services.swagger_service import SwaggerService
 from services.test_case_service import TestCaseService
 from schemas.swagger_schemas import (
@@ -243,8 +244,20 @@ async def import_swagger_from_file(
         raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")
 
 
+def _build_auth_headers(auth_type: str = None, token: str = None) -> dict:
+    """构建鉴权请求头（不在日志中暴露Token明文）"""
+    headers = {}
+    if token and auth_type == "bearer":
+        headers["Authorization"] = f"Bearer {token}"
+    elif token and auth_type == "basic":
+        import base64
+        encoded = base64.b64encode(token.encode()).decode()
+        headers["Authorization"] = f"Basic {encoded}"
+    return headers
+
+
 @router.post("/swagger/import-url", response_model=SwaggerImportResponse)
-async def import_swagger_from_url(
+def import_swagger_from_url(
     request: SwaggerImportFromUrlRequest,
     db: Session = Depends(get_db)
 ):
@@ -252,6 +265,7 @@ async def import_swagger_from_url(
     从 URL 导入 Swagger/OpenAPI
     
     支持的 URL: 公开的 Swagger JSON/YAML 地址
+    支持鉴权: auth_type + token（仅用于请求，不存入 api_specs）
     
     去重逻辑：同一 project_id + source_url 已存在时，返回 409 Conflict
     """
@@ -260,6 +274,9 @@ async def import_swagger_from_url(
         
         # URL规范化：trim + 去掉尾部斜杠
         normalized_url = request.url.strip().rstrip('/')
+        
+        # 确保能读到最新已提交数据(SQLite StaticPool 场景)
+        db.expire_all()
         
         # 检查是否已存在相同的source_url
         existing_spec = db.query(ApiSpec).filter(
@@ -280,11 +297,15 @@ async def import_swagger_from_url(
                 }
             )
         
+        # 构建鉴权头（不打印Token明文）
+        auth_headers = _build_auth_headers(request.auth_type, request.token)
+        
         service = SwaggerService(db)
         result = service.import_from_url(
             project_id=request.project_id,
             url=normalized_url,
-            generate_cases=request.generate_cases
+            generate_cases=request.generate_cases,
+            auth_headers=auth_headers or None
         )
         
         return result
@@ -294,6 +315,180 @@ async def import_swagger_from_url(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"导入失败: {str(e)}")
+
+
+@router.post("/swagger/import-yapi")
+def import_swagger_from_yapi(
+    request: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    从 YApi 导入接口数据，转换为 OpenAPI 格式后保存。
+
+    Body:
+      project_id: int
+      yapi_base: str           — YApi 服务地址 (如 https://yapi.xxx.com)
+      yapi_project_id: int     — YApi 项目 ID
+      yapi_email: str          — YApi 登录邮箱
+      yapi_password: str       — YApi 登录密码
+      generate_cases: bool     — 是否自动生成测试用例 (默认 true)
+    """
+    import time as _time
+
+    project_id = request.get("project_id")
+    yapi_base = (request.get("yapi_base") or "").rstrip("/")
+    yapi_project_id = request.get("yapi_project_id")
+    yapi_email = request.get("yapi_email")
+    yapi_password = request.get("yapi_password")
+    generate_cases = request.get("generate_cases", True)
+
+    if not project_id:
+        raise HTTPException(status_code=400, detail="缺少 project_id")
+    if not yapi_base or not yapi_project_id:
+        raise HTTPException(status_code=400, detail="缺少 yapi_base 或 yapi_project_id")
+    if not yapi_email or not yapi_password:
+        raise HTTPException(status_code=400, detail="YApi 导入需要邮箱和密码")
+
+    # 去重检查
+    from database.models import ApiSpec
+    source_url = f"{yapi_base}/project/{yapi_project_id}"
+    db.expire_all()
+    existing = db.query(ApiSpec).filter(
+        ApiSpec.project_id == project_id,
+        ApiSpec.source_url == source_url
+    ).first()
+    if existing:
+        raise HTTPException(status_code=409, detail={
+            "code": "SWAGGER_ALREADY_IMPORTED",
+            "message": "该YApi项目已导入过",
+            "api_spec_id": existing.id,
+            "project_id": existing.project_id,
+            "source_url": existing.source_url
+        })
+
+    # 1. 登录 YApi（不打印密码）
+    session = requests.Session()
+    try:
+        login_resp = session.post(
+            f"{yapi_base}/api/user/login",
+            json={"email": yapi_email, "password": yapi_password},
+            timeout=10, verify=False
+        )
+        login_data = login_resp.json()
+        if login_data.get("errcode") != 0:
+            raise HTTPException(status_code=401, detail=f"YApi登录失败: {login_data.get('errmsg', '邮箱或密码错误')}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"YApi登录请求失败: {str(e)}")
+
+    # 2. 获取接口菜单
+    try:
+        menu_resp = session.get(
+            f"{yapi_base}/api/interface/list_menu",
+            params={"project_id": yapi_project_id},
+            timeout=15, verify=False
+        )
+        menu_data = menu_resp.json()
+        if menu_data.get("errcode") != 0:
+            raise HTTPException(status_code=400, detail=f"YApi接口列表获取失败: {menu_data.get('errmsg')}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"YApi接口列表请求失败: {str(e)}")
+
+    # 3. 转换为 OpenAPI 3.0 格式
+    categories = menu_data.get("data", [])
+    openapi_spec = _yapi_to_openapi(categories, yapi_project_id, yapi_base)
+
+    # 4. 统一保存 + 生成用例
+    try:
+        service = SwaggerService(db)
+        result = service.import_from_data(
+            project_id=project_id,
+            source_url=source_url,
+            swagger_data=openapi_spec,
+            source_type='yapi',
+            generate_cases=generate_cases
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"YApi导入失败: {str(e)}")
+
+
+def _yapi_to_openapi(categories: list, project_id, yapi_base: str) -> dict:
+    """将 YApi list_menu 数据转换为标准 OpenAPI 3.0 JSON"""
+    paths = {}
+    tags = []
+
+    for cat in categories:
+        if not isinstance(cat, dict):
+            continue
+        tag_name = cat.get("name") or "未分类"
+        tags.append({"name": tag_name})
+
+        for api in cat.get("list") or []:
+            if not isinstance(api, dict):
+                continue
+            method = (api.get("method") or "GET").lower()
+            path = api.get("path") or "/"
+            title = api.get("title") or f"{method.upper()} {path}"
+
+            operation = {
+                "summary": title,
+                "tags": [tag_name],
+                "responses": {"200": {"description": "Success"}},
+            }
+
+            # 请求参数
+            params = []
+            for q in api.get("req_query") or []:
+                params.append({
+                    "name": q.get("name", ""),
+                    "in": "query",
+                    "required": q.get("required") == "1",
+                    "schema": {"type": "string"},
+                    "description": q.get("desc", ""),
+                })
+            for h in api.get("req_headers") or []:
+                name = h.get("name", "")
+                if name.lower() in ("content-type", "cookie"):
+                    continue
+                params.append({
+                    "name": name,
+                    "in": "header",
+                    "schema": {"type": "string"},
+                    "description": h.get("desc", ""),
+                })
+            if params:
+                operation["parameters"] = params
+
+            # 请求体
+            if api.get("req_body_type") == "json" and api.get("req_body_other"):
+                try:
+                    schema = json.loads(api["req_body_other"])
+                    operation["requestBody"] = {
+                        "content": {"application/json": {"schema": schema}}
+                    }
+                except Exception:
+                    pass
+
+            if path not in paths:
+                paths[path] = {}
+            paths[path][method] = operation
+
+    return {
+        "openapi": "3.0.0",
+        "info": {
+            "title": f"YApi Project #{project_id}",
+            "version": "1.0.0",
+            "description": f"Converted from YApi ({yapi_base})"
+        },
+        "paths": paths,
+        "tags": tags,
+    }
 
 
 @router.post("/swagger/preview-url")
@@ -749,3 +944,39 @@ async def get_test_case(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+
+
+@router.post("/test-cases/batch-delete")
+def batch_delete_test_cases(
+    request: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    批量删除测试用例（V2 数据库版 — 软删除）
+
+    软删除策略：将 status 设为 'deleted'，保留数据库记录和 run_cases FK 完整性。
+    正常查询自动排除 status='deleted' 的用例。
+
+    Body:
+      ids: list[str]  — 要删除的测试用例 ID 列表
+    """
+    ids = request.get("ids", [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="缺少 ids")
+
+    deleted = 0
+    for tc_id in ids:
+        tc = db.query(TestCase).filter(
+            TestCase.id == str(tc_id),
+            TestCase.status != 'deleted'
+        ).first()
+        if tc:
+            tc.status = 'deleted'
+            deleted += 1
+    db.commit()
+
+    return {
+        "success": True,
+        "deleted_count": deleted,
+        "requested_count": len(ids)
+    }

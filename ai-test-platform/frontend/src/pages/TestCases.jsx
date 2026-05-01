@@ -15,6 +15,8 @@ export default function TestCases() {
   const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [sourceFilter, setSourceFilter] = useState('all')
+  const [projects, setProjects] = useState([])
+  const [selectedProjectId, setSelectedProjectId] = useState('')
   const [selectedTestCase, setSelectedTestCase] = useState(null)
   const [showDetailDialog, setShowDetailDialog] = useState(false)
   const [showDatasetDialog, setShowDatasetDialog] = useState(false)
@@ -49,59 +51,45 @@ export default function TestCases() {
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false)
 
   useEffect(() => {
+    loadProjects()
     loadTestCases()
     loadDatasets()
     loadEnvironments()
   }, [])
 
-  const loadTestCases = async () => {
+  const loadTestCases = async (projectId) => {
+    setLoading(true)
     try {
-      // 从多个来源加载用例并合并
-      const allCases = []
-      const idSet = new Set()
+      const params = { limit: 1000 }
+      const pid = projectId !== undefined ? projectId : selectedProjectId
+      if (pid) params.project_id = pid
 
-      // 1. 旧API（内存数据）- /api/test-cases
-      try {
-        const res = await fetch('/api/test-cases')
-        if (res.ok) {
-          const data = await res.json()
-          const cases = data.data || data || []
-          if (Array.isArray(cases)) {
-            cases.forEach(tc => {
-              if (!idSet.has(tc.id)) {
-                idSet.add(tc.id)
-                allCases.push(tc)
-              }
-            })
-          }
-        }
-      } catch (e) { console.warn('旧API加载失败:', e) }
-
-      // 2. V2数据库（Swagger导入的用例）- /api/v2/test-cases
-      try {
-        const res = await fetch('/api/v2/test-cases?limit=1000')
-        if (res.ok) {
-          const data = await res.json()
-          const cases = data.test_cases || []
-          cases.forEach(tc => {
-            if (!idSet.has(tc.id)) {
-              idSet.add(tc.id)
-              allCases.push({
-                ...tc,
-                lastRun: tc.lastRun || '未运行',
-                type: tc.type || 'API测试'
-              })
-            }
-          })
-        }
-      } catch (e) { console.warn('V2 API加载失败:', e) }
-
-      setTestCases(allCases)
+      const data = await api.v2.testCases.getAll(params)
+      const cases = (data.test_cases || []).map(tc => ({
+        ...tc,
+        lastRun: tc.last_run_status || '未运行',
+        type: tc.source === 'swagger' ? 'API测试' : tc.type || '功能测试'
+      }))
+      setTestCases(cases)
     } catch (error) {
       console.error('加载测试用例失败:', error)
     } finally {
       setLoading(false)
     }
+  }
+
+  const loadProjects = async () => {
+    try {
+      const result = await api.v2.projects.getAll()
+      setProjects(result.projects || [])
+    } catch (error) {
+      console.error('加载项目列表失败:', error)
+    }
+  }
+
+  const handleProjectChange = (pid) => {
+    setSelectedProjectId(pid)
+    loadTestCases(pid)
   }
 
   const loadDatasets = async () => {
@@ -642,6 +630,16 @@ export default function TestCases() {
           <p className="text-gray-600 mt-1">管理和生成测试用例</p>
         </div>
         <div className="flex space-x-3">
+          <select
+            value={selectedProjectId}
+            onChange={(e) => handleProjectChange(e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm"
+          >
+            <option value="">全部项目</option>
+            {projects.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
           <select
             value={selectedEnvironmentId}
             onChange={(e) => {

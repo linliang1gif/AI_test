@@ -183,7 +183,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-    batchDelete: (ids) => request(`${API_BASE_URL}/testcases/batch-delete`, {
+    batchDelete: (ids) => request(`${API_BASE_URL}/v2/test-cases/batch-delete`, {
       method: 'POST',
       body: JSON.stringify({ ids }),
     }),

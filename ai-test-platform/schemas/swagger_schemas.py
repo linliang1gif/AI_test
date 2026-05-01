@@ -14,6 +14,8 @@ class SwaggerImportFromUrlRequest(BaseModel):
     project_id: int = Field(..., description="项目ID")
     url: str = Field(..., description="Swagger URL")
     generate_cases: bool = Field(True, description="是否自动生成测试用例")
+    auth_type: Optional[str] = Field(None, description="鉴权方式: none/bearer/basic")
+    token: Optional[str] = Field(None, description="鉴权Token（仅用于请求，不存储）")
 
 
 class SwaggerImportResponse(BaseModel):
@@ -53,6 +55,13 @@ class TestCaseResponse(BaseModel):
     source: Optional[str] = None
     created_at: Optional[datetime] = None
     tags: Optional[List[str]] = None
+    # 前端展示所需字段
+    steps: Optional[list] = None
+    expected: Optional[str] = None
+    execution_config: Optional[dict] = None
+    assertions: Optional[list] = None
+    dataset_id: Optional[str] = None
+    api_id: Optional[str] = None
     # Phase 16: 治理字段
     module_name: Optional[str] = None
     api_pattern: Optional[str] = None
