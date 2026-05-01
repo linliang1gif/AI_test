@@ -9,7 +9,172 @@
 
 AI Test Platform 是一个**企业级**的完整测试生命周期管理平台，实现从需求分析到自动化测试执行的全流程自动化。
 
-## 🚀 快速开始
+## 🚀 本地Mock模式快速启动（推荐新手）
+
+### 1. 环境准备
+
+```bash
+# 克隆项目
+git clone <repository>
+cd ai-test-platform
+
+# 创建虚拟环境
+python -m venv venv
+
+# 激活虚拟环境 (Windows)
+venv\Scripts\activate
+
+# 安装后端依赖
+pip install -r requirements.txt
+
+# 安装前端依赖
+cd frontend
+npm install
+cd ..
+```
+
+### 2. 配置Mock模式
+
+```bash
+# 复制配置文件
+cp .env.example .env
+
+# .env中确认以下配置（默认已是Mock模式）
+APP_MODE=mock
+USE_MOCK_DATA=true
+MOCK_API_BASE_URL=https://httpbin.org
+AI_PROVIDER=none
+AI_ANALYSIS_MODE=rule
+```
+
+### 3. 启动服务
+
+**方式A：使用启动脚本（推荐）**
+```bash
+# 启动后端
+scripts\start_local_backend.bat
+
+# 启动前端（新终端）
+scripts\start_local_frontend.bat
+```
+
+**方式B：手动启动**
+```bash
+# 启动后端
+venv\Scripts\python.exe backend_api_server.py
+
+# 启动前端（新终端）
+cd frontend
+npm run dev
+```
+
+### 4. 验收测试
+
+```bash
+# 运行smoke测试
+python scripts\smoke_p0_7_local.py
+
+# 检查环境就绪
+python scripts\verify_local_ready.py
+
+# 检查API契约
+python scripts\check_api_contract.py
+```
+
+预期结果：
+- ✅ 后端: http://localhost:8000
+- ✅ 前端: http://localhost:5173 或 5174
+- ✅ API文档: http://localhost:8000/docs
+- ✅ Smoke通过率: 100%
+
+### 5. 切换到Real模式
+
+当需要连接真实被测系统时：
+
+```bash
+# 修改.env
+APP_MODE=real
+TARGET_API_BASE_URL=https://your-real-api.com
+TARGET_API_TOKEN=your_token_here
+
+# 重启后端服务
+```
+
+📖 **详细文档**: [docs/local_mock_mode.md](docs/local_mock_mode.md)
+
+## 常见问题
+
+### Q1: pydantic版本冲突怎么处理？
+
+**症状**: `SystemError: The installed pydantic-core version is incompatible`
+
+**解决**:
+```bash
+# 使用虚拟环境
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### Q2: /api-specs 前端路由404？
+
+**症状**: 访问 http://localhost:5173/api-specs 返回404
+
+**原因**: Vite代理配置问题
+
+**解决**: 检查 `frontend/vite.config.js`
+```javascript
+proxy: {
+  '/api/': {  // 注意末尾的斜杠
+    target: 'http://127.0.0.1:8000',
+    // ...
+  }
+}
+```
+
+### Q3: 405错误算通过吗？
+
+**不算！** 只有2xx才算成功。
+
+如果遇到405，说明接口方法不支持，需要：
+1. 检查后端是否实现了该方法
+2. 检查前端调用的方法是否正确
+
+### Q4: .env文件要提交吗？
+
+**绝对不要！**
+
+`.env` 包含敏感配置，已在 `.gitignore` 中排除。
+
+**正确做法**:
+- ✅ 提交 `.env.example` 作为模板
+- ✅ 本地维护 `.env`
+- ❌ 不要提交 `.env`
+- ❌ 不要在代码中硬编码Token
+
+### Q5: 推荐的开发流程？
+
+```bash
+# 1. 启动服务
+scripts\start_local_backend.bat
+scripts\start_local_frontend.bat
+
+# 2. 运行smoke验收
+python scripts\smoke_p0_7_local.py
+
+# 3. 开始开发
+# ... 修改代码 ...
+
+# 4. 开发后再次验收
+python scripts\smoke_p0_7_local.py
+python scripts\check_api_contract.py
+
+# 5. 提交代码
+git add .
+git commit -m "feat: xxx"
+```
+
+## 🚀 快速开始（完整流程）
 
 ### 方式1: AI测试控制台（推荐 - 10秒上手）
 

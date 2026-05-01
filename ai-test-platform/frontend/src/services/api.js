@@ -3,7 +3,7 @@
 
 // ==================== API Base URL 配置 ====================
 const API_BASE_URL = '/api'  // 使用代理路径，Vite会自动转发到 http://localhost:8000
-const PILOT_API_BASE_URL = '/api/pilot'
+const PILOT_API_BASE_URL = '/api/v2'  // Pilot路由已禁用，统一使用v2路由
 
 function getRoleHeader() {
   const role = localStorage.getItem('pilot_role') || 'admin'
@@ -86,10 +86,23 @@ export const api = {
   },
 
   environments: {
-    create: (data) => request(`${PILOT_API_BASE_URL}/environments`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+    create: (data) => {
+      // 适配后端Environment模型：name字段是枚举(dev/test/staging/prod)
+      // 如果前端传了自定义名称，将其作为description，name使用env_type
+      const adaptedData = {
+        project_id: data.project_id,
+        name: data.env_type || data.name || 'test', // 使用枚举值
+        base_url: data.base_url,
+        is_protected: data.is_protected || false,
+        allow_write: data.allow_write !== false,
+        timeout_seconds: data.timeout_seconds || 30,
+        retry_count: data.retry_count || 0
+      }
+      return request(`${PILOT_API_BASE_URL}/environments`, {
+        method: 'POST',
+        body: JSON.stringify(adaptedData),
+      })
+    },
     update: (id, data) => request(`${PILOT_API_BASE_URL}/environments/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
@@ -284,11 +297,19 @@ export const api = {
 
   // ==================== 报告 ====================
   reports: {
-    getAll: (projectId) => request(`${PILOT_API_BASE_URL}/reports${projectId ? `?project_id=${projectId}` : ''}`),
-    get: (id) => request(`${PILOT_API_BASE_URL}/reports/${id}`),
-    generate: (data) => request(`${PILOT_API_BASE_URL}/reports/generate`, {
+    // 后端没有独立的reports路由，报告功能在test-runs下
+    // 通过test-runs获取报告信息
+    getAll: (projectId) => {
+      // 获取所有test-runs，前端可以过滤有报告的
+      return request(`${PILOT_API_BASE_URL}/test-runs${projectId ? `?project_id=${projectId}` : ''}`)
+    },
+    get: (runId) => {
+      // 获取指定run的报告
+      return request(`${API_BASE_URL}/v2/test-runs/${runId}/report/download?format=json`)
+    },
+    generate: (data) => request(`${API_BASE_URL}/v2/test-runs/${data.run_id}/report`, {
       method: 'POST',
-      body: JSON.stringify(data),
+      body: JSON.stringify({ format: data.format || 'html' }),
     }),
   },
 
@@ -419,7 +440,7 @@ export const api = {
         const query = new URLSearchParams(params).toString()
         return request(`${API_BASE_URL}/v2/test-runs${query ? '?' + query : ''}`)
       },
-      getCases: (id) => request(`${API_BASE_URL}/v2/test-runs/${id}/cases`),
+      getCases: (id) => request(`${API_BASE_URL}/v2/observability/runs/${id}/cases`),
       getHistory: (id) => request(`${API_BASE_URL}/v2/test-runs/${id}/history`),
     },
 
@@ -472,7 +493,7 @@ export const api = {
         })
       },
       getApiSpecs: (projectId) => {
-        // 只有当 projectId 是有效数字时才添加查询参数
+        // 后端实际路径是 /api/v2/swagger/api-specs
         const query = (projectId && !isNaN(projectId)) ? `?project_id=${projectId}` : ''
         return request(`${API_BASE_URL}/v2/swagger/api-specs${query}`)
       },

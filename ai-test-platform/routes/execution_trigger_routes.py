@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from typing import List
 from pydantic import BaseModel
+import os
 
 import sys
 from pathlib import Path
@@ -21,6 +22,11 @@ from modules.executor import ExecutionEngine
 
 
 router = APIRouter(prefix="/api/v2/execution", tags=["执行触发"])
+
+# 从环境变量读取配置
+APP_MODE = os.getenv("APP_MODE", "mock")
+MOCK_API_BASE_URL = os.getenv("MOCK_API_BASE_URL", "https://httpbin.org")
+TARGET_API_BASE_URL = os.getenv("TARGET_API_BASE_URL", "")
 
 
 class TestCaseInput(BaseModel):
@@ -145,7 +151,7 @@ async def trigger_simple_execution(
     """
     简化的执行触发(用于快速测试)
     
-    - 使用httpbin.org创建简单测试用例
+    - 根据APP_MODE使用mock或real API
     - 适合前端快速验证
     
     Args:
@@ -157,13 +163,24 @@ async def trigger_simple_execution(
         ExecutionTriggerResponse: 包含run_id和trace_id
     """
     try:
-        # 创建简单的httpbin测试用例
+        # 根据模式选择API地址
+        if APP_MODE == "mock":
+            api_base_url = MOCK_API_BASE_URL
+        else:
+            api_base_url = TARGET_API_BASE_URL
+            if not api_base_url:
+                raise HTTPException(
+                    status_code=400,
+                    detail="真实模式下TARGET_API_BASE_URL未配置，请在.env中设置"
+                )
+        
+        # 创建简单的测试用例
         test_cases = []
         for tc_id in test_case_ids:
             test_case = create_test_case(
                 id=tc_id,
                 title=f"测试用例 - {tc_id}",
-                module="httpbin",
+                module=f"{APP_MODE}_api",
                 priority="medium",
                 steps=[],
                 expected="返回200",
@@ -171,7 +188,7 @@ async def trigger_simple_execution(
                 expected_behavior="success",
                 execution_config={
                     "method": "GET",
-                    "url": "https://httpbin.org/get",
+                    "url": f"{api_base_url}/get",
                     "headers": {"User-Agent": "Test"},
                     "params": {"test": tc_id}
                 },

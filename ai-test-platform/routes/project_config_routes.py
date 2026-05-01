@@ -4,11 +4,12 @@
 项目配置路由 - 使用数据库
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from database import get_db
+from database.models import Environment
 from services import ProjectService, EnvironmentService, AuthService
 from schemas.project_schemas import (
     ProjectCreate,
@@ -142,6 +143,24 @@ async def create_environment(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"创建环境失败: {str(e)}")
+
+
+@router.get("/environments", response_model=List[EnvironmentResponse])
+async def get_environments(
+    project_id: Optional[int] = Query(None, description="项目ID（可选）"),
+    db: Session = Depends(get_db)
+):
+    """获取环境列表，支持按项目ID过滤"""
+    try:
+        service = EnvironmentService(db)
+        if project_id:
+            environments = service.get_project_environments(project_id)
+        else:
+            # 获取所有环境
+            environments = db.query(Environment).all()
+        return environments
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取环境列表失败: {str(e)}")
 
 
 @router.get("/projects/{project_id}/environments", response_model=List[EnvironmentResponse])

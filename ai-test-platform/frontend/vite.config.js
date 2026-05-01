@@ -13,8 +13,8 @@ export default defineConfig({
     port: 5173,
     host: '0.0.0.0',
     proxy: {
-      // 只代理 /api 开头的请求到后端
-      '/api': {
+      // 只代理 /api/ 开头的请求到后端（注意末尾的斜杠）
+      '/api/': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         secure: false,
