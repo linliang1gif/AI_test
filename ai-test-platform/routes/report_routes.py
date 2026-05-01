@@ -20,9 +20,10 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database.session import get_db
-from database.models import TestRun, RunCase, TestCase, AiReportAnalysis
+from database.models import TestRun, RunCase, TestCase, AiReportAnalysis, Report, Project, Environment
 
 router = APIRouter(prefix="/api/v2/test-runs", tags=["TestReport"])
+reports_router = APIRouter(prefix="/api/v2/reports", tags=["Reports"])
 
 REPORTS_DIR = Path(__file__).parent.parent / "data" / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -69,9 +70,53 @@ def generate_report(
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(html)
 
+    # ── 写入 / 更新 reports 表 ──
+    report_id = f"REPORT_{run_id}"
+    existing = db.query(Report).filter(Report.run_id == run_id).first()
+    total = run.total_cases or len(cases)
+    passed = run.passed_cases or 0
+    failed = run.failed_cases or 0
+    skipped = run.skipped_cases or 0
+    executed = total - skipped
+    pass_rate = round(passed / max(executed, 1) * 100, 1)
+
+    if existing:
+        existing.title = f"测试报告 - {run_id}"
+        existing.file_path = str(filepath)
+        existing.file_size = filepath.stat().st_size
+        existing.total_tests = total
+        existing.passed = passed
+        existing.failed = failed
+        existing.skipped = skipped
+        existing.pass_rate = pass_rate
+        existing.created_at = datetime.now()
+        report_id = existing.id
+    else:
+        new_report = Report(
+            id=report_id,
+            run_id=run_id,
+            title=f"测试报告 - {run_id}",
+            report_type="comprehensive",
+            format="html",
+            file_path=str(filepath),
+            file_size=filepath.stat().st_size,
+            total_tests=total,
+            passed=passed,
+            failed=failed,
+            skipped=skipped,
+            pass_rate=pass_rate,
+        )
+        db.add(new_report)
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"⚠️  报告入库失败: {e}")
+
     return ReportResponse(
         success=True,
-        report_id=run_id,
+        report_id=report_id,
         report_url=f"/api/v2/test-runs/{run_id}/report/download?format=html",
         message="报告生成成功",
     )
@@ -541,3 +586,125 @@ def _build_ai_analysis_html(run_id: str, db: Session) -> str:
     <h3>下一步行动</h3>
     <ul>{act_html}</ul>
 </div>"""
+
+
+# ==================== Reports 独立路由 ====================
+
+@reports_router.get("", summary="报告列表")
+def list_reports(
+    project_id: Optional[int] = Query(None),
+    run_id: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+):
+    """获取报告列表"""
+    q = db.query(Report).join(TestRun, Report.run_id == TestRun.id)
+
+    if run_id:
+        q = q.filter(Report.run_id == run_id)
+    if project_id:
+        q = q.filter(TestRun.project_id == project_id)
+
+    total = q.count()
+    reports = q.order_by(Report.created_at.desc()).offset(offset).limit(limit).all()
+
+    items = []
+    for r in reports:
+        run = r.test_run
+        summary_data = json.loads(run.summary or '{}') if run and run.summary else {}
+        items.append({
+            "report_id": r.id,
+            "run_id": r.run_id,
+            "project_id": run.project_id if run else None,
+            "title": r.title,
+            "report_type": r.report_type,
+            "format": r.format,
+            "status": "completed",
+            "pass_rate": r.pass_rate,
+            "total_tests": r.total_tests,
+            "passed": r.passed,
+            "failed": r.failed,
+            "skipped": r.skipped,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "app_mode": summary_data.get("app_mode"),
+            "allow_unsafe_methods": summary_data.get("allow_unsafe_methods"),
+            "download_url": f"/api/v2/test-runs/{r.run_id}/report/download?format=html",
+        })
+
+    return {"total": total, "items": items}
+
+
+@reports_router.get("/{report_id}", summary="报告详情")
+def get_report_detail(
+    report_id: str,
+    db: Session = Depends(get_db),
+):
+    """获取报告详情"""
+    r = db.query(Report).filter(Report.id == report_id).first()
+    if not r:
+        raise HTTPException(404, detail=f"报告不存在: {report_id}")
+
+    run = r.test_run
+    summary_data = json.loads(run.summary or '{}') if run and run.summary else {}
+
+    proj = db.query(Project).filter(Project.id == run.project_id).first() if run and run.project_id else None
+    env = db.query(Environment).filter(Environment.id == run.environment_id).first() if run and run.environment_id else None
+
+    # 失败摘要
+    failure_summary = []
+    if run:
+        cases = db.query(RunCase).filter(RunCase.run_id == run.id).all()
+        fc_map = {}
+        for c in cases:
+            if c.status in ('failed', 'error'):
+                cat = c.error_type or 'unknown_error'
+                fc_map[cat] = fc_map.get(cat, 0) + 1
+        failure_summary = [{"category": k, "count": v} for k, v in fc_map.items()]
+
+    # 风险提示
+    risk_warnings = []
+    app_mode = summary_data.get("app_mode")
+    allow_unsafe = summary_data.get("allow_unsafe_methods")
+    if app_mode == "real":
+        if allow_unsafe:
+            risk_warnings.append("本次执行包含真实项目写操作，请确认测试环境数据影响。")
+        else:
+            risk_warnings.append("本次在真实项目模式下执行（仅读操作）。")
+
+    return {
+        "report_id": r.id,
+        "run_id": r.run_id,
+        "project_id": run.project_id if run else None,
+        "project_name": proj.name if proj else None,
+        "environment_name": env.name if env else None,
+        "title": r.title,
+        "report_type": r.report_type,
+        "format": r.format,
+        "status": "completed",
+        "pass_rate": r.pass_rate,
+        "total_tests": r.total_tests,
+        "passed": r.passed,
+        "failed": r.failed,
+        "skipped": r.skipped,
+        "file_path": r.file_path,
+        "file_size": r.file_size,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "app_mode": app_mode,
+        "allow_unsafe_methods": allow_unsafe,
+        "risk_warnings": risk_warnings,
+        "failure_summary": failure_summary,
+        "download_url": f"/api/v2/test-runs/{r.run_id}/report/download?format=html",
+        "run": {
+            "id": run.id,
+            "status": run.status,
+            "trigger_type": run.trigger_type,
+            "total_cases": run.total_cases,
+            "passed_cases": run.passed_cases,
+            "failed_cases": run.failed_cases,
+            "skipped_cases": run.skipped_cases,
+            "duration": run.duration,
+            "start_time": run.start_time.isoformat() if run.start_time else None,
+            "end_time": run.end_time.isoformat() if run.end_time else None,
+        } if run else None,
+    }

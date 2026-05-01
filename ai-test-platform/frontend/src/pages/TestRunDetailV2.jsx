@@ -72,11 +72,20 @@ export default function TestRunDetailV2() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [reportLoading, setReportLoading] = useState(false)
+  const [reportId, setReportId] = useState(null)
   const [statusFilter, setStatusFilter] = useState('all')
   const [viewMode, setViewMode] = useState('list')
   const [activeTab, setActiveTab] = useState('overview')
 
-  useEffect(() => { loadRunDetail() }, [runId])
+  useEffect(() => { loadRunDetail(); checkReport() }, [runId])
+
+  const checkReport = async () => {
+    try {
+      const data = await api.reports.getByRunId(runId)
+      const items = data?.items || []
+      if (items.length > 0) setReportId(items[0].report_id)
+    } catch {}
+  }
 
   const loadRunDetail = async () => {
     try {
@@ -105,7 +114,7 @@ export default function TestRunDetailV2() {
     try {
       setReportLoading(true)
       await api.v2.observability.generateReport(runId, 'html')
-      alert('报告生成成功！')
+      await checkReport()
     } catch (err) {
       alert('报告生成失败: ' + err.message)
     } finally {
@@ -196,11 +205,17 @@ export default function TestRunDetailV2() {
           <div className="flex gap-2">
             <button onClick={handleGenerateReport} disabled={reportLoading}
               className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 text-sm">
-              {reportLoading ? '生成中...' : '生成报告'}
+              {reportLoading ? '生成中...' : reportId ? '重新生成报告' : '生成报告'}
             </button>
+            {reportId && (
+              <button onClick={() => navigate(`/reports/${reportId}`)}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm">
+                查看报告
+              </button>
+            )}
             <button onClick={handleDownloadReport}
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm">
-              下载报告
+              下载HTML
             </button>
             <button onClick={() => navigate('/test-runs-v2')}
               className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm">

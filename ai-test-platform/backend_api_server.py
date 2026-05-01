@@ -437,9 +437,10 @@ except ImportError as e:
 
 # 🆕 导入并注册测试报告路由（Phase 15）
 try:
-    from routes.report_routes import router as report_router
+    from routes.report_routes import router as report_router, reports_router
     app.include_router(report_router)
-    print("✅ 测试报告路由已加载（Phase 15）")
+    app.include_router(reports_router)
+    print("✅ 测试报告路由已加载（Phase 15 + P1-7E）")
 except ImportError as e:
     print(f"⚠️  测试报告路由导入失败: {e}")
 

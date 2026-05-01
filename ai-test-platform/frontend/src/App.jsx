@@ -3,8 +3,8 @@ import { useState, useEffect } from 'react'
 import { ToastProvider } from './components/ui/Toast'
 
 // 导入页面组件（仅导入实际使用的）
-import TestDataFactory from './pages/TestDataFactory'
-import DatasetManagement from './pages/DatasetManagement'
+import Reports from './pages/Reports'
+import ReportDetail from './pages/ReportDetail'
 // V2 页面
 import ProjectsV2 from './pages/ProjectsV2'
 import ProjectDetailV2 from './pages/ProjectDetailV2'
@@ -249,8 +249,6 @@ function App() {
               {expandedSections.development && [
                 { to: '/swagger-workbench', icon: '■', label: 'Swagger接入' },
                 { to: '/api-specs', icon: '■', label: 'API规范' },
-                { to: '/dataset-management', icon: '■', label: '数据集管理' },
-                { to: '/test-data-factory', icon: '■', label: '测试数据工厂' },
               ].map(item => (
                 <NavLink 
                   key={item.to}
@@ -282,6 +280,7 @@ function App() {
                 { to: '/test-runs-v2', icon: '■', label: '执行记录' },
                 { to: '/executor-v2', icon: '■', label: 'API测试执行' },
                 { to: '/batch-run', icon: '■', label: '批量执行中心' },
+                { to: '/reports', icon: '■', label: '测试报告' },
               ].map(item => (
                 <NavLink 
                   key={item.to}
@@ -439,8 +438,10 @@ function App() {
               <Route path="/test-runs-v2" element={<TestRunsV2 />} />
               <Route path="/test-runs-v2/:runId" element={<TestRunDetailV2 />} />
               <Route path="/quick-execution-test" element={<QuickExecutionTest />} />
-              <Route path="/dataset-management" element={<DatasetManagement />} />
-              <Route path="/test-data-factory" element={<TestDataFactory />} />
+              <Route path="/reports" element={<Reports />} />
+              <Route path="/reports/:id" element={<ReportDetail />} />
+              <Route path="/dataset-management" element={<div className="p-12 text-center"><p className="text-lg text-slate-500">数据集管理功能暂未启用，后续版本开放。</p></div>} />
+              <Route path="/test-data-factory" element={<div className="p-12 text-center"><p className="text-lg text-slate-500">测试数据工厂功能暂未启用，后续版本开放。</p></div>} />
               <Route path="/ai-config" element={<AIConfigPage />} />
               <Route path="/executor-v2" element={<ExecutorV2 />} />
               <Route path="/batch-run" element={<BatchRunCenter />} />
@@ -457,9 +458,7 @@ function App() {
               <Route path="/test-runs" element={<Navigate to="/test-runs-v2" replace />} />
               <Route path="/test-runs-old" element={<Navigate to="/test-runs-v2" replace />} />
               <Route path="/test-runs/:id" element={<Navigate to="/test-runs-v2" replace />} />
-              <Route path="/reports" element={<Navigate to="/test-runs-v2" replace />} />
-              <Route path="/reports/:id" element={<Navigate to="/test-runs-v2" replace />} />
-              <Route path="/ai-insights" element={<Navigate to="/test-data-factory" replace />} />
+              <Route path="/ai-insights" element={<Navigate to="/dashboard" replace />} />
               <Route path="/ai-test-console" element={<Navigate to="/quick-execution-test" replace />} />
             </Routes>
           </div>

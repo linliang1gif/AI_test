@@ -297,20 +297,16 @@ export const api = {
 
   // ==================== 报告 ====================
   reports: {
-    // 后端没有独立的reports路由，报告功能在test-runs下
-    // 通过test-runs获取报告信息
-    getAll: (projectId) => {
-      // 获取所有test-runs，前端可以过滤有报告的
-      return request(`${PILOT_API_BASE_URL}/test-runs${projectId ? `?project_id=${projectId}` : ''}`)
+    getAll: (params = {}) => {
+      const query = new URLSearchParams(params).toString()
+      return request(`${API_BASE_URL}/v2/reports${query ? '?' + query : ''}`)
     },
-    get: (runId) => {
-      // 获取指定run的报告
-      return request(`${API_BASE_URL}/v2/test-runs/${runId}/report/download?format=json`)
-    },
+    get: (reportId) => request(`${API_BASE_URL}/v2/reports/${reportId}`),
     generate: (data) => request(`${API_BASE_URL}/v2/test-runs/${data.run_id}/report`, {
       method: 'POST',
       body: JSON.stringify({ format: data.format || 'html' }),
     }),
+    getByRunId: (runId) => request(`${API_BASE_URL}/v2/reports?run_id=${runId}`),
   },
 
   system: {
