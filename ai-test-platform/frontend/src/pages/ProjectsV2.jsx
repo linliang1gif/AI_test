@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 
@@ -8,16 +8,35 @@ export default function ProjectsV2() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [showCreateMenu, setShowCreateMenu] = useState(false)
   const [searchKeyword, setSearchKeyword] = useState('')
   const [formData, setFormData] = useState({
     name: '',
     description: '',
     team: ''
   })
+  const menuRef = useRef(null)
 
   useEffect(() => {
     loadProjects()
   }, [])
+
+  // 点击外部关闭下拉菜单
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) {
+        setShowCreateMenu(false)
+      }
+    }
+
+    if (showCreateMenu) {
+      document.addEventListener('mousedown', handleClickOutside)
+    }
+
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [showCreateMenu])
 
   const loadProjects = async () => {
     try {
@@ -78,12 +97,49 @@ export default function ProjectsV2() {
           <h1 className="text-2xl font-bold text-slate-900">项目管理</h1>
           <p className="text-sm text-slate-600 mt-1">管理测试项目、环境和配置</p>
         </div>
-        <button
-          onClick={() => setShowCreateDialog(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
-        >
-          + 新建项目
-        </button>
+        
+        {/* 新建项目按钮组 */}
+        <div className="relative" ref={menuRef}>
+          <button
+            onClick={() => setShowCreateMenu(!showCreateMenu)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center gap-2"
+          >
+            + 新建项目
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          
+          {/* 下拉菜单 */}
+          {showCreateMenu && (
+            <div className="absolute right-0 top-full mt-2 w-64 bg-white border border-slate-200 rounded-md shadow-lg z-50">
+              <button
+                onClick={() => {
+                  setShowCreateMenu(false)
+                  setShowCreateDialog(true)
+                }}
+                className="w-full px-4 py-3 text-left hover:bg-slate-50 transition-colors border-b border-slate-100"
+              >
+                <div className="font-medium text-slate-900">手动创建项目</div>
+                <div className="text-xs text-slate-600 mt-1">从零开始创建新项目</div>
+              </button>
+              
+              <button
+                onClick={() => {
+                  setShowCreateMenu(false)
+                  navigate('/real-project-onboarding')
+                }}
+                className="w-full px-4 py-3 text-left hover:bg-slate-50 transition-colors"
+              >
+                <div className="font-medium text-slate-900 flex items-center gap-2">
+                  真实项目快速接入
+                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">推荐</span>
+                </div>
+                <div className="text-xs text-slate-600 mt-1">快速接入已有真实项目</div>
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* 搜索栏 */}
@@ -107,13 +163,22 @@ export default function ProjectsV2() {
       {/* 项目列表 */}
       {filteredProjects.length === 0 ? (
         <div className="text-center py-12">
-          <div className="text-slate-400 text-lg mb-2">暂无项目</div>
-          <button
-            onClick={() => setShowCreateDialog(true)}
-            className="text-blue-600 hover:text-blue-700"
-          >
-            创建第一个项目
-          </button>
+          <div className="text-slate-400 text-lg mb-4">暂无项目</div>
+          <div className="flex flex-col items-center gap-3">
+            <button
+              onClick={() => setShowCreateDialog(true)}
+              className="px-6 py-3 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+            >
+              手动创建项目
+            </button>
+            <button
+              onClick={() => navigate('/real-project-onboarding')}
+              className="px-6 py-3 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors flex items-center gap-2"
+            >
+              真实项目快速接入
+              <span className="text-xs bg-white text-green-700 px-2 py-0.5 rounded">推荐</span>
+            </button>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

@@ -39,7 +39,12 @@ class ApiSpecLoader:
         if not self.spec_file.exists():
             raise FileNotFoundError(f"Spec file not found: {self.spec_file}")
         
-        content = self.spec_file.read_text(encoding='utf-8')
+        # 安全读取：先尝试 utf-8-sig（处理 BOM），再 fallback 到 replace 模式
+        try:
+            content = self.spec_file.read_text(encoding='utf-8-sig')
+        except UnicodeDecodeError:
+            raw = self.spec_file.read_bytes()
+            content = raw.decode('utf-8', errors='replace')
         
         if not content.strip():
             raise ValueError("Spec file is empty")

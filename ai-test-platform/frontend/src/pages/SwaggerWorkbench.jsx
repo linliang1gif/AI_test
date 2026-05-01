@@ -27,6 +27,7 @@ export default function SwaggerWorkbench() {
   // 导入状态
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState(null)
+  const [customBaseUrl, setCustomBaseUrl] = useState('')
 
   useEffect(() => { loadProjects() }, [])
 
@@ -60,6 +61,7 @@ export default function SwaggerWorkbench() {
       if (!res.ok) { const err = await res.json(); throw new Error(err.detail || res.statusText) }
       const data = await res.json()
       setPreview(data)
+      setCustomBaseUrl(data.base_url || '')
       // 默认全选 page/list/detail
       const defaultSelected = new Set()
       ;(data.cases || []).forEach((c, i) => {
@@ -136,12 +138,18 @@ export default function SwaggerWorkbench() {
     setImporting(true); setError(null)
     const casesToImport = (preview?.cases || []).filter((_, i) => selectedIds.has(i))
     try {
+      const finalBaseUrl = customBaseUrl.trim() || preview?.base_url || ''
+      if (!finalBaseUrl) {
+        setError('请填写 API 服务地址 (base_url)，否则导入的用例无法执行。示例: https://api.example.com')
+        setImporting(false)
+        return
+      }
       const res = await fetch('/api/v2/swagger/batch-import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           project_id: selectedProject,
-          base_url: preview?.base_url || '',
+          base_url: finalBaseUrl,
           cases: casesToImport,
         }),
       })
@@ -384,17 +392,34 @@ export default function SwaggerWorkbench() {
             </div>
 
             {/* 导入按钮 */}
-            <div className="p-4 border-t bg-gray-50 flex items-center justify-between">
-              <span className="text-sm text-gray-500">
-                已选 <strong className="text-blue-600">{selectedIds.size}</strong> / {preview.cases?.length || 0} 个接口
-              </span>
-              <button
-                onClick={handleImport}
-                disabled={importing || selectedIds.size === 0 || !selectedProject}
-                className="px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium"
-              >
-                {importing ? '导入中...' : `导入 ${selectedIds.size} 个用例到项目`}
-              </button>
+            <div className="p-4 border-t bg-gray-50">
+              <div className="flex items-center gap-3 mb-3">
+                <label className="text-xs text-gray-500 whitespace-nowrap">API 服务地址:</label>
+                <input
+                  type="text"
+                  value={customBaseUrl}
+                  onChange={(e) => setCustomBaseUrl(e.target.value)}
+                  placeholder="https://api.example.com  (必填，用例 URL = 此地址 + 接口路径)"
+                  className={`flex-1 px-3 py-1.5 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 ${
+                    !customBaseUrl.trim() ? 'border-orange-400 bg-orange-50' : 'border-gray-300'
+                  }`}
+                />
+              </div>
+              {!customBaseUrl.trim() && (
+                <p className="text-xs text-orange-600 mb-2">⚠️ 请填写 API 服务地址，否则导入的用例 URL 只有路径没有域名，无法执行</p>
+              )}
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500">
+                  已选 <strong className="text-blue-600">{selectedIds.size}</strong> / {preview.cases?.length || 0} 个接口
+                </span>
+                <button
+                  onClick={handleImport}
+                  disabled={importing || selectedIds.size === 0 || !selectedProject}
+                  className="px-6 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 text-sm font-medium"
+                >
+                  {importing ? '导入中...' : `导入 ${selectedIds.size} 个用例到项目`}
+                </button>
+              </div>
             </div>
           </div>
         )}
