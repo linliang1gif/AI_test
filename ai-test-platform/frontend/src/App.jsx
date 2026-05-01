@@ -21,7 +21,8 @@ import BatchRunCenter from './pages/BatchRunCenter'
 import Dashboard from './pages/Dashboard'
 import RealProjectOnboarding from './pages/RealProjectOnboarding'
 
-const GLOBAL_ENV_STORAGE_KEY = 'ai_test_global_environment'
+// 健康检查轮询间隔（毫秒）
+const HEALTH_CHECK_INTERVAL = 30000
 
 // AI对话组件 - 改为技术支持
 function TechSupportWidget() {
@@ -144,16 +145,8 @@ function TechSupportWidget() {
 }
 
 function App() {
-  const [currentRole, setCurrentRole] = useState(() => localStorage.getItem('pilot_role') || 'admin')
-  const [globalEnvironment, setGlobalEnvironment] = useState(() => localStorage.getItem(GLOBAL_ENV_STORAGE_KEY) || 'test')
-  const [ping, setPing] = useState({ backend: 24, database: 12 })
-  const [failedTasks] = useState([
-    { id: 1, name: '订单处理服务 - 支付接口', time: '18:30', error: 'Timeout' },
-    { id: 2, name: '商品管理平台 - 库存更新', time: '17:45', error: '500 Error' },
-    { id: 3, name: '用户管理系统 - 登录验证', time: '16:20', error: 'Assert Failed' }
-  ])
-  const [showFailedTasks, setShowFailedTasks] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [healthStatus, setHealthStatus] = useState({ ok: null, latency: null }) // null=未检测
   const [expandedSections, setExpandedSections] = useState({
     overview: false,  // 默认折叠,避免加载Dashboard
     projects: true,   // 项目管理分组
@@ -170,21 +163,22 @@ function App() {
     }))
   }
 
-  // 模拟实时 Ping 跳动
+  // 真实 /health 健康检查
   useEffect(() => {
-    const interval = setInterval(() => {
-      setPing({
-        backend: Math.floor(Math.random() * 50) + 10, // 10-60ms
-        database: Math.floor(Math.random() * 30) + 5   // 5-35ms
-      })
-    }, 2000)
+    const checkHealth = async () => {
+      try {
+        const start = performance.now()
+        const res = await fetch('/health', { signal: AbortSignal.timeout(5000) })
+        const latency = Math.round(performance.now() - start)
+        setHealthStatus({ ok: res.ok, latency })
+      } catch {
+        setHealthStatus({ ok: false, latency: null })
+      }
+    }
+    checkHealth()
+    const interval = setInterval(checkHealth, HEALTH_CHECK_INTERVAL)
     return () => clearInterval(interval)
   }, [])
-
-  const handleRoleChange = (value) => {
-    setCurrentRole(value)
-    localStorage.setItem('pilot_role', value)
-  }
 
   return (
     <ToastProvider>
@@ -224,7 +218,6 @@ function App() {
               {expandedSections.projects && [
                 { to: '/dashboard', icon: '■', label: '仪表盘' },
                 { to: '/projects-v2', icon: '■', label: '项目列表' },
-                { to: '/real-project-onboarding', icon: '■', label: '真实项目接入' },
                 { to: '/test-cases', icon: '■', label: '测试用例' },
               ].map(item => (
                 <NavLink 
@@ -338,39 +331,32 @@ function App() {
           {/* 底部状态 */}
           <div className="p-4 border-t border-slate-200">
             {!sidebarCollapsed ? (
-              <div className="bg-green-50 p-3 rounded-md border border-green-200">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-sm font-semibold text-green-700">系统监控</span>
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+              <div className={`p-3 rounded-md border ${
+                healthStatus.ok === null
+                  ? 'bg-slate-50 border-slate-200'
+                  : healthStatus.ok
+                    ? 'bg-green-50 border-green-200'
+                    : 'bg-red-50 border-red-200'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <span className={`text-sm font-semibold ${
+                    healthStatus.ok === null ? 'text-slate-600' : healthStatus.ok ? 'text-green-700' : 'text-red-700'
+                  }`}>后端状态</span>
+                  <div className={`w-2 h-2 rounded-full ${
+                    healthStatus.ok === null ? 'bg-slate-400' : healthStatus.ok ? 'bg-green-500 animate-pulse' : 'bg-red-500 animate-pulse'
+                  }`}></div>
                 </div>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-600">后端服务</span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-green-600">运行中</span>
-                      <span className={`font-mono transition-colors ${
-                        ping.backend > 100 ? 'text-red-600 animate-pulse' : 'text-slate-500'
-                      }`}>
-                        {ping.backend}ms
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-600">数据库</span>
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-green-600">已连接</span>
-                      <span className={`font-mono transition-colors ${
-                        ping.database > 100 ? 'text-red-600 animate-pulse' : 'text-slate-500'
-                      }`}>
-                        {ping.database}ms
-                      </span>
-                    </div>
-                  </div>
+                <div className="mt-2 text-xs text-slate-600">
+                  {healthStatus.ok === null ? '检测中...' : healthStatus.ok
+                    ? `服务正常${healthStatus.latency !== null ? ` · ${healthStatus.latency}ms` : ''}`
+                    : '连接异常'}
                 </div>
               </div>
             ) : (
               <div className="flex justify-center">
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                <div className={`w-2 h-2 rounded-full ${
+                  healthStatus.ok === null ? 'bg-slate-400' : healthStatus.ok ? 'bg-green-500 animate-pulse' : 'bg-red-500 animate-pulse'
+                }`}></div>
               </div>
             )}
             
@@ -390,108 +376,40 @@ function App() {
           {/* 顶部栏 */}
           <div className="bg-white border-b border-slate-200 px-6 py-3">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                {/* 环境选择器 */}
-                <select
-                  value={globalEnvironment}
-                  onChange={(e) => {
-                    setGlobalEnvironment(e.target.value)
-                    localStorage.setItem(GLOBAL_ENV_STORAGE_KEY, e.target.value)
-                  }}
-                  className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-                >
-                  <option value="production">生产环境</option>
-                  <option value="staging">预发布环境</option>
-                  <option value="test">测试环境</option>
-                </select>
-                
-                {/* 全局搜索框 - 标注为全局搜索 */}
-                <div className="relative">
-                  <input 
-                    type="text" 
-                    placeholder="全局搜索：测试用例、接口、项目..." 
-                    className="w-96 px-4 py-2 pl-10 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                  <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                </div>
+              <div className="flex items-center gap-3">
+                <h2 className="text-base font-semibold text-slate-800">AI 测试平台</h2>
               </div>
               
               <div className="flex items-center gap-3">
-                <select
-                  value={currentRole}
-                  onChange={(e) => handleRoleChange(e.target.value)}
-                  className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-                >
-                  <option value="admin">admin</option>
-                  <option value="operator">operator</option>
-                  <option value="viewer">viewer</option>
-                </select>
-
-                {/* 新建测试任务按钮 */}
-                <button className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium transition-colors">
-                  <span className="text-lg">+</span>
-                  新建测试任务
-                </button>
-                
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-green-50 border border-green-200 rounded-md">
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  <span className="text-sm text-green-700 font-medium">系统就绪</span>
-                </div>
-                
-                {/* 通知铃铛 - 增强版 */}
-                <div className="relative">
-                  <button 
-                    onClick={() => setShowFailedTasks(!showFailedTasks)}
-                    className="relative p-2 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                    </svg>
-                    {failedTasks.length > 0 && (
-                      <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
-                    )}
-                  </button>
-                  
-                  {/* 最近失败任务下拉列表 */}
-                  {showFailedTasks && (
-                    <div className="absolute right-0 top-full mt-2 w-80 bg-white border border-slate-200 rounded-md shadow-lg z-50">
-                      <div className="p-3 border-b border-slate-200 bg-red-50">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-semibold text-red-900">最近失败任务</span>
-                          <span className="text-xs text-red-600">{failedTasks.length} 个</span>
-                        </div>
-                      </div>
-                      <div className="max-h-64 overflow-y-auto">
-                        {failedTasks.map(task => (
-                          <div 
-                            key={task.id}
-                            className="p-3 border-b border-slate-100 hover:bg-slate-50 cursor-pointer"
-                            onClick={() => alert(`查看错误日志:\n${task.name}\n错误: ${task.error}`)}
-                          >
-                            <div className="flex items-start justify-between">
-                              <div className="flex-1">
-                                <div className="text-sm font-medium text-slate-900">{task.name}</div>
-                                <div className="text-xs text-red-600 mt-1">错误: {task.error}</div>
-                              </div>
-                              <span className="text-xs text-slate-500">{task.time}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <div className="p-2 border-t border-slate-200 bg-slate-50">
-                        <button 
-                          onClick={() => setShowFailedTasks(false)}
-                          className="w-full text-xs text-blue-600 hover:text-blue-800"
-                        >
-                          查看全部
-                        </button>
-                      </div>
-                    </div>
+                {/* 真实健康状态 */}
+                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-md border ${
+                  healthStatus.ok === null
+                    ? 'bg-slate-50 border-slate-200'
+                    : healthStatus.ok
+                      ? 'bg-green-50 border-green-200'
+                      : 'bg-red-50 border-red-200'
+                }`}>
+                  <div className={`w-2 h-2 rounded-full ${
+                    healthStatus.ok === null
+                      ? 'bg-slate-400'
+                      : healthStatus.ok
+                        ? 'bg-green-500 animate-pulse'
+                        : 'bg-red-500 animate-pulse'
+                  }`}></div>
+                  <span className={`text-sm font-medium ${
+                    healthStatus.ok === null
+                      ? 'text-slate-500'
+                      : healthStatus.ok
+                        ? 'text-green-700'
+                        : 'text-red-700'
+                  }`}>
+                    {healthStatus.ok === null ? '检测中...' : healthStatus.ok ? '系统就绪' : '连接异常'}
+                  </span>
+                  {healthStatus.ok && healthStatus.latency !== null && (
+                    <span className="text-xs text-slate-500 font-mono">{healthStatus.latency}ms</span>
                   )}
                 </div>
-                
+
                 <div className="flex items-center gap-3 pl-3 border-l border-slate-200">
                   <div className="w-8 h-8 bg-blue-600 rounded-md flex items-center justify-center text-white text-sm font-medium">
                     AI
