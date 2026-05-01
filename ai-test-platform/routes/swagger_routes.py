@@ -171,6 +171,7 @@ def _generate_cases_from_yapi_data(data):
     return cases, {"base_url": "", "swagger_version": "yapi", "tags": tags, "stats": stats}
 
 
+
 def _fetch_yapi_open_api(base_url, token, timeout=30):
     root_url = base_url.rstrip("/")
     project_resp = requests.get(
@@ -251,16 +252,44 @@ async def import_swagger_from_url(
     从 URL 导入 Swagger/OpenAPI
     
     支持的 URL: 公开的 Swagger JSON/YAML 地址
+    
+    去重逻辑：同一 project_id + source_url 已存在时，返回 409 Conflict
     """
     try:
+        from database.models import ApiSpec
+        
+        # URL规范化：trim + 去掉尾部斜杠
+        normalized_url = request.url.strip().rstrip('/')
+        
+        # 检查是否已存在相同的source_url
+        existing_spec = db.query(ApiSpec).filter(
+            ApiSpec.project_id == request.project_id,
+            ApiSpec.source_url == normalized_url
+        ).first()
+        
+        if existing_spec:
+            # 返回 409 Conflict，结构化错误
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "SWAGGER_ALREADY_IMPORTED",
+                    "message": "该Swagger文档已导入过",
+                    "api_spec_id": existing_spec.id,
+                    "project_id": existing_spec.project_id,
+                    "source_url": existing_spec.source_url
+                }
+            )
+        
         service = SwaggerService(db)
         result = service.import_from_url(
             project_id=request.project_id,
-            url=request.url,
+            url=normalized_url,
             generate_cases=request.generate_cases
         )
         
         return result
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -365,9 +394,21 @@ async def preview_swagger_from_yapi(request: dict):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"YApi OpenAPI 解析失败: {str(e)}")
 
+    # 如果 base_url 为空，从 yapi_base_url 提取服务地址
+    resolved_base = meta.get("base_url", "")
+    if not resolved_base:
+        import re as _re
+        _cleaned = _re.sub(r'/api/.*$', '', yapi_base_url)
+        _cleaned = _re.sub(r'/project/\d+.*$', '', _cleaned)
+        _cleaned = _re.sub(r'/group/\d+.*$', '', _cleaned)
+        resolved_base = _cleaned.rstrip("/")
+        # YApi 场景：把域名前缀传给前端
+        if resolved_base and not resolved_base.startswith("http"):
+            resolved_base = "https://" + resolved_base
+
     return {
         "source_url": openapi_url,
-        "base_url": meta.get("base_url", ""),
+        "base_url": resolved_base,
         "swagger_version": meta.get("swagger_version", ""),
         "tags": meta.get("tags", []),
         "stats": meta.get("stats", {}),

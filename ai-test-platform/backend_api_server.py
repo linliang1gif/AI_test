@@ -483,6 +483,14 @@ try:
 except ImportError as e:
     print(f"⚠️  AI 报告分析路由导入失败: {e}")
 
+# 🆕 导入并注册真实项目快速接入路由（P1 Round 6）
+try:
+    from routes.real_project_routes import router as real_project_router
+    app.include_router(real_project_router)
+    print("✅ 真实项目快速接入路由已加载（P1 Round 6）")
+except ImportError as e:
+    print(f"⚠️  真实项目快速接入路由导入失败: {e}")
+
 # ==================== 数据模型 ====================
 
 # 测试数据工厂相关模型

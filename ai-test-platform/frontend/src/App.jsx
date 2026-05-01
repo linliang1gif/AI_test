@@ -19,6 +19,7 @@ import ApiSpecDetail from './pages/ApiSpecDetail'
 import AIConfigPage from './pages/AIConfigPage'
 import BatchRunCenter from './pages/BatchRunCenter'
 import Dashboard from './pages/Dashboard'
+import RealProjectOnboarding from './pages/RealProjectOnboarding'
 
 const GLOBAL_ENV_STORAGE_KEY = 'ai_test_global_environment'
 
@@ -223,6 +224,7 @@ function App() {
               {expandedSections.projects && [
                 { to: '/dashboard', icon: '■', label: '仪表盘' },
                 { to: '/projects-v2', icon: '■', label: '项目列表' },
+                { to: '/real-project-onboarding', icon: '■', label: '真实项目接入' },
                 { to: '/test-cases', icon: '■', label: '测试用例' },
               ].map(item => (
                 <NavLink 
@@ -524,6 +526,7 @@ function App() {
               <Route path="/ai-config" element={<AIConfigPage />} />
               <Route path="/executor-v2" element={<ExecutorV2 />} />
               <Route path="/batch-run" element={<BatchRunCenter />} />
+              <Route path="/real-project-onboarding" element={<RealProjectOnboarding />} />
               
               {/* 旧版页面 - 重定向到V2或占位页 */}
               <Route path="/projects" element={<Navigate to="/projects-v2" replace />} />
