@@ -507,6 +507,18 @@ export const api = {
       }),
     },
 
+    // 获取系统运行模式
+    getAppMode: async () => {
+      try {
+        const res = await fetch('/health')
+        if (res.ok) {
+          const data = await res.json()
+          return data.app_mode || 'mock'
+        }
+      } catch {}
+      return 'mock'
+    },
+
     testCases: {
       getAll: (params = {}) => {
         const query = new URLSearchParams(params).toString()

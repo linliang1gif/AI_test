@@ -6,6 +6,7 @@ POST /api/v2/test-cases/{case_id}/execute
 从数据库读取TestCase → 变量替换 → 真实HTTP请求 → 断言校验 → 写入RunCase
 """
 
+import os
 import uuid
 import time
 import json
@@ -36,6 +37,11 @@ from app.executor_v2.models import (
 
 router = APIRouter(prefix="/api/v2/test-cases", tags=["TestCase-Execute"])
 
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+def _get_app_mode() -> str:
+    return os.getenv("APP_MODE", "mock")
+
 
 # ---------- Request / Response Models ----------
 
@@ -44,6 +50,7 @@ class ExecuteRequest(BaseModel):
     base_url: Optional[str] = Field(None, description="直接指定base_url，优先于environment_id")
     dataset_id: Optional[str] = Field(None, description="数据集ID，用于变量替换")
     variables: Optional[Dict[str, Any]] = Field(None, description="直接传入变量，优先于dataset_id")
+    allow_unsafe_methods: bool = Field(False, description="real模式下是否允许执行写操作")
 
 
 class ExecuteResponse(BaseModel):
@@ -65,6 +72,7 @@ class BatchExecuteRequest(ExecuteRequest):
     preset: Optional[str] = Field(None, description="推荐测试集: smoke/regression/query-safe/failed-rerun/p0")
     allow_write_operations: bool = Field(True, description="是否允许执行写操作接口（Dev环境默认允许）")
     skip_destructive: bool = Field(False, description="跳过 destructive=true 的用例")
+    # allow_unsafe_methods inherited from ExecuteRequest
 
 
 class BatchExecuteResponse(BaseModel):
@@ -217,6 +225,27 @@ def batch_execute_test_cases(
     missing_ids = [cid for cid in req.case_ids if cid not in found_ids]
     if not cases:
         raise HTTPException(status_code=404, detail="未找到可执行的测试用例")
+
+    # 真实项目安全执行保护 — 批量
+    app_mode = _get_app_mode()
+    if app_mode == "real" and not req.allow_unsafe_methods:
+        unsafe_cases = []
+        for tc in cases:
+            cfg = tc.execution_config or {}
+            m = (cfg.get('method') or 'GET').upper()
+            if m in UNSAFE_METHODS:
+                unsafe_cases.append({"case_id": tc.id, "title": tc.title, "method": m, "url": cfg.get('url', '')})
+        if unsafe_cases:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "REAL_MODE_UNSAFE_METHOD_BLOCKED",
+                    "message": f"真实项目模式下默认禁止执行写操作，批量中包含 {len(unsafe_cases)} 个危险方法用例，请手动确认后再执行",
+                    "unsafe_count": len(unsafe_cases),
+                    "unsafe_cases": unsafe_cases[:20],
+                    "app_mode": app_mode,
+                }
+            )
 
     skipped_write_cases = []
     skipped_destructive_cases = []    # list of tc.id
@@ -484,6 +513,8 @@ def batch_execute_test_cases(
     test_run.failed_cases = counters["failed"] + counters["error"]
     test_run.skipped_cases = total_skipped
     test_run.summary = json.dumps({
+        "app_mode": app_mode,
+        "allow_unsafe_methods": req.allow_unsafe_methods,
         "missing_case_ids": missing_ids,
         "skipped_write_case_ids": skipped_write_cases,
         "skipped_destructive_case_ids": skipped_destructive_cases,
@@ -558,6 +589,21 @@ def execute_test_case(
         raise HTTPException(
             status_code=400,
             detail=f"用例 {case_id} 缺少执行配置(method/url)，无法执行接口测试"
+        )
+
+    # 1.5 真实项目安全执行保护
+    app_mode = _get_app_mode()
+    method_upper = (exec_config.get('method', 'GET')).upper()
+    if app_mode == "real" and method_upper in UNSAFE_METHODS and not req.allow_unsafe_methods:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "REAL_MODE_UNSAFE_METHOD_BLOCKED",
+                "message": "真实项目模式下默认禁止执行写操作，请手动确认后再执行",
+                "method": method_upper,
+                "url": exec_config.get('url', ''),
+                "app_mode": app_mode,
+            }
         )
 
     # 2. 确定 base_url
@@ -653,6 +699,10 @@ def execute_test_case(
     # 8. 写入数据库
     try:
         # 创建 TestRun
+        run_summary = json.dumps({
+            "app_mode": app_mode,
+            "allow_unsafe_methods": req.allow_unsafe_methods,
+        }, ensure_ascii=False)
         test_run = TestRun(
             id=run_id,
             project_id=1,  # 默认项目
@@ -666,6 +716,7 @@ def execute_test_case(
             total_cases=1,
             passed_cases=1 if final_status == 'passed' else 0,
             failed_cases=1 if final_status in ('failed', 'error') else 0,
+            summary=run_summary,
         )
         db.add(test_run)
 

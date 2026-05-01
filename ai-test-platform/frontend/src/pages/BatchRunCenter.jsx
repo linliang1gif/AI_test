@@ -39,6 +39,7 @@ export default function BatchRunCenter() {
   // 项目和环境列表
   const [projects, setProjects] = useState([])
   const [environments, setEnvironments] = useState([])
+  const [appMode, setAppMode] = useState('mock')
 
   // 创建表单
   const [form, setForm] = useState({
@@ -54,6 +55,7 @@ export default function BatchRunCenter() {
 
   // ── 加载项目列表 ────────────────────────
   useEffect(() => {
+    fetch('/health').then(r => r.ok ? r.json() : {}).then(d => setAppMode(d.app_mode || 'mock')).catch(() => {})
     fetch('/api/v2/projects').then(r => r.ok ? r.json() : []).then(data => {
       const list = Array.isArray(data) ? data : (data.items || data.projects || [])
       setProjects(list)
@@ -96,6 +98,11 @@ export default function BatchRunCenter() {
 
   // ── 创建批量任务 ────────────────────────
   const handleCreate = async () => {
+    if (appMode === 'real') {
+      if (!window.confirm(
+        '当前为真实项目模式，批量执行可能包含写操作用例，\n可能修改真实测试环境数据。\n\n是否确认创建批量执行任务？'
+      )) return
+    }
     setLoading(true)
     try {
       const filters = {}

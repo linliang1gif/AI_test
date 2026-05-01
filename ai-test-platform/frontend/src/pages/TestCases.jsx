@@ -49,12 +49,14 @@ export default function TestCases() {
   // Phase 19: AI Analysis
   const [aiAnalysis, setAiAnalysis] = useState(null)
   const [aiAnalysisLoading, setAiAnalysisLoading] = useState(false)
+  const [appMode, setAppMode] = useState('mock')
 
   useEffect(() => {
     loadProjects()
     loadTestCases()
     loadDatasets()
     loadEnvironments()
+    api.v2.getAppMode().then(setAppMode)
   }, [])
 
   const loadTestCases = async (projectId) => {
@@ -338,21 +340,32 @@ export default function TestCases() {
     }
   }
 
+  const UNSAFE_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE']
+
   const handleExecuteTest = async (testCase) => {
     if (!selectedEnvironmentId) {
       alert('请先选择执行环境')
       return
     }
-    if (!window.confirm(`确定要执行接口测试: ${testCase.title}?`)) {
-      return
+
+    // 真实项目模式安全确认
+    const method = ((testCase.execution_config?.method) || 'GET').toUpperCase()
+    let allowUnsafe = false
+    if (appMode === 'real' && UNSAFE_METHODS.includes(method)) {
+      if (!window.confirm(
+        `当前为真实项目模式，该用例使用 ${method} 方法，可能修改真实测试环境数据。\n\n用例: ${testCase.title}\n接口: ${testCase.execution_config?.url || ''}\n\n是否确认执行？`
+      )) return
+      allowUnsafe = true
+    } else {
+      if (!window.confirm(`确定要执行接口测试: ${testCase.title}?`)) return
     }
 
     setIsExecuting(true)
     setSelectedTestCase(testCase)
     try {
-      // 调用新的一键执行接口 (Phase 11)
       const result = await api.v2.testCases.execute(testCase.id, {
         environment_id: Number(selectedEnvironmentId),
+        allow_unsafe_methods: allowUnsafe,
       })
       
       setExecutionResult(result)
@@ -369,7 +382,12 @@ export default function TestCases() {
       let msg = error.message || '执行失败'
       try {
         const parsed = JSON.parse(msg.replace(/^API调用失败: \d+ /, ''))
-        if (parsed.detail) msg = parsed.detail
+        const detail = parsed.detail
+        if (detail && typeof detail === 'object' && detail.code === 'REAL_MODE_UNSAFE_METHOD_BLOCKED') {
+          msg = `真实项目模式已阻止写操作。\n方法: ${detail.method}\n接口: ${detail.url}\n如确认允许写操作，请勾选“允许执行写操作”。`
+        } else if (detail && typeof detail === 'string') {
+          msg = detail
+        }
       } catch {}
       alert('执行失败: ' + msg)
     } finally {
@@ -388,14 +406,31 @@ export default function TestCases() {
       alert('请选择可执行的接口测试用例进行批量执行')
       return
     }
-    if (!window.confirm(`确定要批量执行 ${apiCases.length} 个接口测试用例吗?`)) {
-      return
+    // 真实项目模式安全确认
+    let allowUnsafe = false
+    if (appMode === 'real') {
+      const unsafeCases = apiCases.filter(tc => {
+        const m = ((tc.execution_config?.method) || 'GET').toUpperCase()
+        return UNSAFE_METHODS.includes(m)
+      })
+      if (unsafeCases.length > 0) {
+        const unsafeList = unsafeCases.slice(0, 5).map(tc => `  ${(tc.execution_config?.method || 'GET').toUpperCase()} ${tc.execution_config?.url || ''}`).join('\n')
+        if (!window.confirm(
+          `当前为真实项目模式，批量中包含 ${unsafeCases.length} 个写操作用例：\n${unsafeList}${unsafeCases.length > 5 ? '\n  ...' : ''}\n\n可能修改真实测试环境数据，是否确认执行？`
+        )) return
+        allowUnsafe = true
+      } else {
+        if (!window.confirm(`确定要批量执行 ${apiCases.length} 个接口测试用例吗?`)) return
+      }
+    } else {
+      if (!window.confirm(`确定要批量执行 ${apiCases.length} 个接口测试用例吗?`)) return
     }
 
     setIsExecuting(true)
     try {
       const result = await api.v2.testCases.batchExecute(apiCases.map(tc => tc.id), {
         environment_id: Number(selectedEnvironmentId),
+        allow_unsafe_methods: allowUnsafe,
       })
       setExecutionResult({ ...result, is_batch: true })
       setShowResultDialog(true)

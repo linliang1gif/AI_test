@@ -542,8 +542,10 @@ async def health_check():
     - 关键表存在性
     - 各模块可用性
     """
+    app_mode = os.getenv("APP_MODE", "mock")
     health_status = {
         "status": "healthy",
+        "app_mode": app_mode,
         "timestamp": datetime.now().isoformat(),
         "database": {
             "connected": False,
@@ -628,6 +630,17 @@ async def readiness_check():
             status_code=503,
             detail=f"系统未就绪: {str(e)}"
         )
+
+# ==================== 运行模式管理（仅开发/测试用） ====================
+
+@app.put("/admin/app-mode")
+async def set_app_mode(mode: str = "mock"):
+    """切换 APP_MODE（仅用于自动化测试，生产环境应禁用此端点）"""
+    if mode not in ("mock", "real"):
+        raise HTTPException(status_code=400, detail="mode must be 'mock' or 'real'")
+    os.environ["APP_MODE"] = mode
+    return {"success": True, "app_mode": mode}
+
 
 # ==================== 测试数据工厂 API ====================
 
