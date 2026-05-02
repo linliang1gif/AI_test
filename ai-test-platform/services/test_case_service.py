@@ -24,6 +24,7 @@ class TestCaseService:
         project_id: Optional[int] = None,
         source: Optional[str] = None,
         status: Optional[str] = None,
+        case_type: Optional[str] = None,
         skip: int = 0,
         limit: int = 100
     ) -> Tuple[List[TestCase], int]:
@@ -34,6 +35,7 @@ class TestCaseService:
             project_id: 项目ID
             source: 来源过滤
             status: 状态过滤
+            case_type: 用例类型过滤 (api/functional/web_ui)
             skip: 跳过数量
             limit: 限制数量
             
@@ -51,6 +53,8 @@ class TestCaseService:
             filters.append(TestCase.source == source)
         if status:
             filters.append(TestCase.status == status)
+        if case_type:
+            filters.append(TestCase.case_type == case_type)
         
         if filters:
             query = query.filter(and_(*filters))

@@ -672,6 +672,37 @@ def get_report_detail(
         else:
             risk_warnings.append("本次在真实项目模式下执行（仅读操作）。")
 
+    # P2-5: visual regression summary
+    visual_summary = None
+    if run:
+        vr_total = vr_passed = vr_failed = vr_baseline = 0
+        max_diff = 0.0
+        for c in cases:
+            resp = c.response_snapshot or {}
+            if isinstance(resp, str):
+                try:
+                    resp = json.loads(resp)
+                except Exception:
+                    resp = {}
+            for vr in (resp.get("visual_results") or []):
+                vr_total += 1
+                st = vr.get("status", "")
+                if st == "passed":
+                    vr_passed += 1
+                elif st == "baseline_created":
+                    vr_baseline += 1
+                elif st == "failed":
+                    vr_failed += 1
+                dr = vr.get("diff_ratio", 0) or 0
+                if dr > max_diff:
+                    max_diff = dr
+        if vr_total > 0:
+            visual_summary = {
+                "total": vr_total, "passed": vr_passed,
+                "failed": vr_failed, "baseline_created": vr_baseline,
+                "max_diff_ratio": round(max_diff, 6),
+            }
+
     return {
         "report_id": r.id,
         "run_id": r.run_id,
@@ -694,6 +725,7 @@ def get_report_detail(
         "allow_unsafe_methods": allow_unsafe,
         "risk_warnings": risk_warnings,
         "failure_summary": failure_summary,
+        "visual_summary": visual_summary,
         "download_url": f"/api/v2/test-runs/{r.run_id}/report/download?format=html",
         "run": {
             "id": run.id,

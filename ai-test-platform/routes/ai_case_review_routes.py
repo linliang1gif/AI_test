@@ -41,6 +41,7 @@ _HIGH_RISK_KEYWORDS = {'delete', 'remove', 'pay', 'submit', 'approve', 'refund',
 
 # ── 写操作方法 ──
 _WRITE_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
+_MAX_REVIEW_CASES = 200
 
 
 # ── 请求/响应模型 ──
@@ -387,6 +388,9 @@ def review_test_cases(
     AI 不可用时自动降级为纯规则评审。
     """
     cases = _load_cases(db, req)
+    original_total = len(cases)
+    if original_total > _MAX_REVIEW_CASES:
+        cases = cases[:_MAX_REVIEW_CASES]
 
     if not cases:
         return {
@@ -426,6 +430,9 @@ def review_test_cases(
         "success": True,
         "review_type": "rule+ai" if ai_enhanced else "rule",
         "ai_enhanced": ai_enhanced,
+        "truncated": original_total > _MAX_REVIEW_CASES,
+        "original_total_cases": original_total,
+        "reviewed_cases": len(cases),
         **rule_result,
     }
 
@@ -449,3 +456,300 @@ def review_test_cases(
         result["missing_scenarios"] = []
 
     return result
+
+
+# ── AI 自愈（P1-8A-Guard 安全加固版）──────────────────────
+
+# 允许 AI 修改的字段白名单
+HEAL_ALLOWED_FIELDS = {"steps", "expected", "assertions", "priority"}
+# 需二次确认的高风险字段（AI 可建议但默认不自动应用）
+HEAL_CONFIRM_FIELDS = {"title", "execution_config"}
+# 绝对禁止修改的字段
+HEAL_FORBIDDEN_FIELDS = {"id", "api_id", "dataset_id", "test_point_id", "source", "created_at", "created_by", "tags"}
+# 敏感字段关键词 — 送 AI 前脱敏
+SENSITIVE_KEYWORDS = {"authorization", "token", "access_token", "refresh_token",
+                      "password", "secret", "cookie", "api_key", "api-key"}
+
+
+class HealCaseRequest(BaseModel):
+    case_id: str = Field(..., description="要自愈的用例 ID")
+    issues: List[str] = Field(default=[], description="评审发现的问题列表")
+    fix_suggestion: str = Field(default="", description="AI 给出的修复建议")
+
+
+class HealBatchRequest(BaseModel):
+    cases: List[HealCaseRequest] = Field(..., description="要自愈的用例列表")
+    dry_run: bool = Field(True, description="true=仅预览不修改, false=确认应用修复")
+
+
+@router.post("/test-cases/heal", summary="AI 用例自愈（安全加固版）")
+def heal_test_cases(
+    req: HealBatchRequest,
+    db: Session = Depends(get_db),
+):
+    """
+    AI 用例自愈，默认 dry_run=true 仅返回修复建议。
+    前端展示 before/after 后，用户确认才以 dry_run=false 调用应用。
+    """
+    results = []
+
+    for item in req.cases:
+        result = _heal_one_case(item, db, dry_run=req.dry_run)
+        results.append(result)
+
+    applied = [r for r in results if r.get("applied")]
+    failed = [r for r in results if r.get("error")]
+
+    return {
+        "success": True,
+        "dry_run": req.dry_run,
+        "total": len(results),
+        "healed_count": len(applied),
+        "failed_count": len(failed),
+        "results": results,
+    }
+
+
+def _heal_one_case(item: HealCaseRequest, db: Session, dry_run: bool) -> Dict:
+    """处理单条用例的自愈请求"""
+    tc = db.query(TestCase).filter(TestCase.id == item.case_id).first()
+    if not tc:
+        return {"case_id": item.case_id, "error": "用例不存在", "applied": False}
+    if tc.status == "deleted":
+        return {"case_id": item.case_id, "error": "已删除的用例不允许自愈", "applied": False}
+
+    # before 快照
+    before = {
+        "steps": tc.steps or [],
+        "expected": tc.expected or "",
+        "assertions": tc.assertions or [],
+        "priority": tc.priority or "",
+    }
+
+    # 生成修复建议（AI 优先，降级到规则）
+    fix_data, source = _generate_fix(tc, item.issues, item.fix_suggestion)
+    if not fix_data:
+        return {"case_id": item.case_id, "error": "生成修复建议失败", "applied": False}
+
+    # 构建 after + changes（只保留白名单字段）
+    after = dict(before)
+    changes = []
+    for field in HEAL_ALLOWED_FIELDS:
+        new_val = fix_data.get(field)
+        if new_val is not None and new_val != before.get(field):
+            after[field] = new_val
+            changes.append({
+                "field": field,
+                "before": before.get(field),
+                "after": new_val,
+                "reason": fix_data.get("change_summary", "AI 建议修改"),
+            })
+
+    # 检测 AI 是否试图修改高风险字段
+    risk_warnings = []
+    for field in HEAL_CONFIRM_FIELDS:
+        if fix_data.get(field) is not None:
+            risk_warnings.append(f"AI 建议修改 {field}（已忽略，需人工确认）")
+    for field in HEAL_FORBIDDEN_FIELDS:
+        if fix_data.get(field) is not None:
+            risk_warnings.append(f"AI 试图修改禁止字段 {field}（已拦截）")
+
+    result = {
+        "case_id": item.case_id,
+        "dry_run": dry_run,
+        "source": source,
+        "before": before,
+        "after": after,
+        "changes": changes,
+        "risk_warnings": risk_warnings,
+        "change_summary": fix_data.get("change_summary", ""),
+        "applied": False,
+    }
+
+    if not changes:
+        result["error"] = "无需修改"
+        return result
+
+    if dry_run:
+        result["risk_warning"] = "AI 生成内容需要人工确认后再应用"
+        return result
+
+    # dry_run=false → 应用修改
+    from services.test_case_service import TestCaseService
+    svc = TestCaseService(db)
+
+    # 再次校验（防止并发删除）
+    tc_check = db.query(TestCase).filter(TestCase.id == item.case_id).first()
+    if not tc_check or tc_check.status == "deleted":
+        result["error"] = "用例已被删除，无法应用"
+        return result
+
+    update_data = {}
+    for ch in changes:
+        update_data[ch["field"]] = ch["after"]
+
+    svc.update_test_case(item.case_id, update_data)
+    result["applied"] = True
+    result["updated_fields"] = list(update_data.keys())
+    return result
+
+
+def _sanitize_for_ai(data: dict) -> dict:
+    """脱敏敏感字段，防止发送给 AI"""
+    sanitized = {}
+    for k, v in data.items():
+        if k.lower() in SENSITIVE_KEYWORDS:
+            sanitized[k] = "***REDACTED***"
+        elif isinstance(v, dict):
+            sanitized[k] = _sanitize_for_ai(v)
+        elif isinstance(v, str) and any(kw in k.lower() for kw in SENSITIVE_KEYWORDS):
+            sanitized[k] = "***REDACTED***"
+        else:
+            sanitized[k] = v
+    return sanitized
+
+
+def _generate_fix(tc: TestCase, issues: List[str], fix_suggestion: str) -> tuple:
+    """生成修复建议。返回 (fix_data, source)。AI 不可用时降级到规则。"""
+    # 先尝试 AI
+    fix_data = _ai_heal_one(tc, issues, fix_suggestion)
+    if fix_data:
+        return fix_data, "ai"
+
+    # AI 不可用 → 规则降级
+    return _rule_based_fix(tc, issues), "rule_based"
+
+
+def _rule_based_fix(tc: TestCase, issues: List[str]) -> Dict:
+    """规则降级：根据问题类型生成基础修复建议"""
+    fix = {}
+    issues_lower = " ".join(issues).lower()
+
+    if not tc.steps or len(tc.steps) == 0 or "步骤" in issues_lower or "steps" in issues_lower:
+        is_api = tc.source in ('swagger', 'demo_swagger', 'demo_seed')
+        cfg = tc.execution_config or {}
+        if is_api and cfg.get("url"):
+            fix["steps"] = [
+                f"步骤1: 构造请求参数",
+                f"步骤2: 发送 {(cfg.get('method') or 'GET').upper()} 请求到 {cfg.get('url', '')}",
+                f"步骤3: 验证响应状态码",
+                f"步骤4: 验证响应体关键字段",
+            ]
+        else:
+            fix["steps"] = [
+                f"步骤1: 准备测试数据和前置条件",
+                f"步骤2: 执行测试操作 - {tc.title}",
+                f"步骤3: 验证操作结果符合预期",
+            ]
+
+    if not tc.expected or tc.expected.strip() == "" or "预期" in issues_lower or "expected" in issues_lower:
+        fix["expected"] = f"预期: {tc.title} 操作成功完成，返回正确结果"
+
+    if (not tc.assertions or len(tc.assertions) == 0) and ("断言" in issues_lower or "assertion" in issues_lower):
+        is_api = tc.source in ('swagger', 'demo_swagger', 'demo_seed')
+        if is_api:
+            fix["assertions"] = [
+                {"type": "status_code", "expected": 200},
+            ]
+
+    if fix:
+        fix["change_summary"] = "规则降级: " + ", ".join(fix.keys())
+
+    return fix
+
+
+def _ai_heal_one(tc: TestCase, issues: List[str], fix_suggestion: str) -> Optional[Dict]:
+    """用 AI 为单条用例生成修复内容"""
+    try:
+        from ai.ai_client import get_ai_client
+        client = get_ai_client(module="case_review")
+
+        cfg = _sanitize_for_ai(tc.execution_config or {})
+        method = (cfg.get("method") or "").upper()
+        path = cfg.get("url") or cfg.get("path") or ""
+
+        is_api = tc.source in ('swagger', 'demo_swagger', 'demo_seed')
+
+        current_info = _sanitize_for_ai({
+            "id": tc.id,
+            "title": tc.title,
+            "method": method if is_api else "",
+            "path": path if is_api else "",
+            "current_steps": tc.steps or [],
+            "current_expected": tc.expected or "",
+            "current_assertions": tc.assertions or [],
+            "priority": tc.priority,
+            "data_type": tc.data_type,
+            "source": tc.source,
+        })
+
+        issues_text = "\n".join(f"- {i}" for i in issues)
+
+        if is_api:
+            prompt = f"""你是测试专家。请修复以下接口测试用例的问题。
+
+## 当前用例
+{json.dumps(current_info, ensure_ascii=False, indent=2)}
+
+## 发现的问题
+{issues_text}
+
+## 修复建议
+{fix_suggestion}
+
+## 修复要求
+1. 补充完整的测试步骤（steps），每步包含具体操作
+2. 补充明确的预期结果（expected）
+3. 补充断言（assertions），至少包含状态码断言和关键字段断言
+4. 如果优先级不合理，给出合理的优先级
+5. 禁止修改 id, execution_config, tags 等字段
+
+请直接输出 JSON（不要 markdown）：
+{{
+  "steps": ["步骤1: 发送请求...", "步骤2: 验证响应..."],
+  "expected": "预期: 返回200, 响应体包含...",
+  "assertions": [
+    {{"type": "status_code", "expected": 200}},
+    {{"type": "json_field", "field": "字段名", "operator": "exists"}}
+  ],
+  "priority": "high/medium/low",
+  "change_summary": "一句话说明修改了什么"
+}}"""
+        else:
+            prompt = f"""你是测试专家。请修复以下功能测试用例的问题。
+
+## 当前用例
+{json.dumps(current_info, ensure_ascii=False, indent=2)}
+
+## 发现的问题
+{issues_text}
+
+## 修复建议
+{fix_suggestion}
+
+## 修复要求
+1. 补充详细可执行的测试步骤（steps），每步包含操作和验证点
+2. 补充明确可验证的预期结果（expected）
+3. 如果优先级不合理，给出合理的优先级
+4. 禁止修改 id, execution_config, tags 等字段
+
+请直接输出 JSON（不要 markdown）：
+{{
+  "steps": ["步骤1: 操作描述", "步骤2: 验证描述"],
+  "expected": "预期结果的详细描述",
+  "priority": "high/medium/low",
+  "change_summary": "一句话说明修改了什么"
+}}"""
+
+        # 日志只打印摘要，不打印完整 prompt
+        print(f"🔧 AI 自愈 [{tc.id}]: 发送 prompt ({len(prompt)} chars)")
+        response = client.generate_text(prompt)
+        text = response.strip()
+        json_match = re.search(r'\{[\s\S]*\}', text)
+        if json_match:
+            return json.loads(json_match.group())
+
+    except Exception as e:
+        print(f"⚠️  AI 自愈失败 [{tc.id}]: {type(e).__name__}: {str(e)[:200]}")
+
+    return None

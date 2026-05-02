@@ -21,13 +21,15 @@ import time
 import requests
 
 BASE = os.getenv("API_BASE", "http://localhost:8000")
+TESTING_KEY = os.getenv("TESTING_KEY", "")
+TESTING_HEADERS = {"X-Testing-Key": TESTING_KEY} if TESTING_KEY else {}
 PASSED = 0
 FAILED = 0
 TOTAL = 0
 
 
 def _set_mode(mode: str):
-    r = requests.put(f"{BASE}/admin/app-mode", params={"mode": mode}, timeout=5)
+    r = requests.put(f"{BASE}/admin/app-mode", params={"mode": mode}, headers=TESTING_HEADERS, timeout=5)
     assert r.status_code == 200, f"set_app_mode failed: {r.status_code} {r.text}"
     # verify
     h = requests.get(f"{BASE}/health", timeout=5).json()

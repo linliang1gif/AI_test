@@ -90,7 +90,7 @@ export default function TestCaseDetail() {
   const handleExecute = async () => {
     setExecuting(true)
     try {
-      const result = await api.testCases.execute(id)
+      const result = await api.v2.testCases.execute(id)
       if (result.success) {
         toast.success('测试用例执行完成')
         navigate('/test-runs')

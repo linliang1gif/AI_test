@@ -46,6 +46,9 @@ passlib[bcrypt]==1.7.4
 # 日志
 loguru==0.7.2
 
+# Web UI 自动化 (P2-4)
+playwright==1.49.1
+
 # 工具库
 jinja2==3.1.2
 pyyaml==6.0.1

@@ -11,7 +11,10 @@ import uuid
 import time
 import json
 import base64
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -225,6 +228,13 @@ def batch_execute_test_cases(
     missing_ids = [cid for cid in req.case_ids if cid not in found_ids]
     if not cases:
         raise HTTPException(status_code=404, detail="未找到可执行的测试用例")
+
+    # P2-3: 过滤掉 web_ui 用例
+    web_ui_cases = [tc for tc in cases if getattr(tc, 'case_type', None) == 'web_ui']
+    if web_ui_cases:
+        cases = [tc for tc in cases if getattr(tc, 'case_type', None) != 'web_ui']
+        if not cases:
+            raise HTTPException(status_code=400, detail="所选用例均为 Web UI 用例，暂不支持执行。Playwright 执行引擎将在 P2-4 支持。")
 
     # 真实项目安全执行保护 — 批量
     app_mode = _get_app_mode()
@@ -564,6 +574,173 @@ def batch_execute_test_cases(
         results=results,
     )
 
+def _execute_web_ui_case(tc, req, db):
+    """P2-4: 执行 Web UI 用例并写入结果"""
+    from services.playwright_engine import execute_web_ui, _is_playwright_available
+    import uuid as _uuid
+
+    if not _is_playwright_available():
+        raise HTTPException(
+            status_code=503,
+            detail="Playwright 未安装。请运行: pip install playwright && python -m playwright install chromium"
+        )
+
+    exec_config = tc.execution_config or {}
+    steps = tc.steps or []
+    assertions = tc.assertions or []
+
+    # P2-5: generate run_id first so visual regression can use it for file naming
+    run_id = f"RUN_{datetime.now().strftime('%Y%m%d%H%M%S')}_{_uuid.uuid4().hex[:8]}"
+
+    pw_result = execute_web_ui(
+        steps=steps,
+        assertions=assertions,
+        execution_config=exec_config,
+        case_id=tc.id,
+        run_id=run_id,
+    )
+
+    if pw_result.status == "error" and "仅支持 chromium" in pw_result.error_message:
+        raise HTTPException(status_code=400, detail=pw_result.error_message)
+    final_status = pw_result.status if pw_result.status in ("passed", "failed") else "failed"
+
+    try:
+        test_run = TestRun(
+            id=run_id,
+            project_id=1,
+            environment_id=req.environment_id if req.environment_id else None,
+            trigger_type="manual",
+            status=final_status,
+            trace_id=f"TRACE_{_uuid.uuid4().hex}",
+            start_time=datetime.fromisoformat(pw_result.started_at) if pw_result.started_at else datetime.now(),
+            end_time=datetime.fromisoformat(pw_result.finished_at) if pw_result.finished_at else datetime.now(),
+            duration=pw_result.duration_ms / 1000,
+            total_cases=1,
+            passed_cases=1 if final_status == "passed" else 0,
+            failed_cases=1 if final_status == "failed" else 0,
+            summary=json.dumps({"engine": "playwright", "case_type": "web_ui", "skipped_count": pw_result.skipped_count}, ensure_ascii=False),
+        )
+        db.add(test_run)
+
+        # 断言统计
+        a_passed = sum(1 for a in pw_result.assertion_results if a.passed)
+        a_failed = sum(1 for a in pw_result.assertion_results if not a.passed)
+        assertion_details = [
+            {"type": a.type, "value": a.value, "target": a.target, "passed": a.passed,
+             "actual": a.actual, "error_message": a.error_message, "description": a.description}
+            for a in pw_result.assertion_results
+        ]
+
+        run_case = RunCase(
+            run_id=run_id,
+            test_case_id=tc.id,
+            status=final_status,
+            start_time=test_run.start_time,
+            end_time=test_run.end_time,
+            duration=pw_result.duration_ms / 1000,
+            error_message=pw_result.error_message or None,
+            request_snapshot={"engine": "playwright", "steps_count": len(steps), "assertions_count": len(assertions)},
+            response_snapshot={"screenshots": [sr.screenshot_path for sr in pw_result.step_results if sr.screenshot_path],
+                               "failure_screenshot": pw_result.failure_screenshot,
+                               "visual_results": pw_result.visual_results},
+            assertions_passed=a_passed,
+            assertions_failed=a_failed,
+            assertion_details=assertion_details,
+        )
+        db.add(run_case)
+        db.flush()  # 获取 run_case.id
+
+        # 写入 run_steps
+        from database.models import RunStep
+        for sr in pw_result.step_results:
+            run_step = RunStep(
+                run_case_id=run_case.id,
+                step_name=f"{sr.action}: {sr.target or sr.value or sr.description}",
+                step_order=sr.step_index,
+                status=sr.status,
+                start_time=test_run.start_time,
+                end_time=test_run.end_time,
+                duration=sr.duration_ms / 1000,
+                input_snapshot={
+                    "action": sr.action,
+                    "target": sr.target,
+                    "value": sr.value,
+                    "description": sr.description,
+                },
+                output_snapshot={
+                    "current_url": sr.current_url,
+                    "screenshot_path": sr.screenshot_path,
+                },
+                error_message=sr.error_message or None,
+                error_type="step_error" if sr.status == "failed" else None,
+            )
+            db.add(run_step)
+
+        # 断言也作为 step 记录
+        for i, ar in enumerate(pw_result.assertion_results):
+            run_step = RunStep(
+                run_case_id=run_case.id,
+                step_name=f"assert:{ar.type} — {ar.description or ar.value}",
+                step_order=len(pw_result.step_results) + i,
+                status="passed" if ar.passed else "failed",
+                start_time=test_run.start_time,
+                end_time=test_run.end_time,
+                duration=0,
+                input_snapshot={
+                    "type": ar.type,
+                    "target": ar.target,
+                    "value": ar.value,
+                    "description": ar.description,
+                },
+                output_snapshot={
+                    "actual": ar.actual,
+                    "passed": ar.passed,
+                },
+                error_message=ar.error_message or None,
+                error_type="assertion_error" if not ar.passed else None,
+            )
+            db.add(run_step)
+
+        # 更新用例状态
+        tc.status = final_status
+        tc.updated_at = datetime.now()
+        tc.last_run_status = final_status
+        if final_status == "failed":
+            tc.failure_category = "ui_step_error"
+        else:
+            tc.failure_category = None
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Web UI 执行结果写入失败: {e}")
+
+    return ExecuteResponse(
+        success=True,
+        case_id=tc.id,
+        run_id=run_id,
+        status=final_status,
+        duration_ms=round(pw_result.duration_ms, 2),
+        assertion_summary={"passed": a_passed if pw_result.assertion_results else 0,
+                           "failed": a_failed if pw_result.assertion_results else 0},
+        assertion_details=assertion_details if pw_result.assertion_results else [],
+        error_message=pw_result.error_message or "",
+        request_snapshot={"engine": "playwright"},
+        response_snapshot={
+            "failure_screenshot": pw_result.failure_screenshot,
+            "skipped_count": pw_result.skipped_count,
+            "step_results": [
+                {"index": sr.step_index, "action": sr.action, "target": sr.target,
+                 "status": sr.status, "duration_ms": round(sr.duration_ms, 2),
+                 "error": sr.error_message, "screenshot": sr.screenshot_path,
+                 "url": sr.current_url, "description": sr.description}
+                for sr in pw_result.step_results
+            ],
+            "visual_results": pw_result.visual_results,
+        },
+    )
+
+
 @router.post("/{case_id}/execute", response_model=ExecuteResponse)
 def execute_test_case(
     case_id: str,
@@ -583,6 +760,10 @@ def execute_test_case(
     tc = db.query(TestCase).filter(TestCase.id == case_id).first()
     if not tc:
         raise HTTPException(status_code=404, detail=f"测试用例不存在: {case_id}")
+
+    # P2-4: web_ui 用例走 PlaywrightEngine
+    if getattr(tc, 'case_type', None) == 'web_ui' or (tc.execution_config or {}).get('engine') == 'playwright':
+        return _execute_web_ui_case(tc, req, db)
 
     exec_config = tc.execution_config or {}
     if not exec_config.get('method') or not exec_config.get('url'):

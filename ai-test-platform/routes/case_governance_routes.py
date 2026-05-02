@@ -76,7 +76,43 @@ class GovernanceSummaryResponse(BaseModel):
     failed_count: int
 
 
+class TestCaseUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    steps: Optional[list] = None
+    expected: Optional[str] = None
+    assertions: Optional[list] = None
+    execution_config: Optional[dict] = None
+    priority: Optional[str] = None
+    module: Optional[str] = None
+    data_type: Optional[str] = None
+    status: Optional[str] = None
+    case_type: Optional[str] = None
+
+
 # ── 路由 ─────────────────────────────────────────────────
+
+@router.put("/{case_id}", summary="更新测试用例")
+async def update_test_case(
+    case_id: str,
+    req: TestCaseUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    """更新单条测试用例的字段"""
+    from services.test_case_service import TestCaseService
+    svc = TestCaseService(db)
+    update_data = {k: v for k, v in req.dict().items() if v is not None}
+    if not update_data:
+        return {"success": False, "message": "没有要更新的字段"}
+    tc = svc.update_test_case(case_id, update_data)
+    if not tc:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"用例 {case_id} 不存在")
+    return {
+        "success": True,
+        "message": f"用例 {case_id} 已更新",
+        "updated_fields": list(update_data.keys()),
+    }
+
 
 @router.post("/govern", response_model=GovernResponse)
 async def govern_test_cases(

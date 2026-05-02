@@ -134,10 +134,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-    execute: (data) => request(`${API_BASE_URL}/execute-api`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+    execute: (data) => { console.warn('[DEPRECATED] api.apis.execute -> use api.v2.testCases.execute'); return request(`${API_BASE_URL}/execute-api`, { method: 'POST', body: JSON.stringify(data) }) },
     saveAsTestCase: (data) => request(`${API_BASE_URL}/save-api-as-testcase`, {
       method: 'POST',
       body: JSON.stringify(data),
@@ -190,12 +187,23 @@ export const api = {
     generate: (file) => {
       const formData = new FormData()
       formData.append('file', file)
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 300000)
       return fetch(`${API_BASE_URL}/testcases/generate`, {
         method: 'POST',
         body: formData,
-      }).then(res => {
-        if (!res.ok) throw new Error('生成失败')
+        signal: controller.signal,
+      }).then(async res => {
+        clearTimeout(timeoutId)
+        if (!res.ok) {
+          const body = await res.text().catch(() => '')
+          try { const j = JSON.parse(body); throw new Error(j.error || j.detail || j.message || `HTTP ${res.status}`) } catch(e) { if (e instanceof SyntaxError) throw new Error(body || `生成失败 (HTTP ${res.status})`); throw e }
+        }
         return res.json()
+      }).catch(err => {
+        clearTimeout(timeoutId)
+        if (err.name === 'AbortError') throw new Error('AI生成超时(>5分钟)，请检查AI服务是否正常')
+        throw err
       })
     },
     generateFromSVN: (data) => request(`${API_BASE_URL}/ai/generate-testcases-from-svn`, {
@@ -205,13 +213,8 @@ export const api = {
     generateScript: (testCaseId) => request(`${API_BASE_URL}/testcases/${testCaseId}/generate-script`, {
       method: 'POST',
     }),
-    execute: (testCaseId) => request(`${API_BASE_URL}/testcases/${testCaseId}/execute`, {
-      method: 'POST',
-    }),
-    manualExecute: (testCaseId, data) => request(`${API_BASE_URL}/testcases/${testCaseId}/manual-execute`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+    execute: (testCaseId) => { console.warn('[DEPRECATED] api.testCases.execute -> use api.v2.testCases.execute'); return request(`${API_BASE_URL}/testcases/${testCaseId}/execute`, { method: 'POST' }) },
+    manualExecute: (testCaseId, data) => { console.warn('[DEPRECATED] api.testCases.manualExecute'); return request(`${API_BASE_URL}/testcases/${testCaseId}/manual-execute`, { method: 'POST', body: JSON.stringify(data) }) },
     bindDataset: (testCaseId, datasetId) => request(`${API_BASE_URL}/test-cases/${testCaseId}/bind-dataset`, {
       method: 'POST',
       body: JSON.stringify({ dataset_id: datasetId }),
@@ -331,6 +334,10 @@ export const api = {
     }),
     getAgents: () => request(`${API_BASE_URL}/ai/agents`),
     reviewCases: (data) => request(`${PILOT_API_BASE_URL}/ai/test-cases/review`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    healCases: (data) => request(`${PILOT_API_BASE_URL}/ai/test-cases/heal`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
@@ -484,12 +491,21 @@ export const api = {
         }
         const formData = new FormData()
         formData.append('file', file)
+        // 大文件解析+生成用例可能耗时较长，给 5 分钟超时
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 300000)
         return fetch(`${API_BASE_URL}/v2/swagger/import-file?project_id=${projectId}&generate_cases=${generateCases}`, {
           method: 'POST',
           body: formData,
+          signal: controller.signal,
         }).then(res => {
-          if (!res.ok) throw new Error('导入失败')
+          clearTimeout(timeoutId)
+          if (!res.ok) return res.text().then(t => { throw new Error(t || `HTTP ${res.status}`) })
           return res.json()
+        }).catch(err => {
+          clearTimeout(timeoutId)
+          if (err.name === 'AbortError') throw new Error('导入超时，文件过大请耐心等待或拆分文件')
+          throw err
         })
       },
       getApiSpecs: (projectId) => {
@@ -505,6 +521,10 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ api_spec_id: apiSpecId }),
       }),
+      coverage: (projectId) => {
+        const query = (projectId && !isNaN(projectId)) ? `?project_id=${projectId}` : ''
+        return request(`${API_BASE_URL}/v2/swagger/coverage${query}`)
+      },
     },
 
     // 获取系统运行模式
@@ -525,6 +545,14 @@ export const api = {
         return request(`${API_BASE_URL}/v2/test-cases${query ? '?' + query : ''}`)
       },
       get: (testCaseId) => request(`${API_BASE_URL}/v2/test-cases/${testCaseId}`),
+      create: (data) => request(`${API_BASE_URL}/v2/test-cases`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      update: (testCaseId, data) => request(`${API_BASE_URL}/v2/test-cases/${testCaseId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
       execute: (caseId, data = {}) => request(`${API_BASE_URL}/v2/test-cases/${caseId}/execute`, {
         method: 'POST',
         body: JSON.stringify(data),
@@ -605,6 +633,26 @@ export const api = {
       init: () => request(`${API_BASE_URL}/v2/demo/init`, { method: 'POST' }),
       reset: () => request(`${API_BASE_URL}/v2/demo/reset`, { method: 'POST' }),
       status: () => request(`${API_BASE_URL}/v2/demo/status`),
+    },
+
+    // ==================== UI Testing ====================
+    ui: {
+      scanPage: (data) => request(`${API_BASE_URL}/v2/ui/scan`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      saveLoginSession: (data) => request(`${API_BASE_URL}/v2/ui/login-session`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      getLoginSession: (projectId) => request(`${API_BASE_URL}/v2/ui/login-session/${projectId}`),
+      deleteLoginSession: (projectId) => request(`${API_BASE_URL}/v2/ui/login-session/${projectId}`, {
+        method: 'DELETE',
+      }),
+      aiGenerate: (data) => request(`${API_BASE_URL}/v2/ui/ai-generate`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
     },
   },
 }

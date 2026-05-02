@@ -246,6 +246,212 @@ def _build_case(
     return case
 
 
+# ── L2: 参数变异用例生成 ─────────────────────────────
+def _build_mutation_cases(
+    path: str,
+    method: str,
+    summary: str,
+    tags: List[str],
+    pattern: str,
+    req_schema: dict,
+    root_spec: dict = None,
+) -> List[Dict[str, Any]]:
+    """
+    L2 规则增强：基于 schema 自动生成参数变异用例。
+    不依赖 AI，纯规则 + 模板。
+    """
+    tag = tags[0] if tags else "未分类"
+    label = summary or path
+    mutations: List[Dict[str, Any]] = []
+
+    props = _extract_properties(req_schema, root_spec)
+    required = req_schema.get("required", []) if req_schema else []
+
+    # 只对有 body 的方法生成变异 (POST/PUT/PATCH)
+    if method not in ("POST", "PUT", "PATCH"):
+        # GET/DELETE: 只生成鉴权缺失
+        mutations.append({
+            "title": f"[{tag}] {label} - 鉴权缺失",
+            "method": method,
+            "path": path,
+            "headers": {},
+            "body": None,
+            "data_type": "auth_missing",
+            "expected_status": 401,
+            "assertions": [
+                {"type": "status_code_in", "expected": [401, 403]},
+            ],
+        })
+        return mutations
+
+    # 构建正向 body 作为基准
+    base_body = {}
+    for name, prop in props.items():
+        if name in ("_sign", "_timestamp", "sequence", "columns"):
+            continue
+        base_body[name] = _make_sample_value(prop)
+
+    # ---- 1. 必填字段缺失 ----
+    for field in required:
+        if field in ("_sign", "_timestamp", "sequence", "columns"):
+            continue
+        if field in base_body:
+            body = {k: v for k, v in base_body.items() if k != field}
+            mutations.append({
+                "title": f"[{tag}] {label} - 必填缺失: {field}",
+                "method": method,
+                "path": path,
+                "headers": {"Content-Type": "application/json"},
+                "body": body,
+                "data_type": "required_missing",
+                "expected_status": 400,
+                "assertions": [
+                    {"type": "status_code_in", "expected": [400, 422, 500]},
+                    {"type": "response_time", "expected": 10000},
+                ],
+            })
+
+    # ---- 2. 空值 ----
+    for field in required[:3]:
+        if field in base_body:
+            body = {**base_body, field: ""}
+            mutations.append({
+                "title": f"[{tag}] {label} - 空值: {field}",
+                "method": method,
+                "path": path,
+                "headers": {"Content-Type": "application/json"},
+                "body": body,
+                "data_type": "empty_value",
+                "expected_status": 400,
+                "assertions": [
+                    {"type": "status_code_in", "expected": [400, 422, 500]},
+                ],
+            })
+
+    # ---- 3. 类型错误 ----
+    for name, prop in list(props.items())[:5]:
+        t = prop.get("type", "string")
+        if t in ("integer", "number"):
+            body = {**base_body, name: "not_a_number"}
+            mutations.append({
+                "title": f"[{tag}] {label} - 类型错误: {name}='not_a_number'",
+                "method": method,
+                "path": path,
+                "headers": {"Content-Type": "application/json"},
+                "body": body,
+                "data_type": "type_error",
+                "expected_status": 400,
+                "assertions": [
+                    {"type": "status_code_in", "expected": [400, 422, 500]},
+                ],
+            })
+        elif t == "boolean":
+            body = {**base_body, name: "not_bool"}
+            mutations.append({
+                "title": f"[{tag}] {label} - 类型错误: {name}='not_bool'",
+                "method": method,
+                "path": path,
+                "headers": {"Content-Type": "application/json"},
+                "body": body,
+                "data_type": "type_error",
+                "expected_status": 400,
+                "assertions": [
+                    {"type": "status_code_in", "expected": [400, 422, 500]},
+                ],
+            })
+
+    # ---- 4. 超长字符串 ----
+    for name, prop in list(props.items())[:3]:
+        if prop.get("type", "string") == "string":
+            body = {**base_body, name: "A" * 10000}
+            mutations.append({
+                "title": f"[{tag}] {label} - 超长字符串: {name}",
+                "method": method,
+                "path": path,
+                "headers": {"Content-Type": "application/json"},
+                "body": body,
+                "data_type": "overflow",
+                "expected_status": 400,
+                "assertions": [
+                    {"type": "status_code_in", "expected": [400, 413, 422, 500]},
+                ],
+            })
+
+    # ---- 5. 非法枚举 ----
+    for name, prop in props.items():
+        if prop.get("enum"):
+            body = {**base_body, name: "__INVALID_ENUM__"}
+            mutations.append({
+                "title": f"[{tag}] {label} - 非法枚举: {name}",
+                "method": method,
+                "path": path,
+                "headers": {"Content-Type": "application/json"},
+                "body": body,
+                "data_type": "invalid_enum",
+                "expected_status": 400,
+                "assertions": [
+                    {"type": "status_code_in", "expected": [400, 422, 500]},
+                ],
+            })
+
+    # ---- 6. 边界值 ----
+    for name, prop in list(props.items())[:3]:
+        t = prop.get("type", "string")
+        if t in ("integer", "number"):
+            for bv, bv_label in [(-1, "-1"), (0, "0"), (2147483647, "MAX_INT")]:
+                body = {**base_body, name: bv}
+                mutations.append({
+                    "title": f"[{tag}] {label} - 边界值: {name}={bv_label}",
+                    "method": method,
+                    "path": path,
+                    "headers": {"Content-Type": "application/json"},
+                    "body": body,
+                    "data_type": "boundary",
+                    "expected_status": None,
+                    "assertions": [
+                        {"type": "status_code_in", "expected": [200, 400, 422, 500]},
+                        {"type": "response_time", "expected": 10000},
+                    ],
+                })
+
+    # ---- 7. 鉴权缺失 ----
+    mutations.append({
+        "title": f"[{tag}] {label} - 鉴权缺失",
+        "method": method,
+        "path": path,
+        "headers": {},
+        "body": base_body if base_body else {},
+        "data_type": "auth_missing",
+        "expected_status": 401,
+        "assertions": [
+            {"type": "status_code_in", "expected": [401, 403]},
+        ],
+    })
+
+    # ---- 8. 不存在 ID (detail/update/delete) ----
+    if pattern in ("detail", "update", "delete"):
+        body = {**base_body}
+        for id_field in ("uuid", "id"):
+            if id_field in body:
+                body[id_field] = "NONEXISTENT_99999999"
+                break
+        mutations.append({
+            "title": f"[{tag}] {label} - 不存在ID",
+            "method": method,
+            "path": path,
+            "headers": {"Content-Type": "application/json"},
+            "body": body,
+            "data_type": "nonexistent_id",
+            "expected_status": 404,
+            "assertions": [
+                {"type": "status_code_in", "expected": [200, 400, 404, 500]},
+                {"type": "response_time", "expected": 10000},
+            ],
+        })
+
+    return mutations
+
+
 # ── 从 Swagger 2.0 parameters 提取 body schema ───────
 def _extract_body_schema_v2(parameters: list, root: dict) -> dict:
     """从 Swagger 2.0 的 parameters 列表中提取 in:body 的 schema"""
@@ -278,6 +484,7 @@ def generate_cases_from_swagger_data(
     include_patterns: Optional[List[str]] = None,
     exclude_patterns: Optional[List[str]] = None,
     max_cases: int = 0,
+    generate_l2: bool = True,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """
     从 Swagger/OpenAPI 数据字典生成 V2 测试用例
@@ -299,7 +506,7 @@ def generate_cases_from_swagger_data(
 
     paths = data.get("paths", {})
     cases = []
-    stats = {"total_apis": 0, "generated": 0, "skipped": 0, "by_pattern": {}, "by_tag": {}}
+    stats = {"total_apis": 0, "generated": 0, "l2_generated": 0, "skipped": 0, "by_pattern": {}, "by_tag": {}}
 
     for path, path_info in paths.items():
         for method, info in path_info.items():
@@ -369,6 +576,16 @@ def generate_cases_from_swagger_data(
             stats["by_pattern"][pattern] = stats["by_pattern"].get(pattern, 0) + 1
             for t in api_tags:
                 stats["by_tag"][t] = stats["by_tag"].get(t, 0) + 1
+
+            # L2: 参数变异用例
+            if generate_l2:
+                l2_cases = _build_mutation_cases(
+                    path=path, method=method, summary=summary,
+                    tags=api_tags, pattern=pattern,
+                    req_schema=req_schema, root_spec=data,
+                )
+                cases.extend(l2_cases)
+                stats["l2_generated"] += len(l2_cases)
 
             if max_cases and len(cases) >= max_cases:
                 break

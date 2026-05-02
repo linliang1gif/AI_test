@@ -3,7 +3,8 @@
 
 """
 AI Test Platform - Backend API Server
-完整的后端API服务器,包含所有功能模块
+P2-2 重构: app 创建由 backend.app.create_app() 完成，
+本文件保留内联业务路由（后续逐步拆分到 routes/）。
 """
 
 import sys
@@ -11,494 +12,62 @@ import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
-from fastapi import FastAPI, HTTPException, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import HTTPException, UploadFile, File
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 import uvicorn
 
-# 🔧 强制加载.env文件,覆盖系统环境变量
-from dotenv import load_dotenv
-env_path = Path(__file__).parent / '.env'
-load_dotenv(dotenv_path=env_path, override=True)
-print(f"✅ 已加载环境变量: ANTHROPIC_BASE_URL={os.getenv('ANTHROPIC_BASE_URL')}")
-
-# 使用配置文件中的AI提供商设置
-# 不强制设置,让系统读取.env配置
-# os.environ['USE_OLLAMA'] = '1'
-# os.environ['AI_PROVIDER'] = 'ollama'
-
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, 'test_data')
-
-# 🔧 添加项目根目录到路径（架构重构）
-# modules 和 core 在项目根目录下，需要添加根目录到路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-# 🔧 导入 modules SDK
+# ── P2-2: 通过工厂函数创建 app ──
+from backend.app import create_app
+app = create_app()
+
+# ── 模块可用性标志（内联路由仍需） ──
+from backend.router_registry import MODULE_FLAGS
+MODULES_SDK_AVAILABLE = MODULE_FLAGS.get("modules_sdk", False)
+CORE_MODELS_AVAILABLE = MODULE_FLAGS.get("core_models", False)
+MODEL_CONVERTER_AVAILABLE = MODULE_FLAGS.get("model_converter", False)
+TEST_DATA_AVAILABLE = MODULE_FLAGS.get("test_data_factory", False)
+
+# 按需导入（仅内联路由实际用到时）
 try:
     from modules.swagger import SwaggerTestCaseGenerator
     from modules.executor import ExecutionEngine
     from modules.healing import HealingEngine
     from modules.report import ReportGenerator
     from modules.data import TestDataManager
-    MODULES_SDK_AVAILABLE = True
-    print("✅ Modules SDK 已加载")
-except ImportError as e:
-    MODULES_SDK_AVAILABLE = False
-    print(f"⚠️  Modules SDK 导入失败: {e}")
+except ImportError:
+    pass
 
-# 🔧 导入 core 模型
 try:
-    from core import (
-        TestCase,
-        ExecutionResult,
-        TestCaseStatus,
-        TestCasePriority,
-        DataType,
-        ExpectedBehavior,
-        create_test_case,
-        create_execution_result
-    )
-    CORE_MODELS_AVAILABLE = True
-    print("✅ Core Models 已加载")
-except ImportError as e:
-    CORE_MODELS_AVAILABLE = False
-    print(f"⚠️  Core Models 导入失败: {e}")
+    from core import (TestCase, ExecutionResult, TestCaseStatus, TestCasePriority,
+                      DataType, ExpectedBehavior, create_test_case, create_execution_result)
+except ImportError:
+    pass
 
-# 🔧 导入数据转换器
 try:
-    from utils.model_converter import (
-        testcase_to_dict,
-        dict_to_testcase,
-        execution_result_to_dict,
-        testcases_to_list,
-        execution_results_to_list,
-        enrich_testcase_dict,
-        enrich_testcase_list
-    )
-    MODEL_CONVERTER_AVAILABLE = True
-    print("✅ Model Converter 已加载")
-except ImportError as e:
-    MODEL_CONVERTER_AVAILABLE = False
-    print(f"⚠️  Model Converter 导入失败: {e}")
+    from utils.model_converter import (testcase_to_dict, dict_to_testcase,
+        execution_result_to_dict, testcases_to_list, execution_results_to_list,
+        enrich_testcase_dict, enrich_testcase_list)
+except ImportError:
+    pass
 
-# 导入Test Agent
-try:
-    from agent.controller import router as agent_router
-    TEST_AGENT_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  Test Agent导入失败: {e}")
-    TEST_AGENT_AVAILABLE = False
-
-# 导入 AI 路由
-try:
-    from routes.ai_routes import router as ai_router
-    AI_ROUTES_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  AI Routes导入失败: {e}")
-    AI_ROUTES_AVAILABLE = False
-
-# 导入Strategy Engine
-try:
-    from strategy.controller import router as strategy_router
-    STRATEGY_ENGINE_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  Strategy Engine导入失败: {e}")
-    STRATEGY_ENGINE_AVAILABLE = False
-
-# 导入Orchestrator
-try:
-    from orchestrator.controller import router as orchestrator_router
-    ORCHESTRATOR_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  Orchestrator导入失败: {e}")
-    ORCHESTRATOR_AVAILABLE = False
-
-# 导入Self-Healing
-try:
-    from self_healing.controller import router as healing_router
-    SELF_HEALING_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  Self-Healing导入失败: {e}")
-    SELF_HEALING_AVAILABLE = False
-
-# 导入Pipeline
-try:
-    from pipeline.controller import router as pipeline_router
-    PIPELINE_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  Pipeline导入失败: {e}")
-    PIPELINE_AVAILABLE = False
-
-# 导入Case Generator
-try:
-    from case_generator.controller import case_router
-    CASE_GENERATOR_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  Case Generator导入失败: {e}")
-    CASE_GENERATOR_AVAILABLE = False
-
-# Pilot 工程化接入层 - 暂时禁用,与database/models.py冲突
-# try:
-#     from pilot import init_database as init_pilot_database
-#     from pilot import router as pilot_router
-#     PILOT_BACKEND_AVAILABLE = True
-# except ImportError as e:
-#     print(f"⚠️  Pilot Backend导入失败: {e}")
-#     PILOT_BACKEND_AVAILABLE = False
-PILOT_BACKEND_AVAILABLE = False
-print("⚠️  Pilot Backend已禁用(与database/models.py冲突)")
-
-# 🔥 导入触发系统
-try:
-    from modules.trigger.test_trigger_system import TestTriggerSystem
-    from modules.trigger.trigger_api import create_trigger_router
-    TRIGGER_SYSTEM_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  触发系统导入失败: {e}")
-    TRIGGER_SYSTEM_AVAILABLE = False
-
-# 🔥 导入分析系统
-try:
-    from modules.analysis.analysis_api import router as analysis_router
-    ANALYSIS_SYSTEM_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  分析系统导入失败: {e}")
-    ANALYSIS_SYSTEM_AVAILABLE = False
-
-# 导入测试数据工厂
 try:
     from test_data.data_factory import factory
-    TEST_DATA_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  测试数据工厂导入失败: {e}")
-    TEST_DATA_AVAILABLE = False
-
-# 创建FastAPI应用
-app = FastAPI(
-    title="AI Test Platform Backend API",
-    description="AI测试平台完整后端API",
-    version="1.2.0"
-)
+except ImportError:
+    factory = None
 
 
-# ==================== 数据库初始化保障 ====================
-@app.on_event("startup")
-async def startup_check_database():
-    """
-    应用启动时检查数据库状态
-    - 检查数据库连接
-    - 检查关键表是否存在
-    - 如果表不存在，自动初始化（仅限本地/开发环境）
-    """
-    print("\n" + "=" * 60)
-    print("🔍 数据库健康检查")
-    print("=" * 60)
-    
-    try:
-        from database import init_db, get_db_info, get_db_session
-        from database.models import TestCase, TestRun, Project
-        from sqlalchemy import inspect
-        
-        # 获取数据库信息
-        db_info = get_db_info()
-        print(f"📊 数据库类型: {db_info['type']}")
-        print(f"📊 数据库URL: {db_info['url']}")
-        
-        # 检查关键表是否存在
-        with get_db_session() as db:
-            inspector = inspect(db.bind)
-            existing_tables = inspector.get_table_names()
-            
-            required_tables = [
-                'projects', 'environments', 'auth_profiles',
-                'api_specs', 'test_cases', 'test_runs',
-                'run_cases', 'run_steps', 'reports',
-                'healing_records', 'system_settings', 'run_status_history'
-            ]
-            
-            missing_tables = [t for t in required_tables if t not in existing_tables]
-            
-            if missing_tables:
-                print(f"⚠️  缺少 {len(missing_tables)} 个关键表: {', '.join(missing_tables)}")
-                
-                # 仅在 SQLite 环境自动初始化
-                if db_info['type'] == 'sqlite':
-                    print(f"🔧 检测到 SQLite 环境，自动初始化数据库...")
-                    init_db()
-                    print(f"✅ 数据库初始化完成")
-                else:
-                    print(f"❌ 生产环境数据库未初始化，请手动执行: python init_db.py")
-                    print(f"❌ 服务器将继续启动，但功能可能不可用")
-            else:
-                print(f"✅ 所有关键表已存在 ({len(required_tables)} 个)")
-        
-        print("=" * 60 + "\n")
-        
-    except Exception as e:
-        print(f"❌ 数据库检查失败: {e}")
-        print(f"⚠️  服务器将继续启动，但数据库功能可能不可用")
-        print("=" * 60 + "\n")
-
-    # Phase 16: 自动添加治理字段（兼容已有数据库）
-    try:
-        from database import get_db_session
-        from sqlalchemy import text as sa_text, inspect as sa_inspect
-        with get_db_session() as db:
-            inspector = sa_inspect(db.bind)
-            existing_cols = {c['name'] for c in inspector.get_columns('test_cases')}
-            new_cols = {
-                'module_name': 'VARCHAR(200)',
-                'api_pattern': 'VARCHAR(50)',
-                'risk_level': 'VARCHAR(10)',
-                'executable': 'BOOLEAN DEFAULT 1',
-                'requires_auth': 'BOOLEAN DEFAULT 0',
-                'requires_dependency': 'BOOLEAN DEFAULT 0',
-                'destructive': 'BOOLEAN DEFAULT 0',
-                'assertion_status': 'VARCHAR(50)',
-                'last_run_status': 'VARCHAR(50)',
-                'failure_category': 'VARCHAR(50)',
-            }
-            added = []
-            for col, col_type in new_cols.items():
-                if col not in existing_cols:
-                    db.execute(sa_text(f'ALTER TABLE test_cases ADD COLUMN {col} {col_type}'))
-                    added.append(col)
-            if added:
-                db.commit()
-                print(f"✅ Phase 16 迁移: 已添加 {len(added)} 个治理字段到 test_cases: {', '.join(added)}")
-            else:
-                print("✅ Phase 16 治理字段已存在，无需迁移")
-    except Exception as e:
-        print(f"⚠️  Phase 16 迁移失败（可忽略首次运行）: {e}")
-
-    # Phase 19: 自动创建 ai_report_analyses 表
-    try:
-        from database import get_db_session
-        from sqlalchemy import inspect as sa_inspect
-        with get_db_session() as db:
-            inspector = sa_inspect(db.bind)
-            if 'ai_report_analyses' not in inspector.get_table_names():
-                from database.models import AiReportAnalysis
-                AiReportAnalysis.__table__.create(db.bind)
-                print("✅ Phase 19 迁移: 已创建 ai_report_analyses 表")
-            else:
-                print("✅ Phase 19 ai_report_analyses 表已存在")
-    except Exception as e:
-        print(f"⚠️  Phase 19 迁移失败: {e}")
-
-if PILOT_BACKEND_AVAILABLE:
-    init_pilot_database()
-    print("✅ Pilot SQLite 持久化层已初始化")
-
-# 配置CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# 注册Test Agent路由
-if TEST_AGENT_AVAILABLE:
-    app.include_router(agent_router, prefix="/api")
-    print("✅ Test Agent模块已加载")
-
-# 注册 AI 路由
-if AI_ROUTES_AVAILABLE:
-    app.include_router(ai_router, prefix="/api")
-    print("✅ AI Routes模块已加载")
-
-# 注册Strategy Engine路由
-if STRATEGY_ENGINE_AVAILABLE:
-    app.include_router(strategy_router, prefix="/api")
-    print("✅ Strategy Engine模块已加载")
-
-# 注册Orchestrator路由
-if ORCHESTRATOR_AVAILABLE:
-    app.include_router(orchestrator_router, prefix="/api")
-    print("✅ Orchestrator模块已加载")
-
-# 注册Self-Healing路由
-if SELF_HEALING_AVAILABLE:
-    app.include_router(healing_router, prefix="/api")
-    print("✅ Self-Healing模块已加载")
-
-# 注册Pipeline路由
-if PIPELINE_AVAILABLE:
-    app.include_router(pipeline_router, prefix="/api")
-    print("✅ Pipeline模块已加载")
-
-# 注册Case Generator路由
-if CASE_GENERATOR_AVAILABLE:
-    app.include_router(case_router, prefix="/api")
-    print("✅ Case Generator模块已加载")
-
-if PILOT_BACKEND_AVAILABLE:
-    app.include_router(pilot_router)
-    print("✅ Pilot 工程化接口已加载")
-
-# 🔥 初始化并注册触发系统
-if TRIGGER_SYSTEM_AVAILABLE:
-    # 创建触发系统实例
-    trigger_system = TestTriggerSystem(pipeline_service=None)  # 暂时不对接Pipeline
-    trigger_router = create_trigger_router(trigger_system)
-    app.include_router(trigger_router)
-    print("✅ 触发系统已加载")
-else:
-    trigger_system = None
-
-# 🔥 注册分析系统
-if ANALYSIS_SYSTEM_AVAILABLE:
-    app.include_router(analysis_router)
-    print("✅ 分析系统已加载")
-
-# 🆕 导入并注册项目配置路由(P0-2)
-try:
-    from routes.project_config_routes import router as project_config_router
-    app.include_router(project_config_router)
-    print("✅ 项目配置路由已加载(使用数据库)")
-    PROJECT_CONFIG_ROUTES_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  项目配置路由导入失败: {e}")
-    PROJECT_CONFIG_ROUTES_AVAILABLE = False
-
-# 🆕 导入并注册测试执行路由(P0-3)
-try:
-    from routes.test_run_routes import router as test_run_router
-    app.include_router(test_run_router)
-    print("✅ 测试执行路由已加载(使用数据库+状态机)")
-    TEST_RUN_ROUTES_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  测试执行路由导入失败: {e}")
-    TEST_RUN_ROUTES_AVAILABLE = False
-
-# 🆕 导入并注册可观测性路由(P0-4)
-try:
-    from routes.observability_routes import router as observability_router
-    app.include_router(observability_router)
-    print("✅ 可观测性路由已加载(查询执行详情)")
-    OBSERVABILITY_ROUTES_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  可观测性路由导入失败: {e}")
-    OBSERVABILITY_ROUTES_AVAILABLE = False
-
-# 🆕 导入并注册执行触发路由(P0-5.1)
-try:
-    from routes.execution_trigger_routes import router as execution_trigger_router
-    app.include_router(execution_trigger_router)
-    print("✅ 执行触发路由已加载(前端触发执行)")
-    EXECUTION_TRIGGER_ROUTES_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  执行触发路由导入失败: {e}")
-    EXECUTION_TRIGGER_ROUTES_AVAILABLE = False
-
-# 🆕 用例治理路由（Phase 16） ── 必须在 Swagger 路由之前注册，避免 {test_case_id} 拦截
-try:
-    from routes.case_governance_routes import router as case_governance_router
-    app.include_router(case_governance_router)
-    print("✅ 用例治理路由已加载（Phase 16 治理）")
-except ImportError as e:
-    print(f"⚠️  用例治理路由导入失败: {e}")
-
-# 🆕 用例一键执行路由（Phase 11+12+13） ── 同上
-try:
-    from routes.case_execute_routes import router as case_execute_router
-    app.include_router(case_execute_router)
-    print("✅ 用例一键执行路由已加载（Phase 11+12+13）")
-    CASE_EXECUTE_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  用例一键执行路由导入失败: {e}")
-    CASE_EXECUTE_AVAILABLE = False
-
-# 🆕 导入并注册Swagger导入路由(P0-6)
-try:
-    from routes.swagger_routes import router as swagger_router
-    app.include_router(swagger_router)
-    print("✅ Swagger导入路由已加载(Swagger/OpenAPI导入)")
-    SWAGGER_ROUTES_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  Swagger导入路由导入失败: {e}")
-    SWAGGER_ROUTES_AVAILABLE = False
-
-# 🆕 导入并注册 Executor V2 路由（真实HTTP执行引擎）
-try:
-    from routes.executor_v2_routes import router as executor_v2_router
-    app.include_router(executor_v2_router)
-    print("✅ Executor V2 路由已加载（真实HTTP执行引擎）")
-    EXECUTOR_V2_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  Executor V2 路由导入失败: {e}")
-    EXECUTOR_V2_AVAILABLE = False
-
-# 🆕 导入并注册测试报告路由（Phase 15）
-try:
-    from routes.report_routes import router as report_router, reports_router
-    app.include_router(report_router)
-    app.include_router(reports_router)
-    print("✅ 测试报告路由已加载（Phase 15 + P1-7E）")
-except ImportError as e:
-    print(f"⚠️  测试报告路由导入失败: {e}")
-
-# 🆕 导入并注册批量执行中心路由（Phase 16）
-try:
-    from routes.batch_run_routes import router as batch_run_router
-    app.include_router(batch_run_router)
-    print("✅ 批量执行中心路由已加载（Phase 16）")
-except ImportError as e:
-    print(f"⚠️  批量执行中心路由导入失败: {e}")
-
-# 🆕 导入并注册 Mock API 路由（Phase 17 Demo）
-try:
-    from routes.mock_routes import router as mock_router
-    app.include_router(mock_router)
-    print("✅ Mock API 路由已加载（Phase 17 Demo）")
-except ImportError as e:
-    print(f"⚠️  Mock API 路由导入失败: {e}")
-
-# 🆕 导入并注册 Demo 初始化/重置路由（Phase 17）
-try:
-    from routes.demo_routes import router as demo_router
-    app.include_router(demo_router)
-    print("✅ Demo 路由已加载（Phase 17）")
-except ImportError as e:
-    print(f"⚠️  Demo 路由导入失败: {e}")
-
-# 🆕 导入并注册 Dashboard 路由（Phase 20）
-try:
-    from routes.dashboard_routes import router as dashboard_router
-    app.include_router(dashboard_router)
-    print("✅ Dashboard 路由已加载（Phase 20）")
-except ImportError as e:
-    print(f"⚠️  Dashboard 路由导入失败: {e}")
-
-# 🆕 导入并注册 AI 报告分析路由（Phase 19）
-try:
-    from routes.ai_report_routes import router as ai_report_router
-    app.include_router(ai_report_router)
-    print("✅ AI 报告分析路由已加载（Phase 19）")
-except ImportError as e:
-    print(f"⚠️  AI 报告分析路由导入失败: {e}")
-
-# 🆕 导入并注册真实项目快速接入路由（P1 Round 6）
-try:
-    from routes.real_project_routes import router as real_project_router
-    app.include_router(real_project_router)
-    print("✅ 真实项目快速接入路由已加载（P1 Round 6）")
-except ImportError as e:
-    print(f"⚠️  真实项目快速接入路由导入失败: {e}")
-
-# 🆕 导入并注册 AI 用例评审路由（P1-8）
-try:
-    from routes.ai_case_review_routes import router as ai_case_review_router
-    app.include_router(ai_case_review_router)
-    print("✅ AI 用例评审路由已加载（P1-8）")
-except ImportError as e:
-    print(f"⚠️  AI 用例评审路由导入失败: {e}")
+# P2-2: 启动初始化、CORS、路由注册已迁移到 backend/ 包
+# - backend/startup.py: 数据库检查 + Phase 迁移
+# - backend/app.py (create_app): CORS + 异常处理
+# - backend/router_registry.py: 统一路由注册
+# - backend/health.py: /health, /readiness, /admin/app-mode
 
 # ==================== 数据模型 ====================
 
@@ -524,132 +93,7 @@ class QualityEvaluationRequest(BaseModel):
 class BatchEvaluationRequest(BaseModel):
     data_list: List[Dict[str, Any]]
 
-# ==================== 基础路由 ====================
-
-@app.get("/")
-async def root():
-    """根路径"""
-    return {
-        "message": "AI Test Platform Backend API",
-        "version": "1.2.0",
-        "status": "running",
-        "features": {
-            "test_data_factory": TEST_DATA_AVAILABLE,
-            "ai_generation": True,
-            "test_execution": True
-        }
-    }
-
-@app.get("/health")
-async def health_check():
-    """
-    健康检查接口
-    
-    返回系统健康状态，包括：
-    - 整体状态
-    - 数据库连接状态
-    - 关键表存在性
-    - 各模块可用性
-    """
-    app_mode = os.getenv("APP_MODE", "mock")
-    health_status = {
-        "status": "healthy",
-        "app_mode": app_mode,
-        "timestamp": datetime.now().isoformat(),
-        "database": {
-            "connected": False,
-            "tables_ready": False,
-            "missing_tables": []
-        },
-        "modules": {
-            "test_data_factory": TEST_DATA_AVAILABLE,
-            "modules_sdk": MODULES_SDK_AVAILABLE,
-            "core_models": CORE_MODELS_AVAILABLE
-        }
-    }
-    
-    # 检查数据库
-    try:
-        from database import get_db_session
-        from sqlalchemy import inspect, text
-        
-        with get_db_session() as db:
-            # 测试连接
-            db.execute(text("SELECT 1"))
-            health_status["database"]["connected"] = True
-            
-            # 检查关键表
-            inspector = inspect(db.bind)
-            existing_tables = inspector.get_table_names()
-            
-            required_tables = [
-                'projects', 'test_cases', 'test_runs',
-                'run_cases', 'run_steps'
-            ]
-            
-            missing = [t for t in required_tables if t not in existing_tables]
-            health_status["database"]["missing_tables"] = missing
-            health_status["database"]["tables_ready"] = len(missing) == 0
-            
-            if missing:
-                health_status["status"] = "degraded"
-                
-    except Exception as e:
-        health_status["status"] = "unhealthy"
-        health_status["database"]["error"] = str(e)
-    
-    return health_status
-
-
-@app.get("/readiness")
-async def readiness_check():
-    """
-    就绪检查接口
-    
-    用于 K8s 等容器编排系统的就绪探针
-    只有当系统完全就绪时才返回 200
-    """
-    try:
-        from database import get_db_session
-        from sqlalchemy import inspect, text
-        
-        with get_db_session() as db:
-            # 测试数据库连接
-            db.execute(text("SELECT 1"))
-            
-            # 检查关键表
-            inspector = inspect(db.bind)
-            existing_tables = inspector.get_table_names()
-            
-            required_tables = ['projects', 'test_cases', 'test_runs']
-            missing = [t for t in required_tables if t not in existing_tables]
-            
-            if missing:
-                raise HTTPException(
-                    status_code=503,
-                    detail=f"数据库未就绪，缺少表: {', '.join(missing)}"
-                )
-        
-        return {"status": "ready"}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=503,
-            detail=f"系统未就绪: {str(e)}"
-        )
-
-# ==================== 运行模式管理（仅开发/测试用） ====================
-
-@app.put("/admin/app-mode")
-async def set_app_mode(mode: str = "mock"):
-    """切换 APP_MODE（仅用于自动化测试，生产环境应禁用此端点）"""
-    if mode not in ("mock", "real"):
-        raise HTTPException(status_code=400, detail="mode must be 'mock' or 'real'")
-    os.environ["APP_MODE"] = mode
-    return {"success": True, "app_mode": mode}
-
+# P2-2: /, /health, /readiness, /admin/app-mode 已迁移到 backend/health.py
 
 # ==================== 测试数据工厂 API ====================
 
@@ -1264,6 +708,18 @@ async def create_project(project: Dict[str, Any]):
         "message": "项目创建成功"
     }
 
+@app.put("/api/projects/{project_id}")
+async def update_project(project_id: int, updates: Dict[str, Any]):
+    """更新项目"""
+    for p in projects_db:
+        if p["id"] == project_id:
+            for k, v in updates.items():
+                if k != "id":
+                    p[k] = v
+            data_manager.set_data("projects", projects_db, save=True)
+            return {"success": True, "project": p}
+    raise HTTPException(status_code=404, detail="项目不存在")
+
 @app.delete("/api/projects/{project_id}")
 async def delete_project(project_id: int):
     """删除项目"""
@@ -1373,9 +829,10 @@ async def save_api_as_testcase(request: Dict[str, Any]):
             "error": str(e)
         }
 
-@app.post("/api/execute-api")
+@app.post("/api/execute-api", deprecated=True)
 async def execute_api(request: Dict[str, Any]):
-    """执行单个API测试（使用ExecutionEngine）"""
+    """[已废弃] 请使用 POST /api/v2/test-cases/{case_id}/execute"""
+    print("⚠️ [DEPRECATED] /api/execute-api 已废弃，请迁移到 /api/v2/test-cases/{case_id}/execute")
     try:
         base_url = request.get('base_url', 'http://localhost:8000')
         method = request.get('method', 'GET')
@@ -1911,6 +1368,34 @@ async def generate_testcases(file: UploadFile = File(...)):
         data_manager.set_data("test_cases", data_manager.get_data("test_cases", []), save=True)
         print(f"💾 已保存 {len(final_cases)} 个测试用例到持久化存储")
         
+        # 同步写入 SQLite 数据库（v2 API 读取的数据源）
+        try:
+            from database.session import get_db_session
+            from database.models import TestCase as DBTestCase
+            db_saved = 0
+            with get_db_session() as db:
+                for case in final_cases:
+                    exists = db.query(DBTestCase).filter(DBTestCase.id == case["id"]).first()
+                    if not exists:
+                        db_case = DBTestCase(
+                            id=case["id"],
+                            title=case["title"],
+                            module=case.get("module"),
+                            priority=case.get("priority", "medium"),
+                            status=case.get("status", "pending"),
+                            steps=case.get("steps"),
+                            expected=case.get("expected"),
+                            source=case.get("source", "ai_generated"),
+                            data_type=case.get("data_type"),
+                            expected_behavior=case.get("expected_behavior"),
+                        )
+                        db.add(db_case)
+                        db_saved += 1
+                db.commit()
+            print(f"💾 已同步 {db_saved} 个测试用例到 SQLite 数据库")
+        except Exception as e:
+            print(f"⚠️  同步到 SQLite 失败（不影响内存数据）: {e}")
+        
         return JSONResponse(
             content={
                 "success": True,
@@ -2167,25 +1652,35 @@ async def _generate_testcases_with_ai(content: str, filename: str, provider: str
 7. 参数校验失败: body.code==10000
 {project_knowledge}"""
 
-    # 每个模块生成的目标数量
-    per_module = max(8, min(20, 60 // len(modules)))
-    
-    for i, module_name in enumerate(modules, 1):
-        print(f"\n{'='*50}")
-        print(f"🔄 第2步 [{i}/{len(modules)}]: 为模块「{module_name}」生成 {per_module} 个用例...")
-        print(f"{'='*50}")
-        
-        # 提取该模块相关的内容片段
-        module_content = content
+    # 动态分配每个模块的用例数量（总目标约60，按模块内容量加权）
+    TOTAL_TARGET = 60
+    module_contents = {}
+    for mod in modules:
+        mod_text = content
         if len(content) > 3000 and len(modules) > 1:
-            # 尝试找到该模块相关的段落
-            for keyword in [module_name, module_name[:4]]:
+            for keyword in [mod, mod[:4]]:
                 idx = content.find(keyword)
                 if idx >= 0:
                     start = max(0, idx - 500)
                     end = min(len(content), idx + 3000)
-                    module_content = content[start:end]
+                    mod_text = content[start:end]
                     break
+        module_contents[mod] = mod_text
+
+    # 按内容长度加权分配，最少5个最多15个
+    lengths = {m: len(t) for m, t in module_contents.items()}
+    total_len = sum(lengths.values()) or 1
+    module_counts = {}
+    for m, l in lengths.items():
+        raw = int(TOTAL_TARGET * l / total_len)
+        module_counts[m] = max(5, min(15, raw))
+    
+    for i, module_name in enumerate(modules, 1):
+        per_module = module_counts.get(module_name, 8)
+        module_content = module_contents.get(module_name, content)
+        print(f"\n{'='*50}")
+        print(f"🔄 第2步 [{i}/{len(modules)}]: 为模块「{module_name}」生成 {per_module} 个用例...")
+        print(f"{'='*50}")
         
         gen_prompt = f"""请为「{module_name}」模块生成 {per_module} 个测试用例。
 
@@ -2929,9 +2424,10 @@ async def download_script(script_id: int):
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/automation/scripts/{script_id}/execute")
+@app.post("/api/automation/scripts/{script_id}/execute", deprecated=True)
 async def execute_script(script_id: int):
-    """执行脚本（使用ExecutionEngine）"""
+    """[已废弃] 脚本执行 — 后续将迁移到 V2"""
+    print(f"⚠️ [DEPRECATED] /api/automation/scripts/{script_id}/execute 已废弃")
     try:
         # 查找脚本
         script = next((s for s in scripts_db if s.get('id') == script_id), None)
@@ -3042,9 +2538,10 @@ async def generate_test_script(testcase_id: str):
             "message": "脚本生成失败"
         }
 
-@app.post("/api/testcases/{testcase_id}/manual-execute")
+@app.post("/api/testcases/{testcase_id}/manual-execute", deprecated=True)
 async def manual_execute_test_case(testcase_id: str, data: Dict[str, Any]):
-    """手动执行测试用例 — 记录手动测试结果"""
+    """[已废弃] 手动执行 — 请迁移到 V2"""
+    print(f"⚠️ [DEPRECATED] /api/testcases/{testcase_id}/manual-execute 已废弃")
     try:
         status = data.get('status', 'passed')
         notes = data.get('notes', '')
@@ -3091,9 +2588,10 @@ async def manual_execute_test_case(testcase_id: str, data: Dict[str, Any]):
         return {"success": False, "error": str(e)}
 
 
-@app.post("/api/testcases/{testcase_id}/execute")
+@app.post("/api/testcases/{testcase_id}/execute", deprecated=True)
 async def execute_test_case(testcase_id: str):
-    """执行测试用例（使用ExecutionEngine）"""
+    """[已废弃] 请使用 POST /api/v2/test-cases/{case_id}/execute"""
+    print(f"⚠️ [DEPRECATED] /api/testcases/{testcase_id}/execute 已废弃，请迁移到 /api/v2/test-cases/{{id}}/execute")
     try:
         import time
         
@@ -3190,89 +2688,173 @@ async def execute_test_case(testcase_id: str):
         }
 
 def _generate_pytest_script(testcase: Dict[str, Any]) -> str:
-    """生成pytest测试脚本"""
-    import json
-    
+    """P1-9E: 生成真实可运行的 pytest 测试脚本"""
+    import json as _json
+
     title = testcase.get('title', '测试用例')
     module = testcase.get('module', '通用模块')
     steps = testcase.get('steps', [])
     expected = testcase.get('expected', '测试通过')
-    
-    # 生成测试方法名
-    method_name = _sanitize_method_name(title)
-    
-    # 生成脚本内容
-    script = f'''#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+    exec_cfg = testcase.get('execution_config') or {}
+    assertions = testcase.get('assertions') or []
+    source = testcase.get('source', '')
 
+    method_name = _sanitize_method_name(title)
+    class_name = _sanitize_class_name(module)
+
+    # 判断是否为接口用例（有 execution_config）
+    has_api = bool(exec_cfg.get('method') and exec_cfg.get('url'))
+    http_method = (exec_cfg.get('method') or 'GET').upper()
+    api_path = exec_cfg.get('url') or ''
+    body = exec_cfg.get('body')
+    headers = exec_cfg.get('headers') or {}
+    query_params = exec_cfg.get('query_params')
+
+    body_str = _json.dumps(body, ensure_ascii=False, indent=8) if body else 'None'
+    headers_str = _json.dumps({**{"Content-Type": "application/json"}, **headers}, ensure_ascii=False, indent=8) if has_api else '{}'
+    query_str = _json.dumps(query_params, ensure_ascii=False, indent=8) if query_params else 'None'
+
+    # 生成断言代码 (8 spaces indent = method body)
+    ind = '        '
+    assertion_lines = []
+    for a in assertions:
+        a_type = a.get('type', '')
+        a_expected = a.get('expected')
+        a_path = a.get('path', '')
+        if a_type == 'status_code':
+            assertion_lines.append(f'{ind}assert resp.status_code == {a_expected}, f"状态码断言失败: 期望 {a_expected}, 实际 {{resp.status_code}}"')
+        elif a_type == 'status_code_in':
+            assertion_lines.append(f'{ind}assert resp.status_code in {a_expected}, f"状态码断言失败: 期望在 {a_expected} 中, 实际 {{resp.status_code}}"')
+        elif a_type == 'response_time':
+            assertion_lines.append(f'{ind}assert resp.elapsed.total_seconds() * 1000 < {a_expected}, f"响应时间超限: {{resp.elapsed.total_seconds()*1000:.0f}}ms > {a_expected}ms"')
+        elif a_type == 'field_exists':
+            parts = a_path.split('.')
+            access = 'data'
+            for p in parts:
+                access += f'["{p}"]' if p else ''
+            assertion_lines.append(f'{ind}assert {access} is not None, "字段 {a_path} 不存在"')
+        elif a_type == 'field_equals':
+            parts = a_path.split('.')
+            access = 'data'
+            for p in parts:
+                access += f'["{p}"]' if p else ''
+            assertion_lines.append(f'{ind}assert {access} == {repr(a_expected)}, "字段 {a_path} 断言失败: 期望 {a_expected}, 实际 " + str({access})')
+
+    if not assertion_lines and has_api:
+        assertion_lines.append(f'{ind}assert resp.status_code == 200, f"状态码断言失败: 期望 200, 实际 {{resp.status_code}}"')
+
+    assertions_code = '\n'.join(assertion_lines) if assertion_lines else f'{ind}pass  # 无断言'
+
+    # 生成步骤注释
+    steps_doc = ''
+    for i, step in enumerate(steps, 1):
+        steps_doc += f'        {i}. {step}\n'
+    if not steps_doc:
+        steps_doc = '        (无详细步骤)\n'
+
+    if has_api:
+        script = f'''#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 {module} - 自动化测试脚本
-测试用例: {title}
+用例: {title}
 生成时间: {_get_current_time()}
 """
 
+import os
 import pytest
 import requests
-import json
-from typing import Dict, Any
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+TOKEN = os.getenv("API_TOKEN", "")
 
-class Test{_sanitize_class_name(module)}:
-    """
-    {module}测试类
-    """
-    
+
+class Test{class_name}:
+
     def setup_method(self):
-        """测试前置设置"""
         self.session = requests.Session()
-        self.session.headers.update({{"Content-Type": "application/json"}})
-    
+        self.session.headers.update({{
+            "Content-Type": "application/json",
+            **({{
+                "Authorization": f"Bearer {{TOKEN}}"
+            }} if TOKEN else {{}})
+        }})
+
     def teardown_method(self):
-        """测试后置清理"""
-        if hasattr(self, 'session'):
-            self.session.close()
-    
+        self.session.close()
+
     def test_{method_name}(self):
         """
         {title}
-        
+
         测试步骤:
-'''
-    
-    # 添加测试步骤
-    for i, step in enumerate(steps, 1):
-        script += f'        {i}. {step}\n'
-    
-    script += f'''        
+{steps_doc}
         预期结果: {expected}
         """
-        # 准备测试数据
-        test_data = {{
-            "test_case_id": {testcase['id']},
-            "title": "{title}"
-        }}
-        
-        # 执行测试步骤
-'''
-    
-    # 根据步骤生成代码
-    for i, step in enumerate(steps, 1):
-        script += f'''        # 步骤{i}: {step}
-        print(f"执行步骤{i}: {step}")
-        
-'''
-    
-    script += f'''        # 验证结果
-        # TODO: 添加具体的断言逻辑
-        assert True, "{expected}"
-        
-        print("✅ 测试通过: {title}")
+        url = f"{{BASE_URL}}{api_path}"
+        body = {body_str}
+        params = {query_str}
+
+        resp = self.session.request(
+            method="{http_method}",
+            url=url,
+            json=body,
+            params=params,
+            timeout=30,
+        )
+
+        # --- 断言 ---
+        data = None
+        try:
+            data = resp.json()
+        except Exception:
+            pass
+
+{assertions_code}
+
+        print(f"✅ 通过: {title} ({{resp.status_code}}, {{resp.elapsed.total_seconds()*1000:.0f}}ms)")
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v", "-s"])
 '''
-    
+    else:
+        # 功能测试用例 — 生成步骤模板
+        script = f'''#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+{module} - 自动化测试脚本
+用例: {title}
+生成时间: {_get_current_time()}
+"""
+
+import pytest
+
+
+class Test{class_name}:
+
+    def test_{method_name}(self):
+        """
+        {title}
+
+        测试步骤:
+{steps_doc}
+        预期结果: {expected}
+        """
+'''
+        for i, step in enumerate(steps, 1):
+            script += f'        # 步骤{i}: {step}\n'
+            script += f'        print("执行步骤{i}: {step}")\n\n'
+
+        script += f'''        # TODO: 补充测试逻辑和断言
+        assert True, "{expected}"
+        print("✅ 通过: {title}")
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v", "-s"])
+'''
+
     return script
 
 def _sanitize_method_name(title: str) -> str:
@@ -3360,25 +2942,6 @@ async def get_knowledge_coverage():
         "details": {}
     }
 
-# ==================== 启动服务器 ====================
-
-if __name__ == "__main__":
-    print("=" * 60)
-    print("🚀 AI Test Platform Backend API Server")
-    print("=" * 60)
-    print(f"📦 版本: 1.2.0")
-    print(f"🏭 测试数据工厂: {'✅ 可用' if TEST_DATA_AVAILABLE else '❌ 不可用'}")
-    print(f"🌐 API文档: http://localhost:8000/docs")
-    print(f"🔍 健康检查: http://localhost:8000/health")
-    print("=" * 60)
-    
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000,
-        log_level="info"
-    )
-
 # ==================== Modules SDK 集成 API ====================
 
 @app.post("/api/testcases/generate-from-swagger")
@@ -3439,9 +3002,10 @@ async def generate_testcases_from_swagger(file: UploadFile = File(...)):
         }
 
 
-@app.post("/api/testcases/execute-batch")
+@app.post("/api/testcases/execute-batch", deprecated=True)
 async def execute_testcases_batch(request: Dict[str, Any]):
-    """批量执行测试用例（使用 modules SDK）"""
+    """[已废弃] 请使用 POST /api/v2/test-cases/batch-execute"""
+    print("⚠️ [DEPRECATED] /api/testcases/execute-batch 已废弃，请迁移到 /api/v2/test-cases/batch-execute")
     try:
         if not MODULES_SDK_AVAILABLE or not MODEL_CONVERTER_AVAILABLE:
             raise HTTPException(status_code=503, detail="Modules SDK 不可用")
@@ -3840,41 +3404,23 @@ async def run_intelligent_test_pipeline(request: Dict[str, Any]):
         }
 
 
-# ==================== 触发系统集成 ====================
-
-# 导入触发系统
-try:
-    from modules.trigger import TestTriggerSystem
-    from modules.trigger.trigger_api import create_trigger_router
-    
-    # 创建触发系统实例（暂时不连接Pipeline，后续集成）
-    trigger_system = TestTriggerSystem(pipeline_service=None)
-    
-    # 创建并添加触发系统路由
-    trigger_router = create_trigger_router(trigger_system)
-    app.include_router(trigger_router)
-    
-    print("✅ 触发系统已集成")
-    TRIGGER_SYSTEM_AVAILABLE = True
-except ImportError as e:
-    print(f"⚠️  触发系统导入失败: {e}")
-    TRIGGER_SYSTEM_AVAILABLE = False
+# P2-2: 触发系统已在 backend/router_registry.py 注册（去重）
 
 # ==================== 启动服务器 ====================
 
 if __name__ == "__main__":
+    from backend.config import settings
     print("\n" + "=" * 60)
-    print("🚀 AI测试平台后端服务启动")
+    print("🚀 AI Test Platform Backend API Server (P2-2)")
     print("=" * 60)
-    print(f"📍 地址: http://0.0.0.0:8000")
-    print(f"📖 API文档: http://0.0.0.0:8000/docs")
-    if TRIGGER_SYSTEM_AVAILABLE:
-        print(f"🔗 触发系统: http://0.0.0.0:8000/api/trigger")
+    print(f"📍 地址: http://{settings.BACKEND_HOST}:{settings.BACKEND_PORT}")
+    print(f"📖 API文档: http://localhost:{settings.BACKEND_PORT}/docs")
+    print(f"🔍 健康检查: http://localhost:{settings.BACKEND_PORT}/health")
     print("=" * 60 + "\n")
-    
+
     uvicorn.run(
         app,
-        host="0.0.0.0",
-        port=8000,
-        log_level="info"
+        host=settings.BACKEND_HOST,
+        port=settings.BACKEND_PORT,
+        log_level=settings.LOG_LEVEL.lower(),
     )

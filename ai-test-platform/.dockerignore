@@ -1,0 +1,17 @@
+.git
+.github
+__pycache__
+*.pyc
+node_modules
+frontend/node_modules
+frontend/dist
+.env
+*.db
+data/*.db
+data/*.json
+knowledge/chroma_db
+tests/
+docs/
+scripts/demo/
+.vscode/
+.idea/

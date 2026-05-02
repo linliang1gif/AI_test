@@ -7,7 +7,7 @@ Swagger/OpenAPI 导入路由
 import json
 
 import requests
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
 from sqlalchemy.orm import Session
 from typing import List
 
@@ -491,6 +491,51 @@ def _yapi_to_openapi(categories: list, project_id, yapi_base: str) -> dict:
     }
 
 
+@router.post("/swagger/preview-file")
+async def preview_swagger_from_file(
+    file: UploadFile = File(...),
+    project_id: int = Form(1),
+):
+    """
+    从上传的 Swagger/OpenAPI JSON/YAML 文件解析预览，不写入数据库。
+    """
+    from app.executor_v2.swagger_to_cases import generate_cases_from_swagger_data
+    import yaml as _yaml
+
+    content = await file.read()
+    filename = file.filename or ""
+
+    # 解析文件内容
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        text = content.decode("utf-8", errors="ignore")
+
+    try:
+        if filename.endswith((".yaml", ".yml")):
+            data = _yaml.safe_load(text)
+        else:
+            data = json.loads(text)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"文件解析失败，请上传有效的 JSON 或 YAML 文件: {str(e)}")
+
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="文件内容不是有效的 Swagger/OpenAPI 文档")
+
+    try:
+        cases, meta = generate_cases_from_swagger_data(data, generate_l2=False)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Swagger 解析失败: {str(e)}")
+
+    return {
+        "base_url": meta.get("base_url", ""),
+        "swagger_version": meta.get("swagger_version", ""),
+        "tags": meta.get("tags", []),
+        "stats": meta.get("stats", {}),
+        "cases": cases,
+    }
+
+
 @router.post("/swagger/preview-url")
 async def preview_swagger_from_url(request: SwaggerImportFromUrlRequest):
     """
@@ -516,6 +561,7 @@ async def preview_swagger_from_url(request: SwaggerImportFromUrlRequest):
             data,
             include_tags=include_tags,
             exclude_tags=exclude_tags,
+            generate_l2=False,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"解析失败: {str(e)}")
@@ -585,7 +631,7 @@ async def preview_swagger_from_yapi(request: dict):
         if yapi_result:
             cases, meta = yapi_result
         else:
-            cases, meta = generate_cases_from_swagger_data(data)
+            cases, meta = generate_cases_from_swagger_data(data, generate_l2=False)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"YApi OpenAPI 解析失败: {str(e)}")
 
@@ -894,19 +940,110 @@ async def generate_test_cases_from_swagger(
         raise HTTPException(status_code=500, detail=f"生成失败: {str(e)}")
 
 
+@router.get("/swagger/coverage")
+async def get_swagger_coverage(
+    project_id: int = Query(None, description="项目ID (可选, 不传则全局)"),
+    db: Session = Depends(get_db)
+):
+    """
+    P2-9D: 接口覆盖率统计
+
+    遍历所有 api_specs 的 Swagger 文件，提取全部 API path+method，
+    与 test_cases (source=swagger) 的 execution_config 做交叉比对。
+    """
+    import os as _os
+    try:
+        query = db.query(ApiSpec)
+        if project_id:
+            query = query.filter(ApiSpec.project_id == project_id)
+        specs = query.all()
+
+        # 1) 收集所有 spec 中的 API (method+path)
+        all_apis = set()  # (METHOD, /path)
+        spec_details = []
+        for spec in specs:
+            spec_apis = set()
+            if spec.raw_spec_path and _os.path.exists(spec.raw_spec_path):
+                try:
+                    with open(spec.raw_spec_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    for path, path_info in data.get("paths", {}).items():
+                        for method in path_info:
+                            if method.upper() in ("GET", "POST", "PUT", "DELETE", "PATCH"):
+                                spec_apis.add((method.upper(), path))
+                except Exception:
+                    pass
+            all_apis |= spec_apis
+            spec_details.append({
+                "api_spec_id": spec.id,
+                "project_id": spec.project_id,
+                "source_type": spec.source_type,
+                "api_count_in_spec": len(spec_apis),
+            })
+
+        # 2) 收集所有 swagger 来源的 test_cases 覆盖的 API
+        tc_query = db.query(TestCase).filter(TestCase.source == "swagger")
+        if project_id:
+            tc_query = tc_query.filter(TestCase.tags.contains(f"project:{project_id}"))
+        swagger_cases = tc_query.all()
+
+        covered_apis = set()
+        l1_covered = set()
+        l2_covered = set()
+        for tc in swagger_cases:
+            cfg = tc.execution_config or {}
+            m = (cfg.get("method", "").upper(), cfg.get("url", ""))
+            if m[0] and m[1]:
+                covered_apis.add(m)
+                if tc.data_type and tc.data_type in (
+                    "required_missing", "empty_value", "type_error",
+                    "overflow", "invalid_enum", "boundary",
+                    "auth_missing", "nonexistent_id",
+                ):
+                    l2_covered.add(m)
+                else:
+                    l1_covered.add(m)
+
+        total = len(all_apis)
+        covered = len(all_apis & covered_apis) if total > 0 else 0
+        uncovered_list = sorted([{"method": m, "path": p} for m, p in (all_apis - covered_apis)], key=lambda x: (x["method"], x["path"]))
+
+        return {
+            "total_apis": total,
+            "covered_apis": covered,
+            "coverage_rate": round(covered / total * 100, 1) if total > 0 else 0,
+            "l1_case_count": len([c for c in swagger_cases if not c.data_type or c.data_type not in (
+                "required_missing", "empty_value", "type_error",
+                "overflow", "invalid_enum", "boundary",
+                "auth_missing", "nonexistent_id",
+            )]),
+            "l2_case_count": len([c for c in swagger_cases if c.data_type and c.data_type in (
+                "required_missing", "empty_value", "type_error",
+                "overflow", "invalid_enum", "boundary",
+                "auth_missing", "nonexistent_id",
+            )]),
+            "total_swagger_cases": len(swagger_cases),
+            "uncovered": uncovered_list[:50],
+            "specs": spec_details,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"覆盖率统计失败: {str(e)}")
+
+
 @router.get("/test-cases", response_model=TestCaseListResponse)
 async def get_test_cases(
     project_id: int = Query(None, description="项目ID"),
     source: str = Query(None, description="来源: swagger/manual/ai_generated"),
     status: str = Query(None, description="状态: pending/passed/failed/skipped"),
+    case_type: str = Query(None, description="用例类型: api/functional/web_ui"),
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(100, ge=1, le=5000),
     db: Session = Depends(get_db)
 ):
     """
     获取测试用例列表
     
-    支持按项目、来源、状态过滤
+    支持按项目、来源、状态、用例类型过滤
     """
     try:
         service = TestCaseService(db)
@@ -914,6 +1051,7 @@ async def get_test_cases(
             project_id=project_id,
             source=source,
             status=status,
+            case_type=case_type,
             skip=skip,
             limit=limit
         )
@@ -924,6 +1062,49 @@ async def get_test_cases(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+
+
+@router.post("/test-cases", summary="手动创建测试用例")
+async def create_test_case_v2(
+    req: dict,
+    db: Session = Depends(get_db)
+):
+    """手动创建一条测试用例，写入 v2 数据库"""
+    import uuid as _uuid
+    from datetime import datetime
+    title = (req.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="请填写用例标题")
+    tc_id = f"TC_M_{_uuid.uuid4().hex[:8]}"
+    case_type = req.get("case_type") or "functional"
+    if case_type not in ("api", "functional", "web_ui"):
+        raise HTTPException(status_code=400, detail="case_type 必须为 api/functional/web_ui")
+    tc = TestCase(
+        id=tc_id,
+        title=title,
+        module=(req.get("module") or "").strip(),
+        priority=req.get("priority") or "medium",
+        status="pending",
+        steps=req.get("steps") or [],
+        expected=(req.get("expected") or "").strip(),
+        assertions=req.get("assertions") or [],
+        execution_config=req.get("execution_config") or {},
+        data_type="manual",
+        expected_behavior="success",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        created_by="manual",
+        source="manual",
+        case_type=case_type,
+        tags=(lambda t, pid: t + [f"project:{pid}"] if pid else t)(req.get("tags") or [], req.get("project_id")),
+    )
+    db.add(tc)
+    db.commit()
+    return {
+        "success": True,
+        "message": f"用例 {tc_id} 创建成功",
+        "test_case_id": tc_id,
+    }
 
 
 @router.get("/test-cases/{test_case_id}", response_model=TestCaseResponse)

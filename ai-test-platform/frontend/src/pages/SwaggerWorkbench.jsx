@@ -12,6 +12,7 @@ export default function SwaggerWorkbench() {
   const [selectedProject, setSelectedProject] = useState(null)
   const [sourceType, setSourceType] = useState('yapi')
   const [swaggerUrl, setSwaggerUrl] = useState('https://dev-recycle.szhibu.com/dev-api/recycle/v2/api-docs')
+  const [swaggerFile, setSwaggerFile] = useState(null)
   const [yapiBaseUrl, setYapiBaseUrl] = useState('')
   const [yapiToken, setYapiToken] = useState('')
   const [loading, setLoading] = useState(false)
@@ -47,17 +48,26 @@ export default function SwaggerWorkbench() {
     if (sourceType === 'url' && !swaggerUrl) { setError('请输入 Swagger URL'); return }
     if (sourceType === 'yapi' && !yapiBaseUrl) { setError('请输入 YApi 服务地址或完整模板 URL'); return }
     if (sourceType === 'yapi' && !yapiToken) { setError('请输入 YApi 项目 token'); return }
+    if (sourceType === 'file' && !swaggerFile) { setError('请选择 Swagger/OpenAPI 文件'); return }
     setLoading(true); setError(null); setPreview(null); setImportResult(null)
     try {
-      const endpoint = sourceType === 'yapi' ? '/api/v2/swagger/preview-yapi' : '/api/v2/swagger/preview-url'
-      const payload = sourceType === 'yapi'
-        ? { project_id: selectedProject || 1, yapi_base_url: yapiBaseUrl, token: yapiToken }
-        : { project_id: selectedProject || 1, url: swaggerUrl, generate_cases: true }
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
+      let res
+      if (sourceType === 'file') {
+        const formData = new FormData()
+        formData.append('file', swaggerFile)
+        formData.append('project_id', selectedProject || 1)
+        res = await fetch('/api/v2/swagger/preview-file', { method: 'POST', body: formData })
+      } else {
+        const endpoint = sourceType === 'yapi' ? '/api/v2/swagger/preview-yapi' : '/api/v2/swagger/preview-url'
+        const payload = sourceType === 'yapi'
+          ? { project_id: selectedProject || 1, yapi_base_url: yapiBaseUrl, token: yapiToken }
+          : { project_id: selectedProject || 1, url: swaggerUrl, generate_cases: true }
+        res = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+      }
       if (!res.ok) { const err = await res.json(); throw new Error(err.detail || res.statusText) }
       const data = await res.json()
       setPreview(data)
@@ -220,10 +230,37 @@ export default function SwaggerWorkbench() {
             >
               Swagger URL
             </button>
+            <button
+              onClick={() => setSourceType('file')}
+              className={`px-4 py-2 rounded-lg text-sm ${sourceType === 'file' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+            >
+              文件上传
+            </button>
           </div>
           <div className="grid grid-cols-12 gap-4">
             <div className="col-span-8">
-              {sourceType === 'url' ? (
+              {sourceType === 'file' ? (
+                <>
+                  <label className="block text-xs text-gray-500 mb-1">上传 Swagger / OpenAPI 文件 (JSON / YAML)</label>
+                  <div className="flex items-center gap-3">
+                    <label className="flex-1 flex items-center justify-center px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
+                      <input
+                        type="file"
+                        accept=".json,.yaml,.yml"
+                        className="hidden"
+                        onChange={(e) => setSwaggerFile(e.target.files?.[0] || null)}
+                      />
+                      <span className="text-sm text-gray-600">
+                        {swaggerFile ? `📄 ${swaggerFile.name} (${(swaggerFile.size / 1024).toFixed(1)} KB)` : '点击选择或拖拽 JSON / YAML 文件'}
+                      </span>
+                    </label>
+                    {swaggerFile && (
+                      <button onClick={() => setSwaggerFile(null)} className="text-xs text-red-500 hover:underline">清除</button>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">支持 Swagger 2.0 / OpenAPI 3.0 格式</p>
+                </>
+              ) : sourceType === 'url' ? (
                 <>
                   <label className="block text-xs text-gray-500 mb-1">Swagger / OpenAPI URL</label>
                   <input
@@ -278,7 +315,7 @@ export default function SwaggerWorkbench() {
           </div>
           <button
             onClick={handlePreview}
-            disabled={loading || (sourceType === 'url' ? !swaggerUrl : (!yapiBaseUrl || !yapiToken))}
+            disabled={loading || (sourceType === 'url' ? !swaggerUrl : sourceType === 'file' ? !swaggerFile : (!yapiBaseUrl || !yapiToken))}
             className="mt-4 px-6 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
           >
             {loading ? '解析中...' : '解析预览'}

@@ -19,6 +19,8 @@ import json
 import requests
 
 BASE = os.getenv("API_BASE", "http://localhost:8000")
+TESTING_KEY = os.getenv("TESTING_KEY", "")
+TESTING_HEADERS = {"X-Testing-Key": TESTING_KEY} if TESTING_KEY else {}
 PASSED = 0
 FAILED = 0
 TOTAL = 0
@@ -157,7 +159,7 @@ def test_real_mode_info_in_report():
     """Test 6: real mode execution info enters report."""
     print("\n【Test 6: real 模式信息进入报告】")
     # Switch to real mode, execute a GET case, generate report, check
-    requests.put(f"{BASE}/admin/app-mode", params={"mode": "real"}, timeout=5)
+    requests.put(f"{BASE}/admin/app-mode", params={"mode": "real"}, headers=TESTING_HEADERS, timeout=5)
     try:
         # Find a GET case and execute
         r = requests.get(f"{BASE}/api/v2/test-cases", params={"limit": 50}, timeout=10)
@@ -196,7 +198,7 @@ def test_real_mode_info_in_report():
             check("报告详情含 app_mode=real", True, "(无可用 GET 用例，跳过)")
             check("报告详情含 risk_warnings", True, "(跳过)")
     finally:
-        requests.put(f"{BASE}/admin/app-mode", params={"mode": "mock"}, timeout=5)
+        requests.put(f"{BASE}/admin/app-mode", params={"mode": "mock"}, headers=TESTING_HEADERS, timeout=5)
 
 
 def test_nonexistent_run():

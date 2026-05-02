@@ -1,0 +1,109 @@
+name: CI - Regression Tests
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  APP_MODE: mock
+  USE_MOCK_DATA: "false"
+  AI_PROVIDER: none
+  TESTING: "true"
+  PYTHONIOENCODING: utf-8
+
+jobs:
+  backend-regression:
+    name: Backend Regression Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Start backend
+        run: |
+          python backend_api_server.py &
+          echo "Waiting for backend..."
+          for i in $(seq 1 30); do
+            if python -c "import requests; r=requests.get('http://localhost:8000/health',timeout=2); exit(0 if r.ok else 1)" 2>/dev/null; then
+              echo "Backend ready (${i}s)"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Run regression tests
+        run: python scripts/run_regression_all.py
+
+      - name: Stop backend
+        if: always()
+        run: pkill -f backend_api_server.py || true
+
+  frontend-build:
+    name: Frontend Build Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci || npm install
+        working-directory: frontend
+
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend
+
+  docker-build:
+    name: Docker Build Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [backend-regression, frontend-build]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create minimal .env
+        run: |
+          echo "APP_MODE=mock" > .env
+          echo "USE_MOCK_DATA=false" >> .env
+          echo "AI_PROVIDER=none" >> .env
+
+      - name: Build Docker images
+        run: docker compose build
+
+      - name: Start services
+        run: |
+          docker compose up -d
+          echo "Waiting for services..."
+          sleep 15
+
+      - name: Verify backend health
+        run: |
+          curl -sf http://localhost:8000/health | python -c "import sys,json; d=json.load(sys.stdin); print(d); exit(0 if d.get('status')=='healthy' else 1)"
+
+      - name: Verify frontend
+        run: curl -sf http://localhost:5174/ | head -5
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v

@@ -53,6 +53,7 @@ class TestCaseResponse(BaseModel):
     data_type: Optional[str] = None
     expected_behavior: Optional[str] = None
     source: Optional[str] = None
+    case_type: Optional[str] = None
     created_at: Optional[datetime] = None
     tags: Optional[List[str]] = None
     # 前端展示所需字段

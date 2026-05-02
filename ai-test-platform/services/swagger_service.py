@@ -305,11 +305,111 @@ class SwaggerService:
                 db_test_cases.append(db_tc)
             
             print(f"[DEBUG] 跳过已存在用例: {skipped_count} 个")
-            print(f"[DEBUG] 准备保存新用例: {len(db_test_cases)} 个")
+            print(f"[DEBUG] 准备保存新用例(L1): {len(db_test_cases)} 个")
+            
+            # ── P1-9C: L2 参数变异用例 ──
+            l2_count = 0
+            L2_MAX = 500  # 大文件保护：最多生成 500 条 L2
+            try:
+                import json as _json, uuid as _uuid
+                from app.executor_v2.swagger_to_cases import (
+                    _build_mutation_cases, _detect_pattern,
+                    _extract_body_schema_v2, _resolve_schema,
+                    _extract_properties,
+                )
+                with open(swagger_file, "r", encoding="utf-8") as _f:
+                    swagger_data = _json.load(_f)
+                # 预加载已有 L2 标题集合，避免逐条查 DB
+                existing_l2_titles = set(
+                    row[0] for row in self.db.query(TestCase.title).filter(
+                        TestCase.source == "swagger", TestCase.id.like("TC_L2_%")
+                    ).all()
+                )
+                is_v2 = swagger_data.get("swagger", "").startswith("2") or "swagger" in swagger_data
+                for api_path, path_info in swagger_data.get("paths", {}).items():
+                    if l2_count >= L2_MAX:
+                        print(f"[INFO] L2 已达上限 {L2_MAX}，跳过剩余接口")
+                        break
+                    for http_method, info in path_info.items():
+                        if l2_count >= L2_MAX:
+                            break
+                        if not isinstance(info, dict):
+                            continue
+                        http_method = http_method.upper()
+                        if http_method not in ("GET", "POST", "PUT", "DELETE", "PATCH"):
+                            continue
+                        api_tags = info.get("tags", ["未分类"])
+                        summary = info.get("summary", "")
+                        pattern = _detect_pattern(api_path)
+                        req_schema = {}
+                        if is_v2:
+                            req_schema = _extract_body_schema_v2(info.get("parameters", []), swagger_data)
+                        else:
+                            rb = info.get("requestBody", {})
+                            if "$ref" in rb:
+                                rb = _resolve_schema(rb, swagger_data)
+                            content = rb.get("content", {})
+                            if "application/json" in content:
+                                req_schema = content["application/json"].get("schema", {})
+                                if "$ref" in req_schema:
+                                    req_schema = _resolve_schema(req_schema, swagger_data)
+                        mutations = _build_mutation_cases(
+                            path=api_path, method=http_method, summary=summary,
+                            tags=api_tags, pattern=pattern,
+                            req_schema=req_schema, root_spec=swagger_data,
+                        )
+                        for m in mutations:
+                            if l2_count >= L2_MAX:
+                                break
+                            tc_id = f"TC_L2_{_uuid.uuid4().hex[:8]}"
+                            # 按标题去重（使用内存集合，避免逐条查 DB）
+                            if m["title"] in existing_l2_titles:
+                                # 确保已有L2用例也带上当前项目标签
+                                ptag = f"project:{project_id}"
+                                existing_by_title = self.db.query(TestCase).filter(
+                                    TestCase.title == m["title"],
+                                    TestCase.source == "swagger",
+                                ).first()
+                                if existing_by_title:
+                                    cur_tags = existing_by_title.tags if isinstance(existing_by_title.tags, list) else []
+                                    if ptag not in cur_tags:
+                                        existing_by_title.tags = list(set(cur_tags + [ptag]))
+                                        flag_modified(existing_by_title, "tags")
+                                continue
+                            existing_l2_titles.add(m["title"])
+                            db_tc = TestCase(
+                                id=tc_id,
+                                title=m["title"],
+                                module=api_tags[0] if api_tags else "未分类",
+                                priority="low",
+                                status="pending",
+                                steps=[f"发送 {http_method} {api_path}"],
+                                expected=f"预期状态码 {m.get('expected_status', '4xx/5xx')}",
+                                data_type=m.get("data_type", "mutation"),
+                                expected_behavior="client_error",
+                                execution_config={
+                                    "method": http_method,
+                                    "url": api_path,
+                                    "body": m.get("body"),
+                                    "headers": m.get("headers", {}),
+                                },
+                                assertions=m.get("assertions", []),
+                                created_at=datetime.now(),
+                                updated_at=datetime.now(),
+                                created_by="swagger_import_l2",
+                                tags=[f"project:{project_id}", "l2_mutation", m.get("data_type", "mutation")],
+                                source="swagger",
+                            )
+                            self.db.add(db_tc)
+                            db_test_cases.append(db_tc)
+                            l2_count += 1
+                print(f"[DEBUG] L2 变异用例生成: {l2_count} 个")
+            except Exception as l2_err:
+                print(f"[WARN] L2 变异用例生成跳过: {l2_err}")
             
             self.db.commit()
             
-            print(f"[DEBUG] 成功保存 {len(db_test_cases)} 个测试用例")
+            print(f"[DEBUG] 成功保存 {len(db_test_cases)} 个测试用例 (L1 + L2)")
             
             return db_test_cases
             

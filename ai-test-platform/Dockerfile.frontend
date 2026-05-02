@@ -1,0 +1,57 @@
+# ── AI Test Platform Frontend (nginx) ──
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci --prefer-offline 2>/dev/null || npm install
+
+COPY frontend/ .
+RUN npm run build
+
+# ── Production stage ──
+FROM nginx:alpine
+
+# 自定义 nginx 配置：SPA + API 反向代理
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+RUN cat > /etc/nginx/conf.d/default.conf << 'EOF'
+server {
+    listen 80;
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # API 请求代理到后端
+    location /api/ {
+        proxy_pass http://backend:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_read_timeout 300s;
+    }
+
+    location /health {
+        proxy_pass http://backend:8000;
+        proxy_set_header Host $host;
+    }
+
+    location /docs {
+        proxy_pass http://backend:8000;
+        proxy_set_header Host $host;
+    }
+
+    location /openapi.json {
+        proxy_pass http://backend:8000;
+        proxy_set_header Host $host;
+    }
+
+    # SPA fallback
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+EOF
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

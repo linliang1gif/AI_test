@@ -113,27 +113,19 @@ export default function Dashboard() {
       {/* 无数据提示 */}
       {noData && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6 text-center">
-          <p className="text-blue-800 text-lg mb-3">暂无执行数据，请先初始化 Demo 项目并执行测试集。</p>
-          <button onClick={handleDemoInit} disabled={actionLoading === 'init'}
-            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-            {actionLoading === 'init' ? '初始化中...' : '初始化 Demo 项目'}
+          <p className="text-blue-800 text-lg mb-3">暂无执行数据，请先导入需求文档或 Swagger 生成测试用例。</p>
+          <button onClick={() => navigate('/test-cases')}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+            前往测试用例页
           </button>
         </div>
       )}
 
-      {/* Demo 快捷操作区 */}
+      {/* 快捷操作区 */}
       <div className="bg-white rounded-lg shadow-sm border p-4 mb-6">
         <div className="flex items-center justify-between flex-wrap gap-2">
-          <span className="text-sm font-semibold text-gray-700">Demo 快捷操作</span>
+          <span className="text-sm font-semibold text-gray-700">快捷操作</span>
           <div className="flex gap-2 flex-wrap">
-            <button onClick={handleDemoInit} disabled={!!actionLoading}
-              className="px-3 py-1.5 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50">
-              {actionLoading === 'init' ? '...' : '初始化 Demo'}
-            </button>
-            <button onClick={handleDemoReset} disabled={!!actionLoading}
-              className="px-3 py-1.5 text-xs bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-50">
-              {actionLoading === 'reset' ? '...' : '重置 Demo'}
-            </button>
             <button onClick={() => navigate('/test-cases')}
               className="px-3 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">
               前往测试用例页

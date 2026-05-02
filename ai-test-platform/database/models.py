@@ -119,6 +119,7 @@ class TestCase(Base):
     api_id = Column(String(100))
     dataset_id = Column(String(100))
     source = Column(String(100))  # swagger/manual/ai_generated
+    case_type = Column(String(50), default='api')  # api/functional/web_ui
     
     # Phase 16: 用例治理字段
     module_name = Column(String(200))  # 模块名
