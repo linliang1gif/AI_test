@@ -88,6 +88,71 @@ export default function ReportDetail() {
         </div>
       </div>
 
+      {/* P2-6B: Performance Summary */}
+      {run?.trigger_type === 'performance' && (() => {
+        let ps = null
+        try { ps = JSON.parse(run.summary || '{}')?.performance_summary } catch {}
+        if (!ps) return null
+        return (
+          <div className="bg-white rounded-xl shadow-sm border border-orange-200 p-4">
+            <h2 className="font-semibold text-orange-700 mb-3">性能测试摘要</h2>
+            <div className="grid grid-cols-3 gap-3 mb-3">
+              <div className="bg-blue-50 rounded-lg p-3 text-center">
+                <div className="text-xl font-bold text-blue-700">{ps.total_requests}</div>
+                <div className="text-xs text-blue-600">总请求</div>
+              </div>
+              <div className="bg-green-50 rounded-lg p-3 text-center">
+                <div className="text-xl font-bold text-green-700">{ps.qps}</div>
+                <div className="text-xs text-green-600">QPS</div>
+              </div>
+              <div className="bg-orange-50 rounded-lg p-3 text-center">
+                <div className="text-xl font-bold text-orange-700">{(ps.error_rate * 100).toFixed(1)}%</div>
+                <div className="text-xs text-orange-600">错误率</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-sm">
+              <div className="flex justify-between"><span className="text-slate-500">Avg</span><span>{ps.avg_response_time_ms}ms</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">P95</span><span>{ps.p95_ms}ms</span></div>
+              <div className="flex justify-between"><span className="text-slate-500">P99</span><span>{ps.p99_ms}ms</span></div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* P2-7: Web UI Evidence Summary */}
+      {run?.trigger_type === 'web_ui_batch' && (() => {
+        let ws = null
+        try { ws = JSON.parse(run.summary || '{}') } catch {}
+        if (!ws || ws.case_type !== 'web_ui') return null
+        return (
+          <div className="bg-white rounded-xl shadow-sm border border-violet-200 p-4">
+            <h2 className="font-semibold text-violet-700 mb-3">Web UI 执行证据</h2>
+            <div className="grid grid-cols-4 gap-3">
+              <div className="bg-violet-50 rounded-lg p-3 text-center">
+                <div className="text-xl font-bold text-violet-700">{ws.total_cases || 0}</div>
+                <div className="text-xs text-violet-600">总用例</div>
+              </div>
+              <div className="bg-violet-50 rounded-lg p-3 text-center">
+                <div className="text-xl font-bold text-violet-700">{ws.trace_count || 0}</div>
+                <div className="text-xs text-violet-600">Trace 文件</div>
+              </div>
+              <div className="bg-yellow-50 rounded-lg p-3 text-center">
+                <div className="text-xl font-bold text-yellow-700">{ws.console_error_count || 0}</div>
+                <div className="text-xs text-yellow-600">Console 错误</div>
+              </div>
+              <div className="bg-red-50 rounded-lg p-3 text-center">
+                <div className="text-xl font-bold text-red-700">{ws.network_error_count || 0}</div>
+                <div className="text-xs text-red-600">Network 错误</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-3 text-sm">
+              <div><span className="text-slate-500">通过:</span> <span className="text-green-600 font-bold">{ws.passed_cases || 0}</span></div>
+              <div><span className="text-slate-500">失败:</span> <span className="text-red-600 font-bold">{ws.failed_cases || 0}</span></div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Failure summary */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
         <h2 className="font-semibold text-slate-900 mb-3">失败摘要</h2>

@@ -65,6 +65,8 @@ def register_routers(app):
         ("routes.real_project_routes",       "router", "真实项目快速接入路由"),
         ("routes.ai_case_review_routes",     "router", "AI 用例评审路由"),
         ("routes.page_scanner_routes",       "router", "页面扫描路由"),
+        ("routes.performance_routes",        "router", "性能测试路由"),
+        ("routes.web_ui_batch_routes",       "router", "Web UI 批量执行路由"),
     ]
     for mod_path, attr, label in _core_routes:
         router = _safe_import(mod_path, attr, label)

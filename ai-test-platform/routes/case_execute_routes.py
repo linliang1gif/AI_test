@@ -618,7 +618,8 @@ def _execute_web_ui_case(tc, req, db):
             total_cases=1,
             passed_cases=1 if final_status == "passed" else 0,
             failed_cases=1 if final_status == "failed" else 0,
-            summary=json.dumps({"engine": "playwright", "case_type": "web_ui", "skipped_count": pw_result.skipped_count}, ensure_ascii=False),
+            summary=json.dumps({"engine": "playwright", "case_type": "web_ui", "skipped_count": pw_result.skipped_count,
+                                "has_high_risk_actions": pw_result.has_high_risk_actions}, ensure_ascii=False),
         )
         db.add(test_run)
 
@@ -642,7 +643,10 @@ def _execute_web_ui_case(tc, req, db):
             request_snapshot={"engine": "playwright", "steps_count": len(steps), "assertions_count": len(assertions)},
             response_snapshot={"screenshots": [sr.screenshot_path for sr in pw_result.step_results if sr.screenshot_path],
                                "failure_screenshot": pw_result.failure_screenshot,
-                               "visual_results": pw_result.visual_results},
+                               "visual_results": pw_result.visual_results,
+                               "trace_path": pw_result.trace_path,
+                               "console_error_count": len(pw_result.console_logs),
+                               "network_error_count": len(pw_result.network_errors)},
             assertions_passed=a_passed,
             assertions_failed=a_failed,
             assertion_details=assertion_details,
@@ -653,9 +657,17 @@ def _execute_web_ui_case(tc, req, db):
         # 写入 run_steps
         from database.models import RunStep
         for sr in pw_result.step_results:
+            # P2-6A.1: sanitize high-risk action data in run_steps
+            step_target = sr.target
+            step_value = sr.value
+            if sr.action == "eval_js":
+                step_target = (sr.target[:50] + "…") if len(sr.target) > 50 else sr.target
+                step_value = "[JS]"
+            elif sr.action == "save_cookies":
+                step_value = "[cookie_data]"
             run_step = RunStep(
                 run_case_id=run_case.id,
-                step_name=f"{sr.action}: {sr.target or sr.value or sr.description}",
+                step_name=f"{sr.action}: {step_target or step_value or sr.description}",
                 step_order=sr.step_index,
                 status=sr.status,
                 start_time=test_run.start_time,
@@ -663,8 +675,8 @@ def _execute_web_ui_case(tc, req, db):
                 duration=sr.duration_ms / 1000,
                 input_snapshot={
                     "action": sr.action,
-                    "target": sr.target,
-                    "value": sr.value,
+                    "target": step_target,
+                    "value": step_value,
                     "description": sr.description,
                 },
                 output_snapshot={
@@ -737,6 +749,10 @@ def _execute_web_ui_case(tc, req, db):
                 for sr in pw_result.step_results
             ],
             "visual_results": pw_result.visual_results,
+            "has_high_risk_actions": pw_result.has_high_risk_actions,
+            "trace_path": pw_result.trace_path,
+            "console_logs": pw_result.console_logs[:50],
+            "network_errors": pw_result.network_errors[:50],
         },
     )
 

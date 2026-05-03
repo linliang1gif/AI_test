@@ -470,6 +470,48 @@ export default function TestRunDetailV2() {
                     </div>
                   </div>
                 )}
+
+                {/* P2-7: Trace / Console / Network 证据块 */}
+                {cd.response_snapshot?.trace_path && (
+                  <div className="bg-white rounded-lg shadow-sm p-4">
+                    <h4 className="text-sm font-semibold mb-2">Playwright Trace</h4>
+                    <a href={`/api/v2/web-ui/traces/${cd.response_snapshot.trace_path.replace(/\\/g, '/').split('/').pop()}`} target="_blank" rel="noreferrer"
+                       className="inline-flex items-center gap-1 px-3 py-1.5 bg-violet-50 text-violet-700 rounded border border-violet-200 text-xs hover:bg-violet-100">
+                      下载 trace.zip
+                    </a>
+                    <p className="mt-2 text-xs text-amber-600">⚠️ Trace 可能包含页面截图和调试信息，请勿外传。</p>
+                  </div>
+                )}
+
+                {cd.response_snapshot?.console_logs && cd.response_snapshot.console_logs.length > 0 && (
+                  <div className="bg-white rounded-lg shadow-sm p-4">
+                    <h4 className="text-sm font-semibold mb-2">Console 日志 ({cd.response_snapshot.console_error_count || cd.response_snapshot.console_logs.length})</h4>
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                      {cd.response_snapshot.console_logs.map((log, i) => (
+                        <div key={i} className={`text-xs p-1.5 rounded ${log.type === 'error' ? 'bg-red-50 text-red-700' : 'bg-yellow-50 text-yellow-700'}`}>
+                          <span className="font-mono font-bold">[{log.type}]</span> {log.text?.slice(0, 200)}
+                          {log.location && <span className="text-gray-400 ml-1">@ {log.location}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {cd.response_snapshot?.network_errors && cd.response_snapshot.network_errors.length > 0 && (
+                  <div className="bg-white rounded-lg shadow-sm p-4">
+                    <h4 className="text-sm font-semibold mb-2">Network 错误 ({cd.response_snapshot.network_error_count || cd.response_snapshot.network_errors.length})</h4>
+                    <div className="space-y-1 max-h-40 overflow-y-auto">
+                      {cd.response_snapshot.network_errors.map((ne, i) => (
+                        <div key={i} className="text-xs p-1.5 rounded bg-red-50 text-red-700 flex gap-2">
+                          <span className="font-mono font-bold">{ne.method}</span>
+                          <span className="truncate flex-1">{ne.url?.slice(0, 120)}</span>
+                          {ne.status && <span className="font-bold">{ne.status}</span>}
+                          {ne.failure_text && <span className="text-gray-500">{ne.failure_text}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

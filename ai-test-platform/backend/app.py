@@ -63,4 +63,9 @@ def create_app() -> FastAPI:
         os.makedirs(d, exist_ok=True)
     app.mount("/visual", StaticFiles(directory=visual_dir), name="visual")
 
+    # 9. P2-7.2: /traces 静态挂载已移除，trace 下载统一走安全 API:
+    #    GET /api/v2/web-ui/traces/{filename}  (含路径穿越防御 + zip-only)
+    traces_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "artifacts", "ui", "traces")
+    os.makedirs(traces_dir, exist_ok=True)
+
     return app

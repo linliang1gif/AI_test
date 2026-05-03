@@ -106,6 +106,12 @@ export default function TestCases() {
   const [reviewLoading, setReviewLoading] = useState(false)
   const [reviewResult, setReviewResult] = useState(null)
   const [showReviewDialog, setShowReviewDialog] = useState(false)
+  // P2-6B: Performance Testing
+  const [showPerfDialog, setShowPerfDialog] = useState(false)
+  const [perfConfig, setPerfConfig] = useState({ concurrency: 5, duration_seconds: 10, ramp_up_seconds: 0, think_time_ms: 0 })
+  const [perfLoading, setPerfLoading] = useState(false)
+  const [perfResult, setPerfResult] = useState(null)
+  const [showPerfResult, setShowPerfResult] = useState(false)
   // AI 自愈（P1-8A-Guard 两步确认）
   const [healingCases, setHealingCases] = useState({}) // { case_id: 'loading'|'preview'|'applying'|'done'|'error' }
   const [healPreviews, setHealPreviews] = useState({}) // { case_id: { before, after, changes, ... } }
@@ -922,6 +928,44 @@ export default function TestCases() {
     }
   }
 
+  // P2-7: Web UI 批量执行
+  const handleWebUiBatchExecute = async () => {
+    const selectedCases = filteredTestCases.filter(tc => selectedIds.includes(tc.id))
+    const webUiCases = selectedCases.filter(tc => tc.case_type === 'web_ui')
+    const nonWebUi = selectedCases.filter(tc => tc.case_type !== 'web_ui')
+    if (webUiCases.length === 0) {
+      alert('所选用例中没有 Web UI 用例。请选择 case_type=web_ui 的用例。')
+      return
+    }
+    if (nonWebUi.length > 0) {
+      if (!window.confirm(`所选 ${selectedCases.length} 条用例中有 ${nonWebUi.length} 条非 Web UI 用例将被跳过，仅执行 ${webUiCases.length} 条 Web UI 用例。继续？`)) return
+    } else {
+      const traceWarn = appMode === 'real' ? '\n\n⚠️ 当前为真实模式，Trace 可能包含页面敏感数据。' : ''
+    if (!window.confirm(`确定批量执行 ${webUiCases.length} 条 Web UI 用例？（Playwright 浏览器执行）${traceWarn}`)) return
+    }
+    setIsExecuting(true)
+    try {
+      const result = await api.v2.webUiBatch.run({
+        case_ids: webUiCases.map(tc => tc.id),
+        execution_config: { browser: 'chromium', headless: true, enable_trace: true, capture_console: true, capture_network: true },
+      })
+      setExecutionResult({ ...result, is_batch: true, is_web_ui_batch: true })
+      setShowResultDialog(true)
+      setSelectedIds([])
+      const statusById = {}
+      ;(result.case_results || []).forEach(r => { statusById[r.case_id] = r.status })
+      setTestCases(prev => prev.map(tc =>
+        statusById[tc.id] ? { ...tc, status: statusById[tc.id], lastRun: new Date().toLocaleString() } : tc
+      ))
+    } catch (error) {
+      let msg = error.message || 'Web UI 批量执行失败'
+      try { const p = JSON.parse(msg.replace(/^API调用失败: \d+ /, '')); if (p.detail) msg = p.detail } catch {}
+      alert('Web UI 批量执行失败: ' + msg)
+    } finally {
+      setIsExecuting(false)
+    }
+  }
+
   const handleDownloadScript = () => {
     const blob = new Blob([generatedScript], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
@@ -930,6 +974,35 @@ export default function TestCases() {
     a.download = `test_${selectedTestCase.id}_${Date.now()}.py`
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  // P2-6B: Performance test handler
+  const handlePerfTest = async () => {
+    if (!selectedEnvironmentId) { alert('请先选择执行环境'); return }
+    const apiCaseIds = selectedIds.length > 0
+      ? filteredTestCases.filter(tc => selectedIds.includes(tc.id) && tc.case_type !== 'web_ui').map(tc => tc.id)
+      : filteredTestCases.filter(tc => tc.case_type !== 'web_ui' && tc.execution_config).map(tc => tc.id)
+    if (apiCaseIds.length === 0) { alert('无可用 API 用例'); return }
+    setPerfLoading(true)
+    try {
+      const result = await api.v2.performance.run({
+        project_id: Number(selectedProjectId) || 1,
+        case_ids: apiCaseIds,
+        environment_id: Number(selectedEnvironmentId),
+        concurrency: perfConfig.concurrency,
+        duration_seconds: perfConfig.duration_seconds,
+        ramp_up_seconds: perfConfig.ramp_up_seconds,
+        think_time_ms: perfConfig.think_time_ms,
+        allow_unsafe_methods: false,
+      })
+      setPerfResult(result)
+      setShowPerfDialog(false)
+      setShowPerfResult(true)
+    } catch (e) {
+      alert('性能测试失败: ' + (e.message || e))
+    } finally {
+      setPerfLoading(false)
+    }
   }
 
   const handleManualTest = (testCase) => {
@@ -1172,6 +1245,20 @@ export default function TestCases() {
                 className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center space-x-2 transition-colors disabled:opacity-50"
               >
                 <span>{isExecuting ? '执行中...' : `批量执行 (${selectedIds.length})`}</span>
+              </button>
+              <button
+                onClick={handleWebUiBatchExecute}
+                disabled={isExecuting}
+                className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 flex items-center space-x-2 transition-colors disabled:opacity-50"
+              >
+                <span>{isExecuting ? '执行中...' : `Web UI 批量 (${selectedIds.length})`}</span>
+              </button>
+              <button
+                onClick={() => setShowPerfDialog(true)}
+                disabled={perfLoading}
+                className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 flex items-center space-x-2 transition-colors disabled:opacity-50"
+              >
+                <span>{perfLoading ? '测试中...' : `性能测试 (${selectedIds.length})`}</span>
               </button>
               <button
                 onClick={handleBatchDelete}
@@ -2064,7 +2151,7 @@ export default function TestCases() {
                           <span className="text-xs text-gray-400 w-5 text-center">{idx+1}</span>
                           <select value={step.action} onChange={e=>{const s=[...webUiSteps];s[idx]={...s[idx],action:e.target.value};setWebUiSteps(s)}}
                             className="w-24 px-1.5 py-1.5 border rounded text-xs bg-white">
-                            {[{v:'goto',l:'打开页面'},{v:'click',l:'点击'},{v:'fill',l:'输入'},{v:'wait_for',l:'等待'},{v:'screenshot',l:'截图'},{v:'hover',l:'悬停'},{v:'select',l:'选择'}].map(a=><option key={a.v} value={a.v}>{a.l}</option>)}
+                            {[{v:'goto',l:'打开页面'},{v:'click',l:'点击'},{v:'fill',l:'输入'},{v:'wait_for',l:'等待'},{v:'screenshot',l:'截图'},{v:'hover',l:'悬停'},{v:'select',l:'选择'},{v:'upload',l:'上传'},{v:'press',l:'按键'},{v:'double_click',l:'双击'},{v:'clear',l:'清空'},{v:'scroll',l:'滚动'},{v:'switch_frame',l:'切换iframe'},{v:'switch_main',l:'回到主页'},{v:'eval_js',l:'执行JS'},{v:'save_cookies',l:'保存Cookie'}].map(a=><option key={a.v} value={a.v}>{a.l}</option>)}
                           </select>
                           {step.action !== 'screenshot' && (
                             <input value={step.target} onChange={e=>{const s=[...webUiSteps];s[idx]={...s[idx],target:e.target.value};setWebUiSteps(s)}}
@@ -2096,7 +2183,7 @@ export default function TestCases() {
                           <span className="text-xs text-gray-400 w-5 text-center">{idx+1}</span>
                           <select value={a.type} onChange={e=>{const arr=[...webUiAssertions];arr[idx]={...arr[idx],type:e.target.value};setWebUiAssertions(arr)}}
                             className="w-32 px-1.5 py-1.5 border rounded text-xs bg-white">
-                            {[{v:'url_contains',l:'URL 包含'},{v:'url_not_contains',l:'URL 不包含'},{v:'text_visible',l:'文字可见'},{v:'element_visible',l:'元素可见'},{v:'screenshot_match',l:'📸 视觉对比'}].map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
+                            {[{v:'url_contains',l:'URL 包含'},{v:'url_not_contains',l:'URL 不包含'},{v:'text_visible',l:'文字可见'},{v:'element_visible',l:'元素可见'},{v:'element_count',l:'元素数量'},{v:'screenshot_match',l:'📸 视觉对比'}].map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
                           </select>
                           {a.type==='screenshot_match' ? (<>
                             <input value={a.name||''} onChange={e=>{const arr=[...webUiAssertions];arr[idx]={...arr[idx],name:e.target.value};setWebUiAssertions(arr)}}
@@ -2331,7 +2418,7 @@ export default function TestCases() {
                           <>
                             <select value={step.action||''} onChange={e=>{const s=[...editForm.steps];s[idx]={...s[idx],action:e.target.value};setEditForm(p=>({...p,steps:s}))}}
                               className="w-20 px-1 py-1.5 border rounded text-xs">
-                              {[{v:'goto',l:'打开页面'},{v:'click',l:'点击'},{v:'fill',l:'输入'},{v:'wait_for',l:'等待'},{v:'screenshot',l:'截图'},{v:'hover',l:'悬停'},{v:'select',l:'选择'},{v:'upload',l:'上传'}].map(a=><option key={a.v} value={a.v}>{a.l}</option>)}
+                              {[{v:'goto',l:'打开页面'},{v:'click',l:'点击'},{v:'fill',l:'输入'},{v:'wait_for',l:'等待'},{v:'screenshot',l:'截图'},{v:'hover',l:'悬停'},{v:'select',l:'选择'},{v:'upload',l:'上传'},{v:'press',l:'按键'},{v:'double_click',l:'双击'},{v:'clear',l:'清空'},{v:'scroll',l:'滚动'},{v:'switch_frame',l:'切换iframe'},{v:'switch_main',l:'回到主页'},{v:'eval_js',l:'执行JS'},{v:'save_cookies',l:'保存Cookie'}].map(a=><option key={a.v} value={a.v}>{a.l}</option>)}
                             </select>
                             <input value={step.target||''} onChange={e=>{const s=[...editForm.steps];s[idx]={...s[idx],target:e.target.value};setEditForm(p=>({...p,steps:s}))}}
                               placeholder="选择器" className="flex-1 px-2 py-1.5 border rounded text-xs" />
@@ -2522,14 +2609,14 @@ export default function TestCases() {
           <div className="bg-white rounded-lg shadow-xl p-6 w-[850px] max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-bold">
-                {executionResult.status === 'passed' ? '✅' : executionResult.status === 'no_assertion' ? '⚠️' : '❌'} {executionResult.is_batch ? '批量执行结果' : executionResult.request_snapshot?.engine === 'playwright' ? 'Web UI 测试结果' : '接口测试结果'}
+                {executionResult.status === 'passed' ? '✅' : executionResult.status === 'no_assertion' ? '⚠️' : '❌'} {executionResult.is_web_ui_batch ? 'Web UI 批量执行结果' : executionResult.is_batch ? '批量执行结果' : executionResult.request_snapshot?.engine === 'playwright' ? 'Web UI 测试结果' : '接口测试结果'}
               </h2>
               <button onClick={() => setShowResultDialog(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
             </div>
             
             <div className="mb-4 p-3 bg-blue-50 rounded border border-blue-200">
               <p className="text-sm text-blue-800">
-                <span className="font-medium">{executionResult.is_batch ? '批量执行:' : '用例:'}</span> {executionResult.is_batch ? `${executionResult.total_cases || 0} 个接口用例` : selectedTestCase?.title}
+                <span className="font-medium">{executionResult.is_batch ? '批量执行:' : '用例:'}</span> {executionResult.is_web_ui_batch ? `${executionResult.total_cases || 0} 个 Web UI 用例` : executionResult.is_batch ? `${executionResult.total_cases || 0} 个接口用例` : selectedTestCase?.title}
               </p>
               {executionResult.run_id && <p className="text-xs text-blue-600 mt-1">Run ID: {executionResult.run_id}</p>}
             </div>
@@ -2579,6 +2666,66 @@ export default function TestCases() {
                     {Object.entries(executionResult.skipped_reasons).map(([k, v]) => (
                       <span key={k} className="px-2 py-0.5 bg-gray-100 text-gray-700 text-xs rounded border border-gray-200">{k}: {v}</span>
                     ))}
+                  </div>
+                )}
+                {/* P2-7: Web UI 证据摘要 */}
+                {executionResult.is_web_ui_batch && executionResult.trace_count > 0 && (
+                  <div className="p-2.5 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800 mb-2">
+                    ⚠️ Trace 文件可能包含页面截图和调试信息，请勿外传。
+                  </div>
+                )}
+                {executionResult.is_web_ui_batch && (
+                  <div className="grid grid-cols-3 gap-2 mt-3 mb-2">
+                    <div className="p-2 bg-violet-50 rounded border border-violet-200 text-center">
+                      <div className="text-xs text-gray-500">Trace 文件</div>
+                      <div className="text-base font-bold text-violet-600">{executionResult.trace_count || 0}</div>
+                    </div>
+                    <div className="p-2 bg-yellow-50 rounded border border-yellow-200 text-center">
+                      <div className="text-xs text-gray-500">Console 错误</div>
+                      <div className="text-base font-bold text-yellow-600">{executionResult.console_error_count || 0}</div>
+                    </div>
+                    <div className="p-2 bg-red-50 rounded border border-red-200 text-center">
+                      <div className="text-xs text-gray-500">Network 错误</div>
+                      <div className="text-base font-bold text-red-600">{executionResult.network_error_count || 0}</div>
+                    </div>
+                  </div>
+                )}
+                {/* P2-7: Web UI 用例明细 */}
+                {executionResult.is_web_ui_batch && executionResult.case_results && (
+                  <div className="mt-3">
+                    <h3 className="text-sm font-semibold mb-2">Web UI 用例执行明细</h3>
+                    <div className="border rounded overflow-hidden max-h-60 overflow-y-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-gray-100 sticky top-0">
+                          <tr>
+                            <th className="px-3 py-2 text-left">用例ID</th>
+                            <th className="px-3 py-2 text-left">标题</th>
+                            <th className="px-3 py-2 text-center">状态</th>
+                            <th className="px-3 py-2 text-center">耗时</th>
+                            <th className="px-3 py-2 text-center">Trace</th>
+                            <th className="px-3 py-2 text-center">Console</th>
+                            <th className="px-3 py-2 text-center">Network</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {executionResult.case_results.map((cr, i) => (
+                            <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                              <td className="px-3 py-1.5 text-xs font-mono">{(cr.case_id || '').slice(0, 12)}</td>
+                              <td className="px-3 py-1.5 truncate max-w-[200px]">{cr.title || '-'}</td>
+                              <td className="px-3 py-1.5 text-center">
+                                <span className={`px-1.5 py-0.5 rounded text-xs ${cr.status === 'passed' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                  {cr.status === 'passed' ? 'PASS' : 'FAIL'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-1.5 text-center text-xs">{(cr.duration_ms || 0).toFixed(0)}ms</td>
+                              <td className="px-3 py-1.5 text-center">{cr.trace_path ? <a href={`/api/v2/web-ui/traces/${cr.trace_path.replace(/\\/g, '/').split('/').pop()}`} target="_blank" rel="noreferrer" className="text-violet-600 underline text-xs">下载</a> : '-'}</td>
+                              <td className="px-3 py-1.5 text-center text-xs">{cr.console_error_count || 0}</td>
+                              <td className="px-3 py-1.5 text-center text-xs">{cr.network_error_count || 0}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 )}
               </div>
@@ -3341,6 +3488,119 @@ export default function TestCases() {
                   className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-sm"
                 >提交测试结果</button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* P2-6B: Performance Test Config Modal */}
+      {showPerfDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
+            <h2 className="text-lg font-bold text-slate-900 mb-4">API 性能测试配置</h2>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">并发数 (1-50)</label>
+                <input type="number" min={1} max={50} value={perfConfig.concurrency}
+                  onChange={e => setPerfConfig(p => ({ ...p, concurrency: Number(e.target.value) }))}
+                  className="w-full px-3 py-2 border rounded-lg text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">持续时间 (秒, 1-300)</label>
+                <input type="number" min={1} max={300} value={perfConfig.duration_seconds}
+                  onChange={e => setPerfConfig(p => ({ ...p, duration_seconds: Number(e.target.value) }))}
+                  className="w-full px-3 py-2 border rounded-lg text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Ramp-up (秒)</label>
+                <input type="number" min={0} value={perfConfig.ramp_up_seconds}
+                  onChange={e => setPerfConfig(p => ({ ...p, ramp_up_seconds: Number(e.target.value) }))}
+                  className="w-full px-3 py-2 border rounded-lg text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">请求间隔 (ms)</label>
+                <input type="number" min={0} value={perfConfig.think_time_ms}
+                  onChange={e => setPerfConfig(p => ({ ...p, think_time_ms: Number(e.target.value) }))}
+                  className="w-full px-3 py-2 border rounded-lg text-sm" />
+              </div>
+              <p className="text-xs text-slate-500">将对 {selectedIds.length > 0 ? selectedIds.length : '所有'} 个 API 用例执行性能测试</p>
+            </div>
+            <div className="mt-5 flex justify-end space-x-3">
+              <button onClick={() => setShowPerfDialog(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">取消</button>
+              <button onClick={handlePerfTest} disabled={perfLoading}
+                className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 text-sm disabled:opacity-50">
+                {perfLoading ? '执行中...' : '开始性能测试'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* P2-6B: Performance Test Result Dialog */}
+      {showPerfResult && perfResult && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold text-slate-900">性能测试结果</h2>
+              <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                perfResult.performance_summary?.threshold_passed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+              }`}>{perfResult.performance_summary?.threshold_passed ? 'PASSED' : 'FAILED'}</span>
+            </div>
+            {perfResult.performance_summary && (() => {
+              const ps = perfResult.performance_summary
+              return (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="bg-blue-50 rounded-lg p-3 text-center">
+                      <div className="text-2xl font-bold text-blue-700">{ps.total_requests}</div>
+                      <div className="text-xs text-blue-600">总请求数</div>
+                    </div>
+                    <div className="bg-green-50 rounded-lg p-3 text-center">
+                      <div className="text-2xl font-bold text-green-700">{ps.qps}</div>
+                      <div className="text-xs text-green-600">QPS</div>
+                    </div>
+                    <div className="bg-orange-50 rounded-lg p-3 text-center">
+                      <div className="text-2xl font-bold text-orange-700">{(ps.error_rate * 100).toFixed(1)}%</div>
+                      <div className="text-xs text-orange-600">错误率</div>
+                    </div>
+                  </div>
+                  <div className="bg-slate-50 rounded-lg p-4">
+                    <h3 className="text-sm font-semibold text-slate-700 mb-2">响应时间</h3>
+                    <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div className="flex justify-between"><span className="text-slate-500">平均</span><span className="font-medium">{ps.avg_response_time_ms} ms</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">最小</span><span className="font-medium">{ps.min_response_time_ms} ms</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">P50</span><span className="font-medium">{ps.p50_ms} ms</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">P95</span><span className="font-medium">{ps.p95_ms} ms</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">P99</span><span className="font-medium">{ps.p99_ms} ms</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">最大</span><span className="font-medium">{ps.max_response_time_ms} ms</span></div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="flex justify-between"><span className="text-slate-500">成功</span><span className="text-green-600 font-medium">{ps.success_requests}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-500">失败</span><span className="text-red-600 font-medium">{ps.failed_requests}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-500">并发</span><span className="font-medium">{ps.concurrency}</span></div>
+                    <div className="flex justify-between"><span className="text-slate-500">持续</span><span className="font-medium">{ps.duration_seconds}s</span></div>
+                  </div>
+                  {ps.threshold_failures?.length > 0 && (
+                    <div className="bg-red-50 rounded-lg p-3">
+                      <h3 className="text-sm font-semibold text-red-700 mb-1">阈值未通过</h3>
+                      {ps.threshold_failures.map((f, i) => (
+                        <div key={i} className="text-xs text-red-600">{f.metric}: 实际 {f.actual} &gt; 期望 {f.expected}</div>
+                      ))}
+                    </div>
+                  )}
+                  {ps.failure_samples?.length > 0 && (
+                    <div className="bg-amber-50 rounded-lg p-3">
+                      <h3 className="text-sm font-semibold text-amber-700 mb-1">失败样本 (前{ps.failure_samples.length}个)</h3>
+                      {ps.failure_samples.slice(0, 5).map((s, i) => (
+                        <div key={i} className="text-xs text-amber-600">{s.method} {s.url} → {s.error} ({s.duration_ms}ms)</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+            <div className="mt-5 flex justify-end">
+              <button onClick={() => setShowPerfResult(false)} className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 text-sm">关闭</button>
             </div>
           </div>
         </div>

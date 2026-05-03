@@ -635,6 +635,22 @@ export const api = {
       status: () => request(`${API_BASE_URL}/v2/demo/status`),
     },
 
+    // ==================== Performance Testing (P2-6B) ====================
+    performance: {
+      run: (data) => request(`${API_BASE_URL}/v2/performance/run`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    },
+
+    // ==================== Web UI Batch (P2-7) ====================
+    webUiBatch: {
+      run: (data) => request(`${API_BASE_URL}/v2/web-ui/batch-run`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    },
+
     // ==================== UI Testing ====================
     ui: {
       scanPage: (data) => request(`${API_BASE_URL}/v2/ui/scan`, {

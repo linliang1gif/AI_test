@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-P2-4 Playwright 执行引擎 MVP + P2-5 视觉回归
+P2-4 Playwright 执行引擎 MVP + P2-5 视觉回归 + P2-6 能力增强
 
-支持 action: goto, fill, click, wait_for, screenshot
-支持 assertion: text_visible, url_contains, url_not_contains, element_visible, screenshot_match
+支持 action: goto, fill, click, wait_for, screenshot, upload, hover, select,
+              press, switch_frame, switch_main, scroll, double_click, clear, eval_js, save_cookies
+支持 assertion: text_visible, url_contains, url_not_contains, element_visible, element_count, screenshot_match
 """
 import os
 import time
@@ -15,9 +16,21 @@ from typing import List, Optional, Dict, Any
 logger = logging.getLogger(__name__)
 
 SCREENSHOT_DIR = os.path.join("data", "artifacts", "ui", "screenshots")
+TRACE_DIR = os.path.join("data", "artifacts", "ui", "traces")
 
-SUPPORTED_ACTIONS = {"goto", "fill", "click", "wait_for", "screenshot", "upload", "hover", "select"}
-SUPPORTED_ASSERTIONS = {"text_visible", "url_contains", "url_not_contains", "element_visible", "screenshot_match"}
+SUPPORTED_ACTIONS = {
+    "goto", "fill", "click", "wait_for", "screenshot",
+    "upload", "hover", "select",
+    # P2-6 新增
+    "press", "switch_frame", "switch_main", "scroll",
+    "double_click", "clear", "eval_js", "save_cookies",
+}
+# P2-6A.1: 高风险操作 — real 模式默认禁止, 需 allow_high_risk_ui_actions=true
+HIGH_RISK_ACTIONS = {"eval_js", "save_cookies"}
+SUPPORTED_ASSERTIONS = {
+    "text_visible", "url_contains", "url_not_contains",
+    "element_visible", "element_count", "screenshot_match",
+}
 
 
 @dataclass
@@ -57,10 +70,19 @@ class PlaywrightResult:
     failure_screenshot: str = ""
     skipped_count: int = 0  # P2-4.1: track skipped optional steps
     visual_results: List[Dict[str, Any]] = field(default_factory=list)  # P2-5
+    has_high_risk_actions: bool = False  # P2-6A.1: 标记本次执行是否包含高风险操作
+    # P2-7: trace / console / network
+    trace_path: str = ""
+    console_logs: List[Dict[str, Any]] = field(default_factory=list)
+    network_errors: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def _ensure_screenshot_dir():
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+
+
+def _ensure_trace_dir():
+    os.makedirs(TRACE_DIR, exist_ok=True)
 
 
 def _is_playwright_available() -> bool:
@@ -103,8 +125,19 @@ def execute_web_ui(
     viewport = execution_config.get("viewport", {"width": 1366, "height": 768})
     timeout_ms = execution_config.get("timeout", 30000)
 
+    # P2-6A.1: security policy for high-risk actions
+    app_mode = os.getenv("APP_MODE", "mock")
+    allow_high_risk = execution_config.get("allow_high_risk_ui_actions", False)
+
+    # P2-7: trace/console/network flags
+    enable_trace = execution_config.get("enable_trace", True)
+    capture_console = execution_config.get("capture_console", True)
+    capture_network = execution_config.get("capture_network", True)
+
     result = PlaywrightResult(started_at=datetime.now().isoformat())
     _ensure_screenshot_dir()
+    if enable_trace:
+        _ensure_trace_dir()
 
     pw = None
     browser = None
@@ -115,6 +148,13 @@ def execute_web_ui(
             viewport={"width": viewport.get("width", 1366), "height": viewport.get("height", 768)},
         )
         context.set_default_timeout(timeout_ms)
+
+        # P2-7: start tracing
+        if enable_trace:
+            try:
+                context.tracing.start(screenshots=True, snapshots=True, sources=False)
+            except Exception as e:
+                logger.warning(f"Trace start failed: {e}")
 
         # Load saved session cookies if available
         session_project_id = execution_config.get("session_project_id")
@@ -129,11 +169,59 @@ def execute_web_ui(
                 logger.warning(f"Failed to load session cookies: {e}")
 
         page = context.new_page()
+        # P2-6: engine_ctx tracks mutable state across steps
+        engine_ctx = {"page": page, "context": context, "active_frame": page}
+
+        # P2-7: console log capture
+        if capture_console:
+            from services.sanitize import sanitize_console_entry
+            def _on_console(msg):
+                if msg.type in ("error", "warning"):
+                    entry = sanitize_console_entry({
+                        "type": msg.type,
+                        "text": msg.text[:1000],
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                    try:
+                        entry["location"] = str(msg.location)[:200]
+                    except Exception:
+                        entry["location"] = ""
+                    result.console_logs.append(entry)
+            page.on("console", _on_console)
+
+        # P2-7: network error capture
+        if capture_network:
+            from services.sanitize import sanitize_network_entry
+            def _on_request_failed(request):
+                entry = sanitize_network_entry({
+                    "url": request.url[:500],
+                    "method": request.method,
+                    "resource_type": request.resource_type,
+                    "failure_text": (request.failure or "")[:300] if hasattr(request, "failure") else "",
+                    "timestamp": datetime.now().isoformat(),
+                })
+                result.network_errors.append(entry)
+            page.on("requestfailed", _on_request_failed)
+
+            def _on_response(response):
+                if response.status >= 400:
+                    entry = sanitize_network_entry({
+                        "url": response.url[:500],
+                        "method": response.request.method,
+                        "status": response.status,
+                        "resource_type": response.request.resource_type,
+                        "timestamp": datetime.now().isoformat(),
+                    })
+                    result.network_errors.append(entry)
+            page.on("response", _on_response)
 
         # ── 执行 steps ──
         all_passed = True
         for idx, step in enumerate(steps):
-            sr = _execute_step(page, step, idx, base_url, case_id)
+            sr = _execute_step(engine_ctx, step, idx, base_url, case_id,
+                               app_mode=app_mode, allow_high_risk=allow_high_risk)
+            if sr.action in HIGH_RISK_ACTIONS and sr.status == "passed":
+                result.has_high_risk_actions = True
             result.step_results.append(sr)
             if sr.status == "failed":
                 all_passed = False
@@ -200,6 +288,16 @@ def execute_web_ui(
         result.error_message = f"Playwright 执行异常: {str(e)}"
         logger.exception("Playwright execution error")
     finally:
+        # P2-7: save trace before closing
+        if enable_trace:
+            try:
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                trace_name = f"{run_id}_{case_id}_{ts}.zip" if run_id else f"{case_id}_{ts}.zip"
+                trace_path = os.path.join(TRACE_DIR, trace_name)
+                context.tracing.stop(path=trace_path)
+                result.trace_path = trace_path.replace("\\", "/")
+            except Exception as e:
+                logger.warning(f"Trace save failed: {e}")
         try:
             if browser:
                 browser.close()
@@ -260,7 +358,12 @@ def _parse_text_step(text: str) -> Dict[str, str]:
     return None
 
 
-def _execute_step(page, step, idx: int, base_url: str, case_id: str) -> StepResult:
+def _execute_step(engine_ctx: dict, step, idx: int, base_url: str, case_id: str,
+                   app_mode: str = "mock", allow_high_risk: bool = False) -> StepResult:
+    page = engine_ctx["page"]
+    context = engine_ctx["context"]
+    frame = engine_ctx["active_frame"]  # P2-6: may be page or iframe
+
     # Guard: parse plain string steps into structured format
     if isinstance(step, str):
         parsed = _parse_text_step(step)
@@ -288,6 +391,16 @@ def _execute_step(page, step, idx: int, base_url: str, case_id: str) -> StepResu
         sr.error_message = f"不支持的操作: {action}。当前仅支持: {', '.join(sorted(SUPPORTED_ACTIONS))}"
         return sr
 
+    # P2-6A.1: high-risk action gating
+    if action in HIGH_RISK_ACTIONS:
+        if app_mode == "real" and not allow_high_risk:
+            sr.status = "failed"
+            sr.error_message = (f"[安全限制] {action} 为高风险操作，在 real 模式下默认禁止。"
+                                f"如需使用，请在 execution_config 中设置 allow_high_risk_ui_actions=true")
+            logger.warning(f"P2-6A.1: blocked high-risk action '{action}' in real mode (case={case_id}, step={idx})")
+            return sr
+        logger.info(f"P2-6A.1: executing high-risk action '{action}' (case={case_id}, step={idx}, mode={app_mode})")
+
     def _fail_or_skip(msg: str):
         """P2-4.1: optional=true → skipped, otherwise → failed"""
         if optional:
@@ -308,6 +421,7 @@ def _execute_step(page, step, idx: int, base_url: str, case_id: str) -> StepResu
                     return sr
                 url = f"{base_url}/{target.lstrip('/')}"
             page.goto(url, wait_until="networkidle", timeout=30000)
+            engine_ctx["active_frame"] = page  # reset frame after navigation
             sr.current_url = page.url
             # P2-5: detect redirect — smart categorization
             intended_path = target.split("?")[0].rstrip("/")
@@ -322,8 +436,8 @@ def _execute_step(page, step, idx: int, base_url: str, case_id: str) -> StepResu
 
         elif action == "fill":
             try:
-                page.wait_for_selector(target, timeout=8000)
-                page.fill(target, value)
+                frame.wait_for_selector(target, timeout=8000)
+                frame.fill(target, value)
             except Exception:
                 _fail_or_skip(f"元素 {target} 未找到(当前URL: {page.url})")
                 sr.current_url = page.url
@@ -333,8 +447,8 @@ def _execute_step(page, step, idx: int, base_url: str, case_id: str) -> StepResu
 
         elif action == "click":
             try:
-                page.wait_for_selector(target, timeout=8000)
-                page.click(target)
+                frame.wait_for_selector(target, timeout=8000)
+                frame.click(target)
             except Exception:
                 _fail_or_skip(f"元素 {target} 未找到(当前URL: {page.url})")
                 sr.current_url = page.url
@@ -347,7 +461,7 @@ def _execute_step(page, step, idx: int, base_url: str, case_id: str) -> StepResu
                 page.wait_for_timeout(int(target))
             else:
                 try:
-                    page.wait_for_selector(target, timeout=10000)
+                    frame.wait_for_selector(target, timeout=10000)
                 except Exception:
                     _fail_or_skip(f"等待 {target} 超时(当前URL: {page.url})")
                     sr.current_url = page.url
@@ -357,8 +471,8 @@ def _execute_step(page, step, idx: int, base_url: str, case_id: str) -> StepResu
 
         elif action == "upload":
             try:
-                page.wait_for_selector(target, timeout=8000)
-                page.set_input_files(target, value)
+                frame.wait_for_selector(target, timeout=8000)
+                frame.set_input_files(target, value)
             except Exception:
                 _fail_or_skip(f"上传文件失败: 元素 {target} 未找到或文件 {value} 不存在(当前URL: {page.url})")
                 sr.current_url = page.url
@@ -368,8 +482,8 @@ def _execute_step(page, step, idx: int, base_url: str, case_id: str) -> StepResu
 
         elif action == "hover":
             try:
-                page.wait_for_selector(target, timeout=8000)
-                page.hover(target)
+                frame.wait_for_selector(target, timeout=8000)
+                frame.hover(target)
             except Exception:
                 _fail_or_skip(f"悬停失败: 元素 {target} 未找到(当前URL: {page.url})")
                 sr.current_url = page.url
@@ -379,8 +493,8 @@ def _execute_step(page, step, idx: int, base_url: str, case_id: str) -> StepResu
 
         elif action == "select":
             try:
-                page.wait_for_selector(target, timeout=8000)
-                page.select_option(target, value)
+                frame.wait_for_selector(target, timeout=8000)
+                frame.select_option(target, value)
             except Exception:
                 _fail_or_skip(f"选择失败: 元素 {target} 或选项 {value} 未找到(当前URL: {page.url})")
                 sr.current_url = page.url
@@ -395,6 +509,132 @@ def _execute_step(page, step, idx: int, base_url: str, case_id: str) -> StepResu
             path = os.path.join(SCREENSHOT_DIR, fname)
             page.screenshot(path=path)
             sr.screenshot_path = path
+            sr.current_url = page.url
+
+        # ── P2-6 新增操作 ──
+        elif action == "press":
+            # target: CSS选择器(可选), value: 按键名如 Enter, Tab, Escape
+            key = value or target
+            selector = target if value else None
+            try:
+                if selector:
+                    frame.wait_for_selector(selector, timeout=8000)
+                    frame.press(selector, key)
+                else:
+                    frame.keyboard.press(key)
+            except Exception:
+                _fail_or_skip(f"按键 {key} 失败(当前URL: {page.url})")
+                sr.current_url = page.url
+                sr.duration_ms = (time.time() - t0) * 1000
+                return sr
+            sr.current_url = page.url
+
+        elif action == "double_click":
+            try:
+                frame.wait_for_selector(target, timeout=8000)
+                frame.dblclick(target)
+            except Exception:
+                _fail_or_skip(f"双击元素 {target} 未找到(当前URL: {page.url})")
+                sr.current_url = page.url
+                sr.duration_ms = (time.time() - t0) * 1000
+                return sr
+            sr.current_url = page.url
+
+        elif action == "clear":
+            try:
+                frame.wait_for_selector(target, timeout=8000)
+                frame.fill(target, "")
+            except Exception:
+                _fail_or_skip(f"清空元素 {target} 未找到(当前URL: {page.url})")
+                sr.current_url = page.url
+                sr.duration_ms = (time.time() - t0) * 1000
+                return sr
+            sr.current_url = page.url
+
+        elif action == "scroll":
+            # target: CSS选择器(可选, 空则滚动页面), value: 滚动像素(正=下, 负=上)
+            try:
+                pixels = int(value) if value else 500
+            except ValueError:
+                pixels = 500
+            if target:
+                frame.evaluate(f'document.querySelector("{target}")?.scrollBy(0, {pixels})')
+            else:
+                frame.evaluate(f"window.scrollBy(0, {pixels})")
+            sr.current_url = page.url
+
+        elif action == "switch_frame":
+            # target: iframe CSS选择器, 如 iframe#myFrame, iframe[name=content]
+            try:
+                frame_el = page.wait_for_selector(target, timeout=8000)
+                child_frame = frame_el.content_frame()
+                if child_frame:
+                    engine_ctx["active_frame"] = child_frame
+                    sr.error_message = f"已切换到 iframe: {target}"
+                else:
+                    _fail_or_skip(f"元素 {target} 不是 iframe(当前URL: {page.url})")
+                    sr.current_url = page.url
+                    sr.duration_ms = (time.time() - t0) * 1000
+                    return sr
+            except Exception:
+                _fail_or_skip(f"iframe {target} 未找到(当前URL: {page.url})")
+                sr.current_url = page.url
+                sr.duration_ms = (time.time() - t0) * 1000
+                return sr
+            sr.current_url = page.url
+
+        elif action == "switch_main":
+            engine_ctx["active_frame"] = page
+            sr.error_message = "已切换回主页面"
+            sr.current_url = page.url
+
+        elif action == "eval_js":
+            # P2-6A.1: sanitize — don't log/record full JS content
+            js_preview = target[:50] + ("…" if len(target) > 50 else "")
+            sr.target = js_preview  # truncate in step result
+            try:
+                js_result = frame.evaluate(target)
+                sr.error_message = f"JS返回: {str(js_result)[:200]}"
+            except Exception as e:
+                _fail_or_skip(f"JS执行失败: {str(e)[:200]}")
+                sr.current_url = page.url
+                sr.duration_ms = (time.time() - t0) * 1000
+                return sr
+            sr.current_url = page.url
+
+        elif action == "save_cookies":
+            # P2-6A.1: save cookies with project isolation, no cookie content in logs
+            project_id = target or "default"
+            env_id = engine_ctx.get("environment_id", "default")
+            try:
+                cookies = context.cookies()
+                session_data = {
+                    "project_id": project_id,
+                    "environment_id": env_id,
+                    "base_url": base_url,
+                    "cookies": cookies,
+                    "saved_at": datetime.now().isoformat(),
+                    "page_url": page.url,
+                    "cookie_count": len(cookies),
+                }
+                import json
+                # P2-6A.1: isolate by project_id
+                session_dir = os.path.join("data", "artifacts", "ui", "sessions", str(project_id))
+                os.makedirs(session_dir, exist_ok=True)
+                fname = f"session_{env_id}.json"
+                path = os.path.join(session_dir, fname)
+                with open(path, "w", encoding="utf-8") as f:
+                    json.dump(session_data, f, ensure_ascii=False, indent=2)
+                # P2-6A.1: don't expose cookie content or full path in step result
+                sr.error_message = f"已保存 {len(cookies)} 个cookie (项目: {project_id})"
+                if app_mode == "real":
+                    sr.error_message += " ⚠️ 真实模式，请注意cookie安全，定期清理会话文件"
+                logger.info(f"P2-6A.1: saved {len(cookies)} cookies for project={project_id} env={env_id}")
+            except Exception as e:
+                _fail_or_skip(f"保存cookie失败: {str(e)[:200]}")
+                sr.current_url = page.url
+                sr.duration_ms = (time.time() - t0) * 1000
+                return sr
             sr.current_url = page.url
 
         sr.status = "passed"
@@ -486,6 +726,32 @@ def _execute_assertion(page, assertion) -> AssertionResult:
                     ar.passed = False
                     ar.actual = f"不可见 (当前URL: {current_url})"
                     ar.error_message = f"元素 \"{target}\" 不可见, 页面可能未正确加载。当前URL: {current_url}"
+
+        elif a_type == "element_count":
+            # target: CSS选择器, value: 期望数量(如 ">0", "3", ">=5", "<10", "<=10")
+            try:
+                count = page.locator(target).count()
+                ar.actual = str(count)
+                v = value.strip()
+                try:
+                    if v.startswith(">="):
+                        ar.passed = count >= int(v[2:])
+                    elif v.startswith("<="):
+                        ar.passed = count <= int(v[2:])
+                    elif v.startswith(">"):
+                        ar.passed = count > int(v[1:])
+                    elif v.startswith("<"):
+                        ar.passed = count < int(v[1:])
+                    else:
+                        ar.passed = count == int(v)
+                except ValueError:
+                    ar.passed = False
+                    ar.error_message = f"element_count 表达式非法: \"{value}\"。支持格式: 3, >0, >=5, <10, <=10"
+                if not ar.passed and not ar.error_message:
+                    ar.error_message = f"元素 \"{target}\" 数量为 {count}，期望 {value}"
+            except Exception as e:
+                ar.passed = False
+                ar.error_message = f"element_count 断言失败: {str(e)[:200]}"
 
     except Exception as e:
         ar.passed = False
