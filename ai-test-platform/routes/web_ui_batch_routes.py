@@ -1,8 +1,11 @@
 """
 P2-7: Web UI 批量执行路由
+P2-8: AI UI 失败归因
 
 POST /api/v2/web-ui/batch-run  批量执行 Web UI 用例
 GET  /api/v2/web-ui/traces/{filename}  下载 trace 文件
+POST /api/v2/web-ui/runs/{run_id}/failure-analysis  执行失败归因
+GET  /api/v2/web-ui/runs/{run_id}/failure-analysis  查询归因结果
 """
 import json
 import logging
@@ -253,6 +256,94 @@ def download_trace(filename: str):
         raise HTTPException(status_code=404, detail=f"Trace 文件不存在: {filename}")
 
     return FileResponse(str(target), media_type="application/zip", filename=filename)
+
+
+# ── P2-8: Failure Analysis ──────────────────────────────────────
+
+@router.post("/runs/{run_id}/failure-analysis", summary="P2-8: 执行失败归因分析")
+def run_failure_analysis(run_id: str, db: Session = Depends(get_db)):
+    """对指定 Web UI run 执行失败归因。可重复调用，更新已有分析结果。"""
+    from services.failure_analysis import analyze_run_failures, build_failure_summary
+
+    # 1. 查找 TestRun
+    test_run = db.query(TestRun).filter(TestRun.id == run_id).first()
+    if not test_run:
+        raise HTTPException(status_code=404, detail=f"TestRun {run_id} 不存在")
+
+    # 2. 获取所有 RunCases
+    run_cases = db.query(RunCase).filter(RunCase.run_id == run_id).all()
+    if not run_cases:
+        return {"success": True, "run_id": run_id, "analyses": [], "summary": {}}
+
+    # 3. 序列化 RunCase 数据
+    rc_data_list = []
+    for rc in run_cases:
+        rc_data_list.append({
+            "test_case_id": rc.test_case_id,
+            "status": rc.status,
+            "error_message": rc.error_message,
+            "error_type": rc.error_type,
+            "request_snapshot": rc.request_snapshot or {},
+            "response_snapshot": rc.response_snapshot or {},
+            "assertion_details": rc.assertion_details or [],
+        })
+
+    # 4. 执行归因
+    analyses = analyze_run_failures(rc_data_list, run_id)
+    summary = build_failure_summary(analyses)
+
+    # 5. 写入 TestRun.summary (合并，不覆盖原始数据)
+    try:
+        existing_summary = json.loads(test_run.summary) if test_run.summary else {}
+    except (json.JSONDecodeError, TypeError):
+        existing_summary = {}
+    existing_summary["failure_analysis"] = analyses
+    existing_summary["failure_analysis_summary"] = summary
+    test_run.summary = json.dumps(existing_summary, ensure_ascii=False, default=str)
+
+    # 6. 也写入每个 RunCase.response_snapshot
+    analysis_map = {a["case_id"]: a for a in analyses}
+    for rc in run_cases:
+        if rc.test_case_id in analysis_map:
+            resp = rc.response_snapshot or {}
+            resp["failure_analysis"] = analysis_map[rc.test_case_id]
+            rc.response_snapshot = resp
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.warning(f"Failure analysis commit failed: {e}")
+
+    return {
+        "success": True,
+        "run_id": run_id,
+        "analyses": analyses,
+        "summary": summary,
+    }
+
+
+@router.get("/runs/{run_id}/failure-analysis", summary="P2-8: 查询失败归因结果")
+def get_failure_analysis(run_id: str, db: Session = Depends(get_db)):
+    """查询已有归因结果。如果没有归因结果，返回空数组。"""
+    test_run = db.query(TestRun).filter(TestRun.id == run_id).first()
+    if not test_run:
+        raise HTTPException(status_code=404, detail=f"TestRun {run_id} 不存在")
+
+    try:
+        summary_data = json.loads(test_run.summary) if test_run.summary else {}
+    except (json.JSONDecodeError, TypeError):
+        summary_data = {}
+
+    analyses = summary_data.get("failure_analysis", [])
+    fa_summary = summary_data.get("failure_analysis_summary", {})
+
+    return {
+        "success": True,
+        "run_id": run_id,
+        "analyses": analyses,
+        "summary": fa_summary,
+    }
 
 
 # ---------- 内部函数 ----------

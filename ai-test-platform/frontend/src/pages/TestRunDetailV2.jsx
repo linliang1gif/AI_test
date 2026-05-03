@@ -76,6 +76,9 @@ export default function TestRunDetailV2() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [viewMode, setViewMode] = useState('list')
   const [activeTab, setActiveTab] = useState('overview')
+  const [faLoading, setFaLoading] = useState(false)
+  const [faResults, setFaResults] = useState([])
+  const [faSummary, setFaSummary] = useState(null)
 
   useEffect(() => { loadRunDetail(); checkReport() }, [runId])
 
@@ -107,6 +110,30 @@ export default function TestRunDetailV2() {
       setCaseDetail(res.data)
     } catch {
       setCaseDetail(c)
+    }
+  }
+
+  const loadFailureAnalysis = async () => {
+    try {
+      const res = await fetch(`/api/v2/web-ui/runs/${runId}/failure-analysis`)
+      const data = await res.json()
+      if (data.analyses?.length) { setFaResults(data.analyses); setFaSummary(data.summary) }
+    } catch {}
+  }
+  useEffect(() => { loadFailureAnalysis() }, [runId])
+
+  const handleRunFailureAnalysis = async () => {
+    try {
+      setFaLoading(true)
+      const res = await fetch(`/api/v2/web-ui/runs/${runId}/failure-analysis`, { method: 'POST' })
+      const data = await res.json()
+      setFaResults(data.analyses || [])
+      setFaSummary(data.summary || null)
+      if (data.analyses?.length) setActiveTab('ai-analysis')
+    } catch (err) {
+      alert('归因分析失败: ' + err.message)
+    } finally {
+      setFaLoading(false)
     }
   }
 
@@ -213,6 +240,10 @@ export default function TestRunDetailV2() {
                 查看报告
               </button>
             )}
+            <button onClick={handleRunFailureAnalysis} disabled={faLoading}
+              className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 text-sm">
+              {faLoading ? '分析中...' : faResults.length ? '重新归因分析' : '失败归因分析'}
+            </button>
             <button onClick={handleDownloadReport}
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm">
               下载HTML
@@ -284,6 +315,7 @@ export default function TestRunDetailV2() {
             { key: 'overview', label: '用例详情' },
             { key: 'modules', label: '模块分组' },
             { key: 'failures', label: `根因分析${failureAnalysis.length ? ` (${cases.filter(c=>c.status==='failed'||c.status==='error').length})` : ''}` },
+            ...(faResults.length ? [{ key: 'ai-analysis', label: `归因结果 (${faResults.length})` }] : []),
           ].map(tab => (
             <button key={tab.key} onClick={() => setActiveTab(tab.key)}
               className={`px-6 py-3 text-sm font-medium border-b-2 transition ${
@@ -620,6 +652,76 @@ export default function TestRunDetailV2() {
               ))}
             </>
           )}
+        </div>
+      )}
+      {/* ═══ Tab: AI/规则归因结果 (P2-8) ═══ */}
+      {activeTab === 'ai-analysis' && (
+        <div className="mt-6 space-y-4">
+          {/* 归因汇总 */}
+          {faSummary && (
+            <div className="bg-white rounded-lg shadow-sm p-5">
+              <h3 className="text-sm font-semibold mb-4">归因分析汇总</h3>
+              <div className="grid grid-cols-6 gap-3">
+                <div className="rounded-lg bg-gray-50 p-3 text-center">
+                  <div className="text-xs text-gray-500 mb-1">分析总数</div>
+                  <div className="text-xl font-bold">{faSummary.total_analyzed}</div>
+                </div>
+                <div className="rounded-lg bg-amber-50 p-3 text-center">
+                  <div className="text-xs text-amber-600 mb-1">高置信度</div>
+                  <div className="text-xl font-bold text-amber-600">{faSummary.high_confidence_count}</div>
+                </div>
+                <div className="rounded-lg bg-red-50 p-3 text-center">
+                  <div className="text-xs text-red-600 mb-1">建议提 Bug</div>
+                  <div className="text-xl font-bold text-red-600">{faSummary.should_create_bug_count}</div>
+                </div>
+                <div className="rounded-lg bg-blue-50 p-3 text-center">
+                  <div className="text-xs text-blue-600 mb-1">建议重试</div>
+                  <div className="text-xl font-bold text-blue-600">{faSummary.should_retry_count}</div>
+                </div>
+                <div className="rounded-lg bg-violet-50 p-3 text-center">
+                  <div className="text-xs text-violet-600 mb-1">更新 Selector</div>
+                  <div className="text-xl font-bold text-violet-600">{faSummary.should_update_selector_count}</div>
+                </div>
+                <div className="rounded-lg bg-teal-50 p-3 text-center">
+                  <div className="text-xs text-teal-600 mb-1">更新 Baseline</div>
+                  <div className="text-xl font-bold text-teal-600">{faSummary.should_update_baseline_count}</div>
+                </div>
+              </div>
+              {/* 分类分布 */}
+              {faSummary.category_distribution && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {Object.entries(faSummary.category_distribution).map(([cat, cnt]) => (
+                    <span key={cat} className="px-3 py-1 bg-gray-100 rounded-full text-xs font-medium">{cat}: {cnt}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {/* 归因卡片 */}
+          {faResults.map((a, i) => (
+            <div key={i} className="bg-white rounded-lg shadow-sm p-5 border-l-4" style={{borderLeftColor: a.confidence >= 0.8 ? '#f59e0b' : '#9ca3af'}}>
+              <div className="flex items-center gap-3 mb-3">
+                <span className="px-3 py-1 bg-amber-100 text-amber-800 rounded-full text-xs font-bold">{a.failure_category}</span>
+                <span className="text-xs text-gray-500">置信度: <strong>{(a.confidence * 100).toFixed(0)}%</strong></span>
+                <span className={`text-xs px-2 py-0.5 rounded ${a.analysis_mode === 'ai' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>{a.analysis_mode === 'ai' ? 'AI' : '规则'}</span>
+                <span className="text-xs text-gray-400 font-mono">{(a.case_id || '').slice(0, 16)}</span>
+              </div>
+              <p className="text-sm text-gray-800 mb-2">{a.root_cause_summary}</p>
+              {a.evidence?.length > 0 && (
+                <div className="bg-gray-50 rounded p-3 mb-2">
+                  <div className="text-xs font-semibold text-gray-500 mb-1">证据</div>
+                  {a.evidence.map((e, j) => <div key={j} className="text-xs text-gray-600 font-mono truncate">{e}</div>)}
+                </div>
+              )}
+              <p className="text-sm text-blue-700 mb-2">{a.suggested_action}</p>
+              <div className="flex gap-3 text-xs">
+                {a.should_retry && <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded">建议重试</span>}
+                {a.should_create_bug && <span className="px-2 py-1 bg-red-50 text-red-700 rounded">建议提 Bug</span>}
+                {a.should_update_selector && <span className="px-2 py-1 bg-violet-50 text-violet-700 rounded">更新 Selector</span>}
+                {a.should_update_baseline && <span className="px-2 py-1 bg-teal-50 text-teal-700 rounded">更新 Baseline</span>}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>

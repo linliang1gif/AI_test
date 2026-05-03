@@ -153,6 +153,64 @@ export default function ReportDetail() {
         )
       })()}
 
+      {/* P2-8: UI Failure Analysis Summary */}
+      {run && (() => {
+        let ws = null
+        try { ws = JSON.parse(run.summary || '{}') } catch {}
+        const fa = ws?.failure_analysis_summary
+        const faList = ws?.failure_analysis || []
+        if (!fa || !fa.total_analyzed) return null
+        return (
+          <div className="bg-white rounded-xl shadow-sm border border-amber-200 p-4">
+            <h2 className="font-semibold text-amber-700 mb-3">UI 失败归因摘要</h2>
+            <div className="grid grid-cols-6 gap-3 mb-3">
+              <div className="bg-gray-50 rounded-lg p-3 text-center">
+                <div className="text-xl font-bold">{fa.total_analyzed}</div>
+                <div className="text-xs text-gray-500">分析总数</div>
+              </div>
+              <div className="bg-amber-50 rounded-lg p-3 text-center">
+                <div className="text-xl font-bold text-amber-600">{fa.high_confidence_count}</div>
+                <div className="text-xs text-amber-600">高置信度</div>
+              </div>
+              <div className="bg-red-50 rounded-lg p-3 text-center">
+                <div className="text-xl font-bold text-red-600">{fa.should_create_bug_count}</div>
+                <div className="text-xs text-red-600">建议提 Bug</div>
+              </div>
+              <div className="bg-blue-50 rounded-lg p-3 text-center">
+                <div className="text-xl font-bold text-blue-600">{fa.should_retry_count}</div>
+                <div className="text-xs text-blue-600">建议重试</div>
+              </div>
+              <div className="bg-violet-50 rounded-lg p-3 text-center">
+                <div className="text-xl font-bold text-violet-600">{fa.should_update_selector_count}</div>
+                <div className="text-xs text-violet-600">更新 Selector</div>
+              </div>
+              <div className="bg-teal-50 rounded-lg p-3 text-center">
+                <div className="text-xl font-bold text-teal-600">{fa.should_update_baseline_count}</div>
+                <div className="text-xs text-teal-600">更新 Baseline</div>
+              </div>
+            </div>
+            {fa.category_distribution && (
+              <div className="flex flex-wrap gap-2 mb-3">
+                {Object.entries(fa.category_distribution).map(([cat, cnt]) => (
+                  <span key={cat} className="px-3 py-1 bg-gray-100 rounded-full text-xs font-medium">{cat}: {cnt}</span>
+                ))}
+              </div>
+            )}
+            {faList.length > 0 && (
+              <div className="space-y-2">
+                {faList.map((a, i) => (
+                  <div key={i} className="p-2 bg-amber-50 rounded-lg text-sm flex items-start gap-2">
+                    <span className="px-2 py-0.5 bg-amber-200 text-amber-800 rounded text-xs font-bold whitespace-nowrap">{a.failure_category}</span>
+                    <span className="flex-1 text-gray-700">{a.root_cause_summary}</span>
+                    <span className="text-xs text-gray-400 font-mono whitespace-nowrap">{(a.case_id || '').slice(0, 12)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })()}
+
       {/* Failure summary */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4">
         <h2 className="font-semibold text-slate-900 mb-3">失败摘要</h2>

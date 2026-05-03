@@ -1,4 +1,5 @@
-﻿import { useState, useEffect } from 'react'
+﻿import { useState, useEffect, useMemo } from 'react'
+import { CaseActionToolbar, CaseMetricsPanel, CaseTypeTabs, CaseListTable, CaseDetailDialog, PerfConfigDialog, PerfResultDialog, CaseImportDialog, AiReviewDialog } from '../components/testcases'
 import { useNavigate } from 'react-router-dom'
 import api from '../services/api'
 import SVNInput from '../components/SVNInput'
@@ -39,6 +40,8 @@ export default function TestCases() {
   const [webUiBrowser, setWebUiBrowser] = useState('chromium')
   const [webUiBaseUrl, setWebUiBaseUrl] = useState('')
   const [webUiHeadless, setWebUiHeadless] = useState(true)
+  const [showHiddenPetStore, setShowHiddenPetStore] = useState(false)
+  const [scannerExpanded, setScannerExpanded] = useState(false)
   const [webUiNeedLogin, setWebUiNeedLogin] = useState(false)
   const [webUiLoginMerchant, setWebUiLoginMerchant] = useState('')
   const [webUiLoginUser, setWebUiLoginUser] = useState('')
@@ -725,7 +728,7 @@ export default function TestCases() {
   }
 
   const filteredTestCases = testCases.filter(tc => {
-    if (selectedEnvironmentId && !isPetStoreEnvironment && isPetStoreSampleCase(tc)) return false
+    if (selectedEnvironmentId && !isPetStoreEnvironment && isPetStoreSampleCase(tc) && !showHiddenPetStore) return false
     // 来源筛选
     const isApiSource = ['swagger', 'demo_swagger', 'demo_seed'].includes(tc.source) || tc.case_type === 'api'
     const isWebUi = tc.case_type === 'web_ui'
@@ -1192,12 +1195,48 @@ export default function TestCases() {
   const safePage = Math.min(currentPage, totalPages)
   const pagedCases = govFilteredCases.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE)
 
+  // P2-7.3: Selected case type analysis for dynamic toolbar
+  const selectedCaseAnalysis = useMemo(() => {
+    if (selectedIds.length === 0) return { count: 0, isMixed: false, hasApi: false, hasWebUi: false, hasFunctional: false }
+    const selected = filteredTestCases.filter(tc => selectedIds.includes(tc.id))
+    const types = new Set(selected.map(tc => {
+      if (tc.case_type === 'web_ui') return 'web_ui'
+      if (['swagger', 'demo_swagger', 'demo_seed'].includes(tc.source) || tc.case_type === 'api') return 'api'
+      return 'functional'
+    }))
+    return { count: selected.length, isMixed: types.size > 1, hasApi: types.has('api'), hasWebUi: types.has('web_ui'), hasFunctional: types.has('functional') }
+  }, [selectedIds, filteredTestCases])
+
+  // P2-7.3: Tab-specific metrics
+  const tabMetrics = useMemo(() => {
+    const apiCases = testCases.filter(tc => ['swagger','demo_swagger','demo_seed'].includes(tc.source) || tc.case_type === 'api')
+    const webUiCases = testCases.filter(tc => tc.case_type === 'web_ui')
+    const funcCases = testCases.filter(tc => !['swagger','demo_swagger','demo_seed'].includes(tc.source) && tc.case_type !== 'web_ui' && tc.case_type !== 'api')
+    return {
+      all: { total: testCases.length, apiCount: apiCases.length, funcCount: funcCases.length, webUiCount: webUiCases.length, recentFailed: testCases.filter(tc => tc.status === 'failed').length },
+      api: { total: apiCases.length, covered: coverage?.covered_apis || 0, l1: coverage?.l1_case_count || 0, l2: coverage?.l2_case_count || 0, coverageRate: coverage?.coverage_rate || 0 },
+      web_ui: {
+        total: webUiCases.length,
+        executed: webUiCases.filter(tc => tc.status && tc.status !== 'pending').length,
+        passRate: webUiCases.length > 0 ? Math.round(webUiCases.filter(tc => tc.status === 'passed').length / webUiCases.length * 100) : 0,
+        traceCount: webUiCases.filter(tc => tc.status === 'passed' || tc.status === 'failed').length,
+        visualCount: webUiCases.filter(tc => tc.assertions?.some?.(a => a.type === 'screenshot_match')).length,
+      },
+      functional: {
+        total: funcCases.length,
+        reviewed: funcCases.filter(tc => tc.status && tc.status !== 'pending').length,
+        highRisk: funcCases.filter(tc => tc.risk_level === 'P0').length,
+        needImprove: funcCases.filter(tc => !tc.expected || !tc.steps?.length).length,
+      },
+    }
+  }, [testCases, coverage])
+
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900"> 测试用例</h1>
-          <p className="text-gray-600 mt-1">管理和生成测试用例</p>
+          <h1 className="text-3xl font-bold text-gray-900">测试用例</h1>
+          <p className="text-gray-600 mt-1">测试用例资产中心 — 统一管理功能、API、Web UI 用例</p>
         </div>
         <div className="flex space-x-3">
           <select
@@ -1237,46 +1276,7 @@ export default function TestCases() {
               </option>
             ))}
           </select>
-          {selectedIds.length > 0 && (
-            <>
-              <button
-                onClick={handleBatchExecute}
-                disabled={isExecuting}
-                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center space-x-2 transition-colors disabled:opacity-50"
-              >
-                <span>{isExecuting ? '执行中...' : `批量执行 (${selectedIds.length})`}</span>
-              </button>
-              <button
-                onClick={handleWebUiBatchExecute}
-                disabled={isExecuting}
-                className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 flex items-center space-x-2 transition-colors disabled:opacity-50"
-              >
-                <span>{isExecuting ? '执行中...' : `Web UI 批量 (${selectedIds.length})`}</span>
-              </button>
-              <button
-                onClick={() => setShowPerfDialog(true)}
-                disabled={perfLoading}
-                className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 flex items-center space-x-2 transition-colors disabled:opacity-50"
-              >
-                <span>{perfLoading ? '测试中...' : `性能测试 (${selectedIds.length})`}</span>
-              </button>
-              <button
-                onClick={handleBatchDelete}
-                disabled={isDeleting}
-                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center space-x-2 transition-colors disabled:opacity-50"
-              >
-                <span></span>
-                <span>{isDeleting ? '删除中...' : `删除 (${selectedIds.length})`}</span>
-              </button>
-            </>
-          )}
-          <button
-            onClick={handleExportExcel}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center space-x-2 transition-colors"
-          >
-            <span></span>
-            <span>导出Excel</span>
-          </button>
+          {/* P2-7.3: Primary action - always visible */}
           <button
             onClick={() => { setShowImportDialog(true); setImportError(null); setImportSuccess(null) }}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center space-x-2 transition-colors"
@@ -1284,82 +1284,50 @@ export default function TestCases() {
             <span>➕</span>
             <span>导入 / 生成用例</span>
           </button>
-          <button
-            onClick={handleAiReview}
-            disabled={reviewLoading}
-            className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 flex items-center space-x-2 transition-colors disabled:opacity-50"
-          >
-            <span>{reviewLoading ? '评审中...' : `AI评审${selectedProjectId ? '(当前项目)' : selectedIds.length > 0 ? `(${selectedIds.length}条)` : '(全部)'}`}</span>
-          </button>
         </div>
       </div>
       
       <div className="bg-white rounded-lg shadow">
         <div className="p-6 border-b space-y-3">
-          <div className="flex gap-2">
-            {[
-              { key: 'all', label: '全部', count: testCases.length },
-              { key: 'functional', label: '功能测试', count: testCases.filter(tc => !['swagger','demo_swagger','demo_seed'].includes(tc.source) && tc.case_type !== 'web_ui').length },
-              { key: 'api', label: '接口测试', count: testCases.filter(tc => ['swagger','demo_swagger','demo_seed'].includes(tc.source) || tc.case_type === 'api').length },
-              { key: 'web_ui', label: 'Web UI', count: testCases.filter(tc => tc.case_type === 'web_ui').length },
-            ].map(tab => (
-              <button
-                key={tab.key}
-                onClick={() => { setSourceFilter(tab.key); setCurrentPage(1) }}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  sourceFilter === tab.key
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                }`}
-              >
-                {tab.label} ({tab.count})
-              </button>
-            ))}
-          </div>
-          {hiddenPetStoreSampleCount > 0 && (
-            <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700">
-              已根据当前执行环境隐藏 {hiddenPetStoreSampleCount} 条 PetStore 示例 Swagger 用例，避免误用蓝点环境执行示例接口。
-            </div>
-          )}
+          <CaseTypeTabs
+            sourceFilter={sourceFilter}
+            testCases={testCases}
+            onChangeFilter={(key) => { setSourceFilter(key); setCurrentPage(1) }}
+          />
 
-          {/* P2-9D: 接口覆盖率摘要 */}
-          {coverage && coverage.total_apis > 0 && sourceFilter !== 'functional' && (
-            <div className="flex items-center gap-4 px-4 py-3 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-100">
-              <div className="flex items-center gap-2">
-                <div className="relative w-12 h-12">
-                  <svg viewBox="0 0 36 36" className="w-12 h-12 -rotate-90">
-                    <circle cx="18" cy="18" r="15.9" fill="none" stroke="#e5e7eb" strokeWidth="3" />
-                    <circle cx="18" cy="18" r="15.9" fill="none"
-                      stroke={coverage.coverage_rate >= 80 ? '#22c55e' : coverage.coverage_rate >= 50 ? '#f59e0b' : '#ef4444'}
-                      strokeWidth="3" strokeDasharray={`${coverage.coverage_rate} ${100 - coverage.coverage_rate}`} strokeLinecap="round" />
-                  </svg>
-                  <span className="absolute inset-0 flex items-center justify-center text-xs font-bold">{coverage.coverage_rate}%</span>
-                </div>
-              </div>
-              <div className="flex-1 grid grid-cols-4 gap-3 text-center">
-                <div>
-                  <div className="text-lg font-bold text-gray-800">{coverage.total_apis}</div>
-                  <div className="text-xs text-gray-500">API 总数</div>
-                </div>
-                <div>
-                  <div className="text-lg font-bold text-green-600">{coverage.covered_apis}</div>
-                  <div className="text-xs text-gray-500">已覆盖</div>
-                </div>
-                <div>
-                  <div className="text-lg font-bold text-blue-600">{coverage.l1_case_count || 0}</div>
-                  <div className="text-xs text-gray-500">L1 正向</div>
-                </div>
-                <div>
-                  <div className="text-lg font-bold text-orange-600">{coverage.l2_case_count || 0}</div>
-                  <div className="text-xs text-gray-500">L2 变异</div>
-                </div>
-              </div>
-              {coverage.total_apis - coverage.covered_apis > 0 && (
-                <div className="text-xs text-red-500 whitespace-nowrap">
-                  {coverage.total_apis - coverage.covered_apis} 个未覆盖
-                </div>
-              )}
-              <button onClick={() => loadCoverage()} className="text-xs text-blue-500 hover:underline whitespace-nowrap">刷新</button>
+          <CaseActionToolbar
+            selectedCaseAnalysis={selectedCaseAnalysis}
+            isExecuting={isExecuting}
+            perfLoading={perfLoading}
+            reviewLoading={reviewLoading}
+            isDeleting={isDeleting}
+            onBatchExecute={handleBatchExecute}
+            onWebUiBatchExecute={handleWebUiBatchExecute}
+            onShowPerfDialog={() => setShowPerfDialog(true)}
+            onAiReview={handleAiReview}
+            onExportExcel={handleExportExcel}
+            onBatchDelete={handleBatchDelete}
+            onClearSelection={() => setSelectedIds([])}
+          />
+
+          <CaseMetricsPanel
+            sourceFilter={sourceFilter}
+            tabMetrics={tabMetrics}
+            testCases={testCases}
+            coverage={coverage}
+            onRefreshCoverage={() => loadCoverage()}
+          />
+
+          {/* P2-7.3: PetStore example hint with project/env context and clickable reveal */}
+          {hiddenPetStoreSampleCount > 0 && (
+            <div className="px-3 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-700 flex items-center justify-between">
+              <span>
+                当前环境 <strong>{selectedEnvironment?.name || ''}</strong> 非 PetStore Demo，已隐藏 {hiddenPetStoreSampleCount} 条示例用例，避免误执行。
+              </span>
+              <button onClick={() => setShowHiddenPetStore(prev => !prev)}
+                className="text-xs text-amber-600 hover:text-amber-800 underline ml-2 whitespace-nowrap">
+                {showHiddenPetStore ? '恢复隐藏' : '查看隐藏用例'}
+              </button>
             </div>
           )}
 
@@ -1458,807 +1426,181 @@ export default function TestCases() {
           </div>}
         </div>
         
-        <div className="p-6 overflow-x-auto">
-          {loading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-              <span className="ml-2 text-gray-500">加载中...</span>
-            </div>
-          ) : (
-            <table className="w-full table-fixed min-w-[900px]">
-              <thead>
-                <tr className="border-b">
-                  <th className="py-3 px-4 text-gray-600 font-medium w-10">
-                    <input
-                      type="checkbox"
-                      checked={govFilteredCases.length > 0 && selectedIds.length === govFilteredCases.length}
-                      onChange={handleSelectAll}
-                      className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                    />
-                  </th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-medium w-[30%]">用例名称</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-medium w-[14%]">模块</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-medium w-[8%]">风险</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-medium w-[8%]">{sourceFilter === 'api' ? '接口类型' : sourceFilter === 'functional' ? '优先级' : '类型'}</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-medium w-[8%]">来源</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-medium w-[10%]">状态</th>
-                  <th className="text-left py-3 px-4 text-gray-600 font-medium w-[18%]">操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {govFilteredCases.length === 0 ? (
-                  <tr>
-                    <td colSpan={10} className="py-8 text-center text-gray-500">
-                      {searchQuery || hasGovFilter ? '未找到匹配的测试用例' : '暂无测试用例，请导入需求文档生成'}
-                    </td>
-                  </tr>
-                ) : pagedCases.map((tc, index) => {
-                  const priorityMap = { 
-                    high: { cls: 'bg-red-100 text-red-700', label: '高' }, 
-                    medium: { cls: 'bg-yellow-100 text-yellow-700', label: '中' }, 
-                    low: { cls: 'bg-green-100 text-green-700', label: '低' } 
-                  }
-                  const statusMap = { 
-                    passed: { cls: 'bg-green-100 text-green-700', label: '通过' }, 
-                    failed: { cls: 'bg-red-100 text-red-700', label: '失败' }, 
-                    error: { cls: 'bg-red-100 text-red-700', label: '错误' },
-                    no_assertion: { cls: 'bg-yellow-100 text-yellow-700', label: '无断言' },
-                    pending: { cls: 'bg-gray-100 text-gray-700', label: '待运行' } 
-                  }
-                  const p = priorityMap[tc.priority] || { cls: 'bg-gray-100 text-gray-700', label: tc.priority || '-' }
-                  const s = statusMap[tc.status] || { cls: 'bg-gray-100 text-gray-700', label: tc.status || '-' }
-                  
-                  // 使用组合key避免重复
-                  const uniqueKey = `${tc.id}-${index}`;
-                  
-                  return (
-                    <tr key={uniqueKey} className="border-b hover:bg-gray-50 transition-colors">
-                      <td className="py-4 px-4">
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.includes(tc.id)}
-                          onChange={() => handleSelectOne(tc.id)}
-                          className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
-                        />
-                      </td>
-                      <td className="py-4 px-4 font-medium truncate" title={tc.title}>
-                        {tc.title?.replace(/^(测试用例标题|测试点|用例标题|标题)[:：]\s*/, '') || tc.title}
-                      </td>
-                      <td className="py-4 px-4 text-gray-600">{tc.module_name || tc.module || '-'}</td>
-                      <td className="py-4 px-4">
-                        {tc.risk_level ? (
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${
-                            tc.risk_level === 'P0' ? 'bg-red-100 text-red-700' :
-                            tc.risk_level === 'P1' ? 'bg-orange-100 text-orange-700' :
-                            'bg-gray-100 text-gray-600'
-                          }`}>{tc.risk_level}</span>
-                        ) : <span className="text-gray-300 text-xs">-</span>}
-                        {tc.destructive && <span className="ml-1 px-1 bg-red-50 text-red-600 text-xs rounded border border-red-200" title="破坏性接口">破坏</span>}
-                      </td>
-                      <td className="py-4 px-4">
-                        {sourceFilter === 'functional' || (!['swagger','demo_swagger','demo_seed'].includes(tc.source) && sourceFilter === 'all') ? (
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${p.cls}`}>{p.label}</span>
-                        ) : (
-                          <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs">{tc.api_pattern || '-'}</span>
-                        )}
-                      </td>
-                      <td className="py-4 px-4">
-                        <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs">
-                          {sourceLabel(tc.source)}
-                        </span>
-                        {tc.case_type === 'web_ui' && (
-                          <span className="ml-1 px-1.5 py-0.5 bg-violet-100 text-violet-700 rounded text-xs font-medium">Web UI</span>
-                        )}
-                      </td>
-                      <td className="py-4 px-4">
-                        <span className={`px-2 py-1 rounded text-sm ${s.cls}`}>{s.label}</span>
-                        {tc.failure_category && <div className="text-xs text-red-400 mt-0.5">{tc.failure_category}</div>}
-                      </td>
-                      <td className="py-4 px-4">
-                        <div className="flex space-x-2">
-                          <button
-                            onClick={() => handleViewDetail(tc)}
-                            className="px-3 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 text-sm"
-                          >
-                            查看详情
-                          </button>
-                          {tc.case_type === 'web_ui' ? (
-                            <button
-                              onClick={() => handleExecuteTest(tc)}
-                              disabled={isExecuting}
-                              className="px-3 py-1 bg-violet-50 text-violet-600 rounded hover:bg-violet-100 text-sm flex items-center space-x-1 disabled:opacity-50"
-                              title="Playwright 执行 Web UI 用例"
-                            >
-                              <span>🌐</span>
-                              <span>{isExecuting && selectedTestCase?.id === tc.id ? '执行中...' : '执行'}</span>
-                            </button>
-                          ) : ['swagger', 'demo_swagger', 'demo_seed'].includes(tc.source) ? (
-                            <>
-                              <button
-                                onClick={() => handleGenerateScript(tc)}
-                                className="px-3 py-1 bg-purple-50 text-purple-600 rounded hover:bg-purple-100 text-sm flex items-center space-x-1"
-                                title="导出可运行的 pytest 脚本，支持环境变量配置"
-                              >
-                                <span></span>
-                                <span>导出脚本</span>
-                              </button>
-                              <button
-                                onClick={() => handleExecuteTest(tc)}
-                                className="px-3 py-1 bg-green-50 text-green-600 rounded hover:bg-green-100 text-sm flex items-center space-x-1"
-                                title="自动化执行"
-                              >
-                                <span></span>
-                                <span>自动执行</span>
-                              </button>
-                            </>
-                          ) : (
-                            <button
-                              onClick={() => handleManualTest(tc)}
-                              className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded hover:bg-indigo-100 text-sm flex items-center space-x-1"
-                              title="手动功能测试"
-                            >
-                              <span></span>
-                              <span>手动测试</span>
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          )}
-          {/* 分页 */}
-          {govFilteredCases.length > PAGE_SIZE && (
-            <div className="flex items-center justify-between px-4 py-3 border-t">
-              <span className="text-sm text-gray-500">共 {govFilteredCases.length} 条，第 {safePage}/{totalPages} 页</span>
-              <div className="flex items-center gap-1">
-                <button onClick={() => setCurrentPage(1)} disabled={safePage <= 1}
-                  className="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-40">首页</button>
-                <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={safePage <= 1}
-                  className="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-40">上一页</button>
-                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                  let page
-                  if (totalPages <= 5) { page = i + 1 }
-                  else if (safePage <= 3) { page = i + 1 }
-                  else if (safePage >= totalPages - 2) { page = totalPages - 4 + i }
-                  else { page = safePage - 2 + i }
-                  return (
-                    <button key={page} onClick={() => setCurrentPage(page)}
-                      className={`px-2.5 py-1 text-xs border rounded ${page === safePage ? 'bg-blue-600 text-white border-blue-600' : 'hover:bg-gray-50'}`}>{page}</button>
-                  )
-                })}
-                <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={safePage >= totalPages}
-                  className="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-40">下一页</button>
-                <button onClick={() => setCurrentPage(totalPages)} disabled={safePage >= totalPages}
-                  className="px-2 py-1 text-xs border rounded hover:bg-gray-50 disabled:opacity-40">末页</button>
-              </div>
-            </div>
-          )}
-        </div>
+        <CaseListTable
+          loading={loading}
+          sourceFilter={sourceFilter}
+          govFilteredCases={govFilteredCases}
+          pagedCases={pagedCases}
+          selectedIds={selectedIds}
+          selectedTestCase={selectedTestCase}
+          isExecuting={isExecuting}
+          searchQuery={searchQuery}
+          hasGovFilter={hasGovFilter}
+          safePage={safePage}
+          totalPages={totalPages}
+          onSelectAll={handleSelectAll}
+          onSelectOne={handleSelectOne}
+          onViewDetail={handleViewDetail}
+          onExecuteTest={handleExecuteTest}
+          onGenerateScript={handleGenerateScript}
+          onManualTest={handleManualTest}
+          onSetCurrentPage={setCurrentPage}
+        />
       </div>
 
-      {/* P1-9A: 统一导入 / 生成用例弹窗 */}
-      {showImportDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl w-[680px] max-h-[85vh] overflow-y-auto">
-            {/* 标题栏 */}
-            <div className="flex items-center justify-between px-6 py-4 border-b">
-              <h2 className="text-lg font-bold text-gray-800">导入 / 生成用例</h2>
-              <button onClick={closeImportDialog} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
-            </div>
-
-            {/* Tab 切换 */}
-            <div className="flex border-b px-6 pt-3 gap-1">
-              {[
-                { key: 'requirement', label: '需求文档' },
-                { key: 'swagger_file', label: 'Swagger 文件' },
-                { key: 'swagger_url', label: 'Swagger URL' },
-                { key: 'yapi', label: 'YApi' },
-                { key: 'manual', label: '手动创建' },
-              ].map(t => (
-                <button
-                  key={t.key}
-                  onClick={() => { setImportTab(t.key); setImportError(null); setImportSuccess(null) }}
-                  className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
-                    importTab === t.key
-                      ? 'bg-blue-50 text-blue-700 border border-b-0 border-blue-200'
-                      : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-                  }`}
-                >{t.label}</button>
-              ))}
-            </div>
-
-            {/* 错误提示 */}
-            {importError && (
-              <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-start gap-2">
-                <span className="mt-0.5">⚠️</span>
-                <span>{importError}</span>
-                <button onClick={() => setImportError(null)} className="ml-auto text-red-400 hover:text-red-600">&times;</button>
-              </div>
-            )}
-
-            {/* 成功提示 */}
-            {importSuccess && (
-              <div className="mx-6 mt-4 p-4 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">
-                <p className="font-medium mb-2">✅ 导入成功！</p>
-                <p>已生成 <strong>{importSuccess.count}</strong> 条测试用例
-                  {importSuccess.apiCount ? `，共 ${importSuccess.apiCount} 个接口` : ''}
-                </p>
-                {importSuccess.apiSpecId && (
-                  <p className="mt-1 text-xs text-green-600">API 规范已写入 (ID: {importSuccess.apiSpecId})</p>
-                )}
-                <div className="flex gap-2 mt-3">
-                  <button onClick={closeImportDialog} className="px-3 py-1.5 text-xs bg-green-600 text-white rounded hover:bg-green-700">
-                    查看测试用例
-                  </button>
-                  {importSuccess.apiSpecId && (
-                    <button onClick={() => { closeImportDialog(); navigate('/api-specs') }}
-                      className="px-3 py-1.5 text-xs bg-white border border-green-300 text-green-700 rounded hover:bg-green-50">
-                      查看 API 规范
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Tab 内容 */}
-            <div className="px-6 py-5">
-
-              {/* ── 需求文档 Tab ── */}
-              {importTab === 'requirement' && !importSuccess && (
-                <div>
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">选择需求文档</label>
-                    <input type="file" accept=".docx,.xlsx,.pdf,.doc,.xls,.txt"
-                      onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
-                    {uploadFile && <p className="mt-1.5 text-sm text-green-600">✓ 已选择: {uploadFile.name}</p>}
-                  </div>
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-xs text-blue-800">
-                    <p className="font-medium mb-1">AI 将自动：</p>
-                    <ul className="list-disc list-inside space-y-0.5">
-                      <li>解析需求文档，拆分功能模块</li>
-                      <li>结合项目知识库生成测试场景</li>
-                      <li>生成完整测试用例（含业务断言）</li>
-                    </ul>
-                    <p className="mt-1.5 text-blue-600">⏱️ 预计 1-2 分钟</p>
-                  </div>
-                  {isGenerating && (
-                    <div className="mb-4">
-                      <div className="flex justify-between mb-1 text-sm">
-                        <span className="text-gray-700">{generationStep}</span>
-                        <span className="text-gray-500">{generationProgress}%</span>
-                      </div>
-                      <div className="w-full bg-gray-200 rounded-full h-2">
-                        <div className="bg-blue-600 h-2 rounded-full transition-all duration-500" style={{ width: `${generationProgress}%` }} />
-                      </div>
-                    </div>
-                  )}
-                  <div className="flex justify-end">
-                    <button onClick={handleImportRequirement} disabled={!uploadFile || importLoading}
-                      className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm flex items-center gap-2">
-                      {importLoading ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> AI 生成中...</> : '开始生成'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Swagger 文件 Tab ── */}
-              {importTab === 'swagger_file' && !importSuccess && (
-                <div>
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">上传 Swagger / OpenAPI 文件</label>
-                    <label className="flex items-center justify-center px-4 py-4 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors">
-                      <input type="file" accept=".json,.yaml,.yml" className="hidden"
-                        onChange={(e) => setSwaggerFile(e.target.files?.[0] || null)} />
-                      <span className="text-sm text-gray-600">
-                        {swaggerFile ? `📄 ${swaggerFile.name} (${(swaggerFile.size/1024).toFixed(1)} KB)` : '点击选择 JSON / YAML 文件'}
-                      </span>
-                    </label>
-                    {swaggerFile && <button onClick={() => setSwaggerFile(null)} className="mt-1 text-xs text-red-500 hover:underline">清除</button>}
-                    <p className="text-xs text-gray-400 mt-1">支持 Swagger 2.0 / OpenAPI 3.0 格式，导入后写入 API 规范并自动生成接口测试用例</p>
-                  </div>
-                  <div className="mb-4">
-                    <label className="block text-xs text-gray-500 mb-1">目标项目</label>
-                    <select value={selectedProjectId || projects[0]?.id || ''}
-                      onChange={(e) => setSelectedProjectId(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
-                      <option value="">选择项目</option>
-                      {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  </div>
-                  <div className="flex justify-end">
-                    <button onClick={handleImportSwaggerFile} disabled={!swaggerFile || importLoading}
-                      className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm flex items-center gap-2">
-                      {importLoading ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> 导入中...</> : '导入并生成用例'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Swagger URL Tab ── */}
-              {importTab === 'swagger_url' && !importSuccess && (
-                <div>
-                  <div className="mb-3">
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Swagger / OpenAPI URL</label>
-                    <input type="text" value={swaggerUrl} onChange={(e) => setSwaggerUrl(e.target.value)}
-                      placeholder="https://api.example.com/v2/api-docs"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 mb-3">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">鉴权方式</label>
-                      <select value={swaggerAuthType} onChange={(e) => setSwaggerAuthType(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                        <option value="none">无鉴权</option>
-                        <option value="bearer">Bearer Token</option>
-                        <option value="basic">Basic Auth</option>
-                      </select>
-                    </div>
-                    {swaggerAuthType !== 'none' && (
-                      <div>
-                        <label className="block text-xs text-gray-500 mb-1">Token</label>
-                        <input type="password" value={swaggerToken} onChange={(e) => setSwaggerToken(e.target.value)}
-                          placeholder="输入鉴权 Token"
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="mb-4">
-                    <label className="block text-xs text-gray-500 mb-1">目标项目</label>
-                    <select value={selectedProjectId || projects[0]?.id || ''}
-                      onChange={(e) => setSelectedProjectId(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
-                      <option value="">选择项目</option>
-                      {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  </div>
-                  <p className="text-xs text-gray-400 mb-4">导入后写入 API 规范并自动生成接口测试用例，重复导入会返回 409</p>
-                  <div className="flex justify-end">
-                    <button onClick={handleImportSwaggerUrl} disabled={!swaggerUrl.trim() || importLoading}
-                      className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm flex items-center gap-2">
-                      {importLoading ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> 导入中...</> : '导入并生成用例'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ── YApi Tab ── */}
-              {importTab === 'yapi' && !importSuccess && (
-                <div>
-                  <div className="grid grid-cols-2 gap-3 mb-3">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">YApi 服务地址</label>
-                      <input type="text" value={yapiBase} onChange={(e) => setYapiBase(e.target.value)}
-                        placeholder="https://yapi.example.com"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">YApi 项目 ID</label>
-                      <input type="number" value={yapiProjectId} onChange={(e) => setYapiProjectId(e.target.value)}
-                        placeholder="123"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 mb-3">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">登录邮箱</label>
-                      <input type="email" value={yapiEmail} onChange={(e) => setYapiEmail(e.target.value)}
-                        placeholder="user@example.com"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-1">登录密码</label>
-                      <input type="password" value={yapiPassword} onChange={(e) => setYapiPassword(e.target.value)}
-                        placeholder="密码"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-                    </div>
-                  </div>
-                  <div className="mb-4">
-                    <label className="block text-xs text-gray-500 mb-1">目标项目</label>
-                    <select value={selectedProjectId || projects[0]?.id || ''}
-                      onChange={(e) => setSelectedProjectId(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
-                      <option value="">选择项目</option>
-                      {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  </div>
-                  <p className="text-xs text-gray-400 mb-4">YApi → OpenAPI 转换 → 写入 API 规范 → 自动生成接口测试用例</p>
-                  <div className="flex justify-end">
-                    <button onClick={handleImportYapi} disabled={importLoading}
-                      className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm flex items-center gap-2">
-                      {importLoading ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> 导入中...</> : '导入并生成用例'}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* ── 手动创建 Tab ── */}
-              {importTab === 'manual' && !importSuccess && (
-                <div className="space-y-3" style={{maxHeight:'60vh',overflowY:'auto'}}>
-                  {/* 用例类型选择 */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">用例类型</label>
-                    <div className="flex gap-2">
-                      {[{k:'functional',l:'功能用例'},{k:'api',l:'API用例'},{k:'web_ui',l:'Web UI用例'}].map(t=>(
-                        <button key={t.k} onClick={()=>setManualCaseType(t.k)}
-                          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${manualCaseType===t.k?'bg-blue-600 text-white':'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{t.l}</button>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">用例标题 <span className="text-red-500">*</span></label>
-                    <input type="text" value={manualTitle} onChange={e => setManualTitle(e.target.value)}
-                      placeholder={manualCaseType==='web_ui'?"例: 用户登录流程 - 正常登录":"例: 用户登录 - 正确的用户名密码"}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">模块</label>
-                      <input type="text" value={manualModule} onChange={e => setManualModule(e.target.value)}
-                        placeholder="例: 用户管理"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">优先级</label>
-                      <select value={manualPriority} onChange={e => setManualPriority(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <option value="critical">Critical</option>
-                        <option value="high">High</option>
-                        <option value="medium">Medium</option>
-                        <option value="low">Low</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Web UI 专用表单 */}
-                  {manualCaseType === 'web_ui' && (<>
-                    {/* 登录 & 会话管理 */}
-                    <div className={`p-3 rounded-lg border ${webUiNeedLogin || useSession ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200'}`}>
-                      <div className="flex items-center gap-4 flex-wrap">
-                        {loginSession?.has_session ? (
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={useSession} onChange={e=>{setUseSession(e.target.checked);if(e.target.checked)setWebUiNeedLogin(false)}}
-                              className="w-4 h-4 accent-green-500" />
-                            <span className="text-sm font-medium text-green-700">使用已保存的登录</span>
-                            <span className="text-xs text-gray-400">({loginSession.page_title || '已登录'}, {new Date(loginSession.saved_at).toLocaleString()})</span>
-                            <button onClick={async()=>{
-                              await api.v2.ui.deleteLoginSession(selectedProjectId)
-                              setLoginSession(null);setUseSession(false)
-                            }} className="text-xs text-red-400 hover:underline ml-1">清除</button>
-                          </label>
-                        ) : (
-                          <label className="flex items-center gap-2 cursor-pointer">
-                            <input type="checkbox" checked={webUiNeedLogin} onChange={e=>{setWebUiNeedLogin(e.target.checked);if(e.target.checked)setUseSession(false)}}
-                              className="w-4 h-4 accent-amber-500" />
-                            <span className="text-sm font-medium text-gray-700">需要先登录</span>
-                            <span className="text-xs text-gray-400">勾选后自动在测试前登录</span>
-                          </label>
-                        )}
-                      </div>
-                      {webUiNeedLogin && (
-                        <div className="mt-2">
-                          <div className="grid grid-cols-3 gap-2">
-                            <input type="text" value={webUiLoginMerchant} onChange={e=>setWebUiLoginMerchant(e.target.value)}
-                              placeholder="商户号" className="px-2 py-1.5 border rounded text-sm" />
-                            <input type="text" value={webUiLoginUser} onChange={e=>setWebUiLoginUser(e.target.value)}
-                              placeholder="账号" className="px-2 py-1.5 border rounded text-sm" />
-                            <input type="password" value={webUiLoginPass} onChange={e=>setWebUiLoginPass(e.target.value)}
-                              placeholder="密码" className="px-2 py-1.5 border rounded text-sm" />
-                          </div>
-                          {selectedProjectId && webUiLoginMerchant && webUiLoginUser && webUiLoginPass && (
-                            <button disabled={sessionSaving} onClick={async()=>{
-                              setSessionSaving(true)
-                              try {
-                                const env = environments.find(e=>String(e.project_id)===selectedProjectId)
-                                const base = env?.base_url ? new URL(env.base_url).origin : webUiBaseUrl
-                                const res = await api.v2.ui.saveLoginSession({
-                                  base_url: base,
-                                  project_id: selectedProjectId,
-                                  login_steps: [
-                                    {action:'goto',target:'/index',value:''},
-                                    {action:'wait_for',target:'#merchantId',value:''},
-                                    {action:'fill',target:'#merchantId',value:webUiLoginMerchant},
-                                    {action:'fill',target:'#username',value:webUiLoginUser},
-                                    {action:'fill',target:'#password',value:webUiLoginPass},
-                                    {action:'click',target:'#agreementCheckbox',value:''},
-                                    {action:'click',target:'button[type=submit]',value:''},
-                                    {action:'wait_for',target:'5000',value:''},
-                                  ]
-                                })
-                                if(res.success){
-                                  setLoginSession({has_session:true,saved_at:new Date().toISOString(),page_title:res.page_title,cookie_count:res.cookie_count})
-                                  setUseSession(true); setWebUiNeedLogin(false)
-                                  setImportSuccess({count:0,message:'登录会话已保存! 后续测试自动携带登录态'})
-                                }
-                              } catch(e) { setImportError('登录保存失败: '+e.message) }
-                              finally { setSessionSaving(false) }
-                            }} className="mt-2 px-3 py-1.5 bg-amber-500 text-white rounded text-xs hover:bg-amber-600 disabled:opacity-50">
-                              {sessionSaving ? '正在登录...' : '保存登录会话(后续测试免登录)'}
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 页面扫描器 */}
-                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                      <label className="block text-sm font-medium text-blue-700 mb-2">页面扫描器 <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs font-normal ml-1">实验功能</span> <span className="text-xs font-normal text-blue-400">— 扫描页面找到所有可操作元素，点击添加为步骤</span></label>
-                      <div className="flex gap-2 items-center">
-                        <input type="text" value={scanUrl} onChange={e=>setScanUrl(e.target.value)}
-                          placeholder="输入完整URL，如: https://dev-recycle.szhibu.com/index"
-                          className="flex-1 px-3 py-2 border border-blue-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                        <button disabled={scanLoading} onClick={async()=>{
-                          let url = scanUrl.trim()
-                          if(!url){setImportError('请输入要扫描的URL');return}
-                          if(!url.startsWith('http')) url = 'https://'+url
-                          setScanLoading(true); setScanResult(null)
-                          try {
-                            const res = await api.v2.ui.scanPage({url, project_id: selectedProjectId||undefined})
-                            setScanResult(res)
-                            if(!webUiBaseUrl && url) { try { setWebUiBaseUrl(new URL(url).origin) } catch{} }
-                          } catch(e) { setImportError('扫描失败: '+e.message) }
-                          finally { setScanLoading(false) }
-                        }} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">
-                          {scanLoading ? '扫描中...' : '扫描页面'}
-                        </button>
-                      </div>
-                      {scanResult && (
-                        <div className="mt-3">
-                          {scanResult.screenshot_url && (
-                            <div className="mb-2">
-                              <img src={scanResult.screenshot_url} alt="页面截图" className="w-full rounded border max-h-48 object-cover object-top" />
-                              <p className="text-xs text-gray-500 mt-1">{scanResult.page_title} - {scanResult.page_url}</p>
-                            </div>
-                          )}
-                          <div className="flex items-center gap-2 mb-2 flex-wrap">
-                            <span className="text-xs text-gray-600">找到 {scanResult.element_count || 0} 个可交互元素</span>
-                            <button disabled={scanLoading || !aiAvailable} title={!aiAvailable ? 'AI 服务不可用 (AI_PROVIDER=none)' : ''} onClick={async()=>{
-                              if(!aiAvailable){setImportError('AI 服务不可用，请配置 AI_PROVIDER 环境变量');return}
-                              setScanLoading(true)
-                              try {
-                                const res = await api.v2.ui.aiGenerate({
-                                  page_title: scanResult.page_title,
-                                  page_url: scanResult.page_url,
-                                  elements: (scanResult.elements||[]).slice(0, 30),
-                                })
-                                if(res.steps) {
-                                  setWebUiSteps(res.steps)
-                                  setWebUiAssertions(res.assertions || [{type:'element_visible',target:'body',value:'',description:'页面正常'}])
-                                  if(res.title) setManualTitle(res.title)
-                                  if(res.module) setManualModule(res.module)
-                                  if(!webUiBaseUrl && scanResult.page_url) { try { setWebUiBaseUrl(new URL(scanResult.page_url).origin) } catch{} }
-                                  setImportSuccess({count:0,message:'AI 已生成测试用例，请检查步骤并补充输入值'})
-                                }
-                              } catch(e) { setImportError('AI生成失败: '+e.message) }
-                              finally { setScanLoading(false) }
-                            }}
-                              className={`px-3 py-1 rounded text-xs disabled:opacity-50 ${aiAvailable ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white hover:from-purple-700 hover:to-blue-700' : 'bg-gray-300 text-gray-500 cursor-not-allowed'}`}>
-                              {scanLoading ? 'AI 生成中...' : !aiAvailable ? '🧪 AI 智能生成用例 (不可用)' : '🧪 AI 智能生成用例'}
-                            </button>
-                            <span className="text-xs text-gray-400">或点击下方元素手动添加</span>
-                          </div>
-                          <div className="max-h-52 overflow-y-auto space-y-1">
-                            {(scanResult.elements||[]).map((el,i)=>(
-                              <div key={i} onClick={()=>{
-                                const newStep = {
-                                  action: el.action_hint || 'click',
-                                  target: el.selector,
-                                  value: el.action_hint==='fill' ? '' : '',
-                                  description: el.label || el.selector,
-                                }
-                                setWebUiSteps(prev=>[...prev, newStep])
-                              }}
-                                className="flex items-center gap-2 p-1.5 bg-white rounded border hover:bg-blue-50 cursor-pointer text-xs">
-                                <span className={`px-1.5 py-0.5 rounded text-white text-xs ${
-                                  el.type==='button'?'bg-green-500':el.type==='input'?'bg-orange-500':el.type==='link'?'bg-blue-500':el.type==='select'?'bg-purple-500':'bg-gray-500'
-                                }`}>{el.type==='button'?'按钮':el.type==='input'?'输入':el.type==='link'?'链接':el.type==='select'?'下拉':el.type==='checkbox'?'勾选':el.type}</span>
-                                <span className="flex-1 truncate">{el.label || '(无文字)'}</span>
-                                <code className="text-gray-400 truncate max-w-[200px]">{el.selector}</code>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* 快速页面测试 */}
-                    <div className="p-3 bg-violet-50 border border-violet-200 rounded-lg">
-                      <label className="block text-sm font-medium text-violet-700 mb-2">快速测试 <span className="text-xs font-normal text-violet-500">— 填路径即可生成用例{webUiNeedLogin ? '(含自动登录)' : ''}</span></label>
-                      <div className="flex gap-2 items-center">
-                        <span className="text-xs text-gray-500 whitespace-nowrap">{(()=>{
-                          const env = environments.find(e=>String(e.id)===String(selectedEnvironmentId))
-                          return env?.base_url ? new URL(env.base_url).origin : 'https://...'
-                        })()}</span>
-                        <input id="quickPath" type="text" placeholder="页面路径，如: /index  /order/list  /user/profile"
-                          className="flex-1 px-3 py-2 border border-violet-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500" />
-                        <button onClick={()=>{
-                          const path = document.getElementById('quickPath')?.value?.trim()
-                          if(!path){setImportError('请输入页面路径');return}
-                          const env = environments.find(e=>String(e.id)===String(selectedEnvironmentId))
-                          const base = env?.base_url || ''
-                          if(!base){setImportError('请先选择一个环境');return}
-                          try { setWebUiBaseUrl(new URL(base).origin) } catch { setWebUiBaseUrl(base.replace(/\/+$/,'')) }
-                          setWebUiSteps([
-                            {action:'goto',target:path,value:'',description:'打开页面'},
-                            {action:'wait_for',target:'2000',value:'',description:'等待加载'},
-                            {action:'screenshot',target:'',value:'',description:'截取页面'},
-                          ])
-                          setWebUiAssertions([
-                            {type:'url_contains',target:'',value:path.split('?')[0],description:'URL 正确'},
-                            {type:'element_visible',target:'body',value:'',description:'页面有内容'},
-                          ])
-                          if(!manualTitle) setManualTitle('页面测试 - ' + path)
-                          if(!manualModule) setManualModule('UI测试')
-                        }} className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm hover:bg-violet-700 whitespace-nowrap">
-                          生成用例
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* 快捷模板 */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">快捷模板 <span className="text-xs text-gray-400 font-normal">点击自动填充步骤</span></label>
-                      <div className="flex flex-wrap gap-2">
-                        {[
-                          {l:'页面访问',m:'UI测试',steps:[{action:'goto',target:'/',value:'',description:'打开首页'},{action:'wait_for',target:'2000',value:'',description:'等待加载'},{action:'screenshot',target:'',value:'',description:'截图'}],asserts:[{type:'element_visible',target:'body',value:'',description:'页面正常'}]},
-                          {l:'菜单导航',m:'UI测试',steps:[{action:'goto',target:'/',value:'',description:'进入首页'},{action:'wait_for',target:'2000',value:'',description:'等待加载'},{action:'click',target:'.menu-item, .nav-link, .sidebar a',value:'',description:'点击菜单项(改成实际选择器)'},{action:'wait_for',target:'2000',value:'',description:'等待页面'},{action:'screenshot',target:'',value:'',description:'截图'}],asserts:[{type:'element_visible',target:'body',value:'',description:'页面正常'}]},
-                          {l:'列表搜索',m:'业务测试',steps:[{action:'goto',target:'/list',value:'',description:'打开列表页(改路径)'},{action:'wait_for',target:'2000',value:'',description:'等待加载'},{action:'fill',target:'input[placeholder*=搜索], input[placeholder*=查询], .search-input',value:'测试',description:'输入搜索词'},{action:'click',target:'button.search, .btn-search, button[type=submit]',value:'',description:'点击搜索'},{action:'wait_for',target:'2000',value:'',description:'等待结果'},{action:'screenshot',target:'',value:'',description:'截图'}],asserts:[{type:'element_visible',target:'table, .list, .el-table',value:'',description:'列表可见'}]},
-                          {l:'新增表单',m:'业务测试',steps:[{action:'goto',target:'/add',value:'',description:'打开新增页(改路径)'},{action:'wait_for',target:'2000',value:'',description:'等待加载'},{action:'fill',target:'input[name=name], .el-input__inner',value:'测试数据',description:'填写字段(改选择器)'},{action:'screenshot',target:'',value:'',description:'填写后截图'},{action:'click',target:'button[type=submit], .btn-save, .el-button--primary',value:'',description:'点击保存'},{action:'wait_for',target:'2000',value:'',description:'等待响应'},{action:'screenshot',target:'',value:'',description:'结果截图'}],asserts:[{type:'text_visible',target:'',value:'成功',description:'提交成功'}]},
-                          {l:'详情查看',m:'业务测试',steps:[{action:'goto',target:'/list',value:'',description:'打开列表页(改路径)'},{action:'wait_for',target:'2000',value:'',description:'等待加载'},{action:'click',target:'table tr:first-child a, .list-item:first-child',value:'',description:'点击第一条(改选择器)'},{action:'wait_for',target:'2000',value:'',description:'等待详情'},{action:'screenshot',target:'',value:'',description:'截图'}],asserts:[{type:'element_visible',target:'body',value:'',description:'详情可见'}]},
-                          {l:'删除确认',m:'业务测试',steps:[{action:'goto',target:'/list',value:'',description:'打开列表页(改路径)'},{action:'wait_for',target:'2000',value:'',description:'等待加载'},{action:'click',target:'.btn-delete, .delete-btn',value:'',description:'点击删除(改选择器)'},{action:'wait_for',target:'1000',value:'',description:'等待弹窗'},{action:'screenshot',target:'',value:'',description:'弹窗截图'},{action:'click',target:'.el-button--primary, button.confirm, .btn-ok',value:'',description:'确认删除'},{action:'wait_for',target:'2000',value:'',description:'等待响应'},{action:'screenshot',target:'',value:'',description:'结果截图'}],asserts:[{type:'text_visible',target:'',value:'成功',description:'删除成功'}]},
-                        ].map((tpl,i)=>(
-                          <button key={i} onClick={()=>{
-                            setWebUiSteps(tpl.steps);setWebUiAssertions(tpl.asserts)
-                            if(!manualTitle) setManualTitle(tpl.l+'测试')
-                            if(!manualModule) setManualModule(tpl.m||'UI测试')
-                            const env = environments.find(e=>String(e.id)===String(selectedEnvironmentId))
-                            if(env?.base_url && !webUiBaseUrl) {
-                              try { setWebUiBaseUrl(new URL(env.base_url).origin) } catch { setWebUiBaseUrl(env.base_url.replace(/\/+$/,'')) }
-                            }
-                          }}
-                            className="px-3 py-1.5 text-xs bg-violet-50 text-violet-600 rounded-lg hover:bg-violet-100 border border-violet-200">{tpl.l}</button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* 基础 URL */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        页面基础 URL
-                        {selectedEnvironmentId && !webUiBaseUrl && (
-                          <button onClick={()=>{
-                            const env = environments.find(e=>String(e.id)===String(selectedEnvironmentId))
-                            if(env?.base_url) { try { setWebUiBaseUrl(new URL(env.base_url).origin) } catch { setWebUiBaseUrl(env.base_url.replace(/\/+$/,'')) } }
-                          }} className="ml-2 text-xs text-violet-500 hover:underline font-normal">从环境自动填入</button>
-                        )}
-                      </label>
-                      <input type="text" value={webUiBaseUrl} onChange={e=>setWebUiBaseUrl(e.target.value)}
-                        placeholder={(() => { const env = environments.find(e=>String(e.id)===String(selectedEnvironmentId)); return env?.base_url || 'https://your-site.com' })()}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    </div>
-
-                    {/* 步骤编辑 */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
-                        操作步骤
-                        {webUiNeedLogin && <span className="text-xs text-amber-500 font-normal ml-2">登录步骤会自动添加到前面</span>}
-                      </label>
-                      {webUiSteps.map((step,idx)=>(
-                        <div key={idx} className="flex items-center gap-1 mb-1.5 p-1.5 bg-gray-50 rounded">
-                          <span className="text-xs text-gray-400 w-5 text-center">{idx+1}</span>
-                          <select value={step.action} onChange={e=>{const s=[...webUiSteps];s[idx]={...s[idx],action:e.target.value};setWebUiSteps(s)}}
-                            className="w-24 px-1.5 py-1.5 border rounded text-xs bg-white">
-                            {[{v:'goto',l:'打开页面'},{v:'click',l:'点击'},{v:'fill',l:'输入'},{v:'wait_for',l:'等待'},{v:'screenshot',l:'截图'},{v:'hover',l:'悬停'},{v:'select',l:'选择'},{v:'upload',l:'上传'},{v:'press',l:'按键'},{v:'double_click',l:'双击'},{v:'clear',l:'清空'},{v:'scroll',l:'滚动'},{v:'switch_frame',l:'切换iframe'},{v:'switch_main',l:'回到主页'},{v:'eval_js',l:'执行JS'},{v:'save_cookies',l:'保存Cookie'}].map(a=><option key={a.v} value={a.v}>{a.l}</option>)}
-                          </select>
-                          {step.action !== 'screenshot' && (
-                            <input value={step.target} onChange={e=>{const s=[...webUiSteps];s[idx]={...s[idx],target:e.target.value};setWebUiSteps(s)}}
-                              placeholder={step.action==='goto'?'页面路径 如 /index':step.action==='wait_for'?'毫秒数 如 2000 或 CSS选择器':'CSS选择器 如 button.login'}
-                              className="flex-1 px-2 py-1.5 border rounded text-xs" />
-                          )}
-                          {step.action === 'fill' && (
-                            <input value={step.value} onChange={e=>{const s=[...webUiSteps];s[idx]={...s[idx],value:e.target.value};setWebUiSteps(s)}}
-                              placeholder="要输入的值" className="w-28 px-2 py-1.5 border rounded text-xs" />
-                          )}
-                          {step.action === 'screenshot' && <span className="flex-1 text-xs text-gray-400 px-2">自动截取当前页面</span>}
-                          <input value={step.description} onChange={e=>{const s=[...webUiSteps];s[idx]={...s[idx],description:e.target.value};setWebUiSteps(s)}}
-                            placeholder="说明(可选)" className="w-24 px-2 py-1.5 border rounded text-xs" />
-                          {webUiSteps.length>1&&<button onClick={()=>setWebUiSteps(webUiSteps.filter((_,i)=>i!==idx))} className="text-red-400 hover:text-red-600 text-sm px-1">x</button>}
-                        </div>
-                      ))}
-                      <div className="flex gap-2 mt-1">
-                        <button onClick={()=>setWebUiSteps([...webUiSteps,{action:'click',target:'',value:'',description:''}])}
-                          className="text-xs text-blue-500 hover:underline">+ 添加步骤</button>
-                        <button onClick={()=>setWebUiSteps([...webUiSteps,{action:'screenshot',target:'',value:'',description:'截图'}])}
-                          className="text-xs text-violet-500 hover:underline">+ 添加截图</button>
-                      </div>
-                    </div>
-                    {/* 断言编辑 */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">断言 <span className="text-xs text-gray-400 font-normal">(可选)</span></label>
-                      {webUiAssertions.map((a,idx)=>(
-                        <div key={idx} className="flex items-center gap-1 mb-1.5 p-1.5 bg-gray-50 rounded">
-                          <span className="text-xs text-gray-400 w-5 text-center">{idx+1}</span>
-                          <select value={a.type} onChange={e=>{const arr=[...webUiAssertions];arr[idx]={...arr[idx],type:e.target.value};setWebUiAssertions(arr)}}
-                            className="w-32 px-1.5 py-1.5 border rounded text-xs bg-white">
-                            {[{v:'url_contains',l:'URL 包含'},{v:'url_not_contains',l:'URL 不包含'},{v:'text_visible',l:'文字可见'},{v:'element_visible',l:'元素可见'},{v:'element_count',l:'元素数量'},{v:'screenshot_match',l:'📸 视觉对比'}].map(t=><option key={t.v} value={t.v}>{t.l}</option>)}
-                          </select>
-                          {a.type==='screenshot_match' ? (<>
-                            <input value={a.name||''} onChange={e=>{const arr=[...webUiAssertions];arr[idx]={...arr[idx],name:e.target.value};setWebUiAssertions(arr)}}
-                              placeholder="基准图名称 如 login_page" className="flex-1 px-2 py-1.5 border rounded text-xs" />
-                            <input type="number" step="0.01" min="0" max="1" value={a.threshold??0.05} onChange={e=>{const arr=[...webUiAssertions];arr[idx]={...arr[idx],threshold:parseFloat(e.target.value)||0.05};setWebUiAssertions(arr)}}
-                              className="w-16 px-2 py-1.5 border rounded text-xs" title="阈值(0~1)" />
-                          </>) : (
-                          <input value={a.value || a.target} onChange={e=>{
-                            const arr=[...webUiAssertions]
-                            if(a.type==='element_visible') arr[idx]={...arr[idx],target:e.target.value,value:''}
-                            else arr[idx]={...arr[idx],value:e.target.value,target:''}
-                            setWebUiAssertions(arr)
-                          }}
-                            placeholder={a.type==='url_contains'?'URL 关键词 如 /index':a.type==='text_visible'?'页面上要看到的文字':'CSS 选择器 如 #app'}
-                            className="flex-1 px-2 py-1.5 border rounded text-xs" />
-                          )}
-                          <input value={a.description} onChange={e=>{const arr=[...webUiAssertions];arr[idx]={...arr[idx],description:e.target.value};setWebUiAssertions(arr)}}
-                            placeholder="说明(可选)" className="w-24 px-2 py-1.5 border rounded text-xs" />
-                          {webUiAssertions.length>1&&<button onClick={()=>setWebUiAssertions(webUiAssertions.filter((_,i)=>i!==idx))} className="text-red-400 hover:text-red-600 text-sm px-1">x</button>}
-                        </div>
-                      ))}
-                      <button onClick={()=>setWebUiAssertions([...webUiAssertions,{type:'text_visible',target:'',value:'',description:''}])}
-                        className="text-xs text-blue-500 hover:underline mt-1">+ 添加断言</button>
-                    </div>
-                  </>)}
-
-                  {/* 功能/API 用例步骤 */}
-                  {manualCaseType !== 'web_ui' && (
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">测试步骤</label>
-                      {manualSteps.map((step, idx) => (
-                        <div key={idx} className="flex items-center gap-2 mb-1">
-                          <span className="text-xs text-gray-400 w-5">{idx + 1}.</span>
-                          <input type="text" value={step}
-                            onChange={e => { const s = [...manualSteps]; s[idx] = e.target.value; setManualSteps(s) }}
-                            placeholder={`步骤 ${idx + 1}`}
-                            className="flex-1 px-3 py-1.5 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                          {manualSteps.length > 1 && (
-                            <button onClick={() => setManualSteps(manualSteps.filter((_, i) => i !== idx))}
-                              className="text-red-400 hover:text-red-600 text-xs">✕</button>
-                          )}
-                        </div>
-                      ))}
-                      <button onClick={() => setManualSteps([...manualSteps, ''])}
-                        className="text-xs text-blue-500 hover:underline mt-1">+ 添加步骤</button>
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">预期结果</label>
-                    <textarea value={manualExpected} onChange={e => setManualExpected(e.target.value)}
-                      rows={2} placeholder="例: 登录成功，跳转到首页"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                  </div>
-                  <button onClick={handleManualCreate} disabled={importLoading || !manualTitle.trim()}
-                    className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                    {importLoading ? '创建中...' : '创建用例'}
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* 底部关闭 */}
-            {!importSuccess && (
-              <div className="px-6 py-3 border-t flex justify-between items-center">
-                <p className="text-xs text-gray-400">
-                  {importTab.startsWith('swagger') || importTab === 'yapi' ? 'API 导入会写入 API 规范模块' : ''}
-                </p>
-                <button onClick={closeImportDialog}
-                  className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">取消</button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      <CaseImportDialog
+        show={showImportDialog}
+        importTab={importTab}
+        importError={importError}
+        importSuccess={importSuccess}
+        importLoading={importLoading}
+        isGenerating={isGenerating}
+        generationStep={generationStep}
+        generationProgress={generationProgress}
+        uploadFile={uploadFile}
+        swaggerFile={swaggerFile}
+        swaggerUrl={swaggerUrl}
+        swaggerAuthType={swaggerAuthType}
+        swaggerToken={swaggerToken}
+        yapiBase={yapiBase}
+        yapiProjectId={yapiProjectId}
+        yapiEmail={yapiEmail}
+        yapiPassword={yapiPassword}
+        selectedProjectId={selectedProjectId}
+        projects={projects}
+        manualFormProps={{
+          manualCaseType, manualTitle, manualModule, manualPriority, manualSteps, manualExpected, importLoading,
+          webUiProps: {
+            loginSession, useSession, webUiNeedLogin, webUiLoginMerchant, webUiLoginUser, webUiLoginPass, sessionSaving,
+            scannerExpanded, scanUrl, scanLoading, scanResult, aiAvailable,
+            webUiSteps, webUiAssertions, webUiBaseUrl,
+            selectedProjectId, selectedEnvironmentId, environments,
+            onSetUseSession: setUseSession, onSetWebUiNeedLogin: setWebUiNeedLogin,
+            onSetWebUiLoginMerchant: setWebUiLoginMerchant, onSetWebUiLoginUser: setWebUiLoginUser,
+            onSetWebUiLoginPass: setWebUiLoginPass,
+            onSaveLoginSession: async () => {
+              setSessionSaving(true)
+              try {
+                const env = environments.find(e=>String(e.project_id)===selectedProjectId)
+                const base = env?.base_url ? new URL(env.base_url).origin : webUiBaseUrl
+                const res = await api.v2.ui.saveLoginSession({
+                  base_url: base, project_id: selectedProjectId,
+                  login_steps: [
+                    {action:'goto',target:'/index',value:''},
+                    {action:'wait_for',target:'#merchantId',value:''},
+                    {action:'fill',target:'#merchantId',value:webUiLoginMerchant},
+                    {action:'fill',target:'#username',value:webUiLoginUser},
+                    {action:'fill',target:'#password',value:webUiLoginPass},
+                    {action:'click',target:'#agreementCheckbox',value:''},
+                    {action:'click',target:'button[type=submit]',value:''},
+                    {action:'wait_for',target:'5000',value:''},
+                  ]
+                })
+                if(res.success){
+                  setLoginSession({has_session:true,saved_at:new Date().toISOString(),page_title:res.page_title,cookie_count:res.cookie_count})
+                  setUseSession(true); setWebUiNeedLogin(false)
+                  setImportSuccess({count:0,message:'登录会话已保存! 后续测试自动携带登录态'})
+                }
+              } catch(e) { setImportError('登录保存失败: '+e.message) }
+              finally { setSessionSaving(false) }
+            },
+            onDeleteLoginSession: async () => {
+              await api.v2.ui.deleteLoginSession(selectedProjectId)
+              setLoginSession(null); setUseSession(false)
+            },
+            onSetScannerExpanded: setScannerExpanded, onSetScanUrl: setScanUrl,
+            onScanPage: async () => {
+              let url = scanUrl.trim()
+              if(!url){setImportError('请输入要扫描的URL');return}
+              if(!url.startsWith('http')) url = 'https://'+url
+              setScanLoading(true); setScanResult(null)
+              try {
+                const res = await api.v2.ui.scanPage({url, project_id: selectedProjectId||undefined})
+                setScanResult(res)
+                if(!webUiBaseUrl && url) { try { setWebUiBaseUrl(new URL(url).origin) } catch{} }
+              } catch(e) { setImportError('扫描失败: '+e.message) }
+              finally { setScanLoading(false) }
+            },
+            onAiGenerate: async () => {
+              if(!aiAvailable){setImportError('AI 服务不可用，请配置 AI_PROVIDER 环境变量');return}
+              setScanLoading(true)
+              try {
+                const res = await api.v2.ui.aiGenerate({
+                  page_title: scanResult.page_title,
+                  page_url: scanResult.page_url,
+                  elements: (scanResult.elements||[]).slice(0, 30),
+                })
+                if(res.steps) {
+                  setWebUiSteps(res.steps)
+                  setWebUiAssertions(res.assertions || [{type:'element_visible',target:'body',value:'',description:'页面正常'}])
+                  if(res.title) setManualTitle(res.title)
+                  if(res.module) setManualModule(res.module)
+                  if(!webUiBaseUrl && scanResult.page_url) { try { setWebUiBaseUrl(new URL(scanResult.page_url).origin) } catch{} }
+                  setImportSuccess({count:0,message:'AI 已生成测试用例，请检查步骤并补充输入值'})
+                }
+              } catch(e) { setImportError('AI生成失败: '+e.message) }
+              finally { setScanLoading(false) }
+            },
+            onAddScanElement: (el) => {
+              setWebUiSteps(prev=>[...prev, { action: el.action_hint || 'click', target: el.selector, value: '', description: el.label || el.selector }])
+            },
+            onSetWebUiSteps: setWebUiSteps, onSetWebUiAssertions: setWebUiAssertions, onSetWebUiBaseUrl: setWebUiBaseUrl,
+            onSetManualTitle: setManualTitle, onSetManualModule: setManualModule,
+            onSetImportError: setImportError, onSetImportSuccess: setImportSuccess,
+            onApplyTemplate: (tpl) => {
+              setWebUiSteps(tpl.steps); setWebUiAssertions(tpl.asserts)
+              if(!manualTitle) setManualTitle(tpl.l+'测试')
+              if(!manualModule) setManualModule(tpl.m||'UI测试')
+              const env = environments.find(e=>String(e.id)===String(selectedEnvironmentId))
+              if(env?.base_url && !webUiBaseUrl) {
+                try { setWebUiBaseUrl(new URL(env.base_url).origin) } catch { setWebUiBaseUrl(env.base_url.replace(/\/+$/,'')) }
+              }
+            },
+            onQuickPageTest: () => {
+              const path = document.getElementById('quickPath')?.value?.trim()
+              if(!path){setImportError('请输入页面路径');return}
+              const env = environments.find(e=>String(e.id)===String(selectedEnvironmentId))
+              const base = env?.base_url || ''
+              if(!base){setImportError('请先选择一个环境');return}
+              try { setWebUiBaseUrl(new URL(base).origin) } catch { setWebUiBaseUrl(base.replace(/\/+$/,'')) }
+              setWebUiSteps([
+                {action:'goto',target:path,value:'',description:'打开页面'},
+                {action:'wait_for',target:'2000',value:'',description:'等待加载'},
+                {action:'screenshot',target:'',value:'',description:'截取页面'},
+              ])
+              setWebUiAssertions([
+                {type:'url_contains',target:'',value:path.split('?')[0],description:'URL 正确'},
+                {type:'element_visible',target:'body',value:'',description:'页面有内容'},
+              ])
+              if(!manualTitle) setManualTitle('页面测试 - ' + path)
+              if(!manualModule) setManualModule('UI测试')
+            },
+          },
+          onSetManualCaseType: setManualCaseType, onSetManualTitle: setManualTitle,
+          onSetManualModule: setManualModule, onSetManualPriority: setManualPriority,
+          onSetManualSteps: setManualSteps, onSetManualExpected: setManualExpected,
+          onManualCreate: handleManualCreate,
+        }}
+        onTabChange={(key) => { setImportTab(key); setImportError(null); setImportSuccess(null) }}
+        onClearError={() => setImportError(null)}
+        onClearSuccess={() => setImportSuccess(null)}
+        onClose={closeImportDialog}
+        onNavigate={navigate}
+        onSetUploadFile={setUploadFile}
+        onSetSwaggerFile={setSwaggerFile}
+        onSetSwaggerUrl={setSwaggerUrl}
+        onSetSwaggerAuthType={setSwaggerAuthType}
+        onSetSwaggerToken={setSwaggerToken}
+        onSetYapiBase={setYapiBase}
+        onSetYapiProjectId={setYapiProjectId}
+        onSetYapiEmail={setYapiEmail}
+        onSetYapiPassword={setYapiPassword}
+        onSetSelectedProjectId={setSelectedProjectId}
+        onImportRequirement={handleImportRequirement}
+        onImportSwaggerFile={handleImportSwaggerFile}
+        onImportSwaggerUrl={handleImportSwaggerUrl}
+        onImportYapi={handleImportYapi}
+      />
 
       {/* 数据集选择对话框 */}
       {showDatasetDialog && selectedTestCase && (
@@ -2344,208 +1686,21 @@ export default function TestCases() {
         </div>
       )}
 
-      {/* 测试用例详情 / 编辑对话框 (P1-9B) */}
-      {showDetailDialog && selectedTestCase && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-2xl w-[720px] max-h-[85vh] overflow-y-auto">
-            {/* 标题栏 */}
-            <div className="flex items-center justify-between px-6 py-4 border-b">
-              <h2 className="text-lg font-bold text-gray-800">{isEditing ? '编辑用例' : '用例详情'}</h2>
-              <div className="flex items-center gap-2">
-                {!isEditing && (
-                  <button onClick={enterEditMode}
-                    className="px-3 py-1.5 text-sm bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors">
-                    编辑
-                  </button>
-                )}
-                <button onClick={() => { setShowDetailDialog(false); setIsEditing(false) }}
-                  className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
-              </div>
-            </div>
-
-            <div className="px-6 py-5 space-y-4">
-              {/* 用例标题 */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">用例标题</label>
-                {isEditing ? (
-                  <input type="text" value={editForm.title} onChange={(e) => setEditForm(p => ({ ...p, title: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" />
-                ) : (
-                  <div className="p-3 bg-gray-50 rounded-lg border text-sm">
-                    {selectedTestCase.title?.replace(/^(测试用例标题|测试点|用例标题|标题)[:：]\s*/, '') || selectedTestCase.title}
-                  </div>
-                )}
-              </div>
-
-              {/* 模块 + 优先级 */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">模块</label>
-                  {isEditing ? (
-                    <input type="text" value={editForm.module} onChange={(e) => setEditForm(p => ({ ...p, module: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
-                  ) : (
-                    <div className="p-3 bg-gray-50 rounded-lg border text-sm">{selectedTestCase.module || '-'}</div>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">优先级</label>
-                  {isEditing ? (
-                    <select value={editForm.priority} onChange={(e) => setEditForm(p => ({ ...p, priority: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500">
-                      <option value="high">high</option>
-                      <option value="medium">medium</option>
-                      <option value="low">low</option>
-                    </select>
-                  ) : (
-                    <div className="p-3 bg-gray-50 rounded-lg border text-sm">{selectedTestCase.priority}</div>
-                  )}
-                </div>
-              </div>
-
-              {/* 测试步骤 */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">测试步骤</label>
-                {isEditing ? (
-                  <div className="space-y-2">
-                    {editForm.steps.map((step, idx) => (
-                      <div key={idx} className="flex items-center gap-1">
-                        <span className="text-xs text-gray-400 w-5 text-right">{idx + 1}.</span>
-                        {typeof step === 'string' ? (
-                          <input type="text" value={step} onChange={(e) => handleEditStepChange(idx, e.target.value)}
-                            className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
-                        ) : (
-                          <>
-                            <select value={step.action||''} onChange={e=>{const s=[...editForm.steps];s[idx]={...s[idx],action:e.target.value};setEditForm(p=>({...p,steps:s}))}}
-                              className="w-20 px-1 py-1.5 border rounded text-xs">
-                              {[{v:'goto',l:'打开页面'},{v:'click',l:'点击'},{v:'fill',l:'输入'},{v:'wait_for',l:'等待'},{v:'screenshot',l:'截图'},{v:'hover',l:'悬停'},{v:'select',l:'选择'},{v:'upload',l:'上传'},{v:'press',l:'按键'},{v:'double_click',l:'双击'},{v:'clear',l:'清空'},{v:'scroll',l:'滚动'},{v:'switch_frame',l:'切换iframe'},{v:'switch_main',l:'回到主页'},{v:'eval_js',l:'执行JS'},{v:'save_cookies',l:'保存Cookie'}].map(a=><option key={a.v} value={a.v}>{a.l}</option>)}
-                            </select>
-                            <input value={step.target||''} onChange={e=>{const s=[...editForm.steps];s[idx]={...s[idx],target:e.target.value};setEditForm(p=>({...p,steps:s}))}}
-                              placeholder="选择器" className="flex-1 px-2 py-1.5 border rounded text-xs" />
-                            <input value={step.value||''} onChange={e=>{const s=[...editForm.steps];s[idx]={...s[idx],value:e.target.value};setEditForm(p=>({...p,steps:s}))}}
-                              placeholder="值" className="w-20 px-2 py-1.5 border rounded text-xs" />
-                            <input value={step.description||''} onChange={e=>{const s=[...editForm.steps];s[idx]={...s[idx],description:e.target.value};setEditForm(p=>({...p,steps:s}))}}
-                              placeholder="说明" className="w-24 px-2 py-1.5 border rounded text-xs" />
-                          </>
-                        )}
-                        <button onClick={() => handleRemoveStep(idx)} className="text-red-400 hover:text-red-600 text-sm px-1">✕</button>
-                      </div>
-                    ))}
-                    <button onClick={handleAddStep} className="text-xs text-blue-600 hover:underline">+ 添加步骤</button>
-                  </div>
-                ) : (
-                  <div className="p-3 bg-gray-50 rounded-lg border text-sm">
-                    {selectedTestCase.steps && selectedTestCase.steps.length > 0 ? (
-                      <ol className="list-decimal list-inside space-y-1">
-                        {selectedTestCase.steps.map((step, index) => (
-                          <li key={index} className="text-gray-700">
-                            {typeof step === 'string' ? step : (
-                              <span>
-                                <span className="inline-block px-1.5 py-0.5 bg-violet-100 text-violet-700 rounded text-xs font-mono mr-1">{step.action}</span>
-                                {step.target && <code className="text-xs bg-gray-200 px-1 rounded mr-1">{step.target}</code>}
-                                {step.value && <span className="text-blue-600 text-xs mr-1">"{step.value}"</span>}
-                                {step.description && <span className="text-gray-500 text-xs">— {step.description}</span>}
-                              </span>
-                            )}
-                          </li>
-                        ))}
-                      </ol>
-                    ) : (
-                      <p className="text-gray-400">暂无测试步骤</p>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* 预期结果 */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">预期结果</label>
-                {isEditing ? (
-                  <textarea value={editForm.expected} onChange={(e) => setEditForm(p => ({ ...p, expected: e.target.value }))}
-                    rows={3} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
-                ) : (
-                  <div className="p-3 bg-gray-50 rounded-lg border text-sm">{selectedTestCase.expected || '-'}</div>
-                )}
-              </div>
-
-              {/* 断言 (JSON) — 编辑模式 or 接口用例查看 */}
-              {(isEditing || (selectedTestCase.assertions && selectedTestCase.assertions.length > 0)) && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">断言 (JSON)</label>
-                  {isEditing ? (
-                    <textarea value={editForm.assertions}
-                      onChange={(e) => setEditForm(p => ({ ...p, assertions: e.target.value }))}
-                      rows={4} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs font-mono focus:ring-2 focus:ring-blue-500"
-                      placeholder='[{"type":"status_code","expected":200}]' />
-                  ) : (
-                    <pre className="p-3 bg-gray-50 rounded-lg border text-xs font-mono overflow-x-auto max-h-32">
-                      {JSON.stringify(selectedTestCase.assertions, null, 2)}
-                    </pre>
-                  )}
-                </div>
-              )}
-
-              {/* 只读信息：状态 + 最后运行 + 来源 */}
-              {!isEditing && (
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">状态</label>
-                    <div className="p-3 bg-gray-50 rounded-lg border text-sm">{selectedTestCase.status || '-'}</div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">最后运行</label>
-                    <div className="p-3 bg-gray-50 rounded-lg border text-sm">{selectedTestCase.lastRun || '-'}</div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">来源</label>
-                    <div className="p-3 bg-gray-50 rounded-lg border text-sm">{selectedTestCase.source || '-'}</div>
-                  </div>
-                </div>
-              )}
-
-              {/* Web UI 专属信息 */}
-              {!isEditing && selectedTestCase.case_type === 'web_ui' && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-1 bg-violet-100 text-violet-700 rounded text-xs font-medium">Web UI 用例</span>
-                    {selectedTestCase.execution_config?.browser && (
-                      <span className="px-2 py-1 bg-blue-50 text-blue-600 rounded text-xs">{selectedTestCase.execution_config.browser}</span>
-                    )}
-                    {selectedTestCase.execution_config?.base_url && (
-                      <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs font-mono">{selectedTestCase.execution_config.base_url}</span>
-                    )}
-                  </div>
-                  {selectedTestCase.execution_config && (
-                    <details>
-                      <summary className="text-sm font-medium text-gray-700 cursor-pointer">执行配置</summary>
-                      <pre className="mt-1 p-3 bg-gray-50 rounded-lg border text-xs font-mono overflow-x-auto">
-                        {JSON.stringify(selectedTestCase.execution_config, null, 2)}
-                      </pre>
-                    </details>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* 底部操作 */}
-            <div className="px-6 py-4 border-t flex justify-end gap-3">
-              {isEditing ? (
-                <>
-                  <button onClick={() => setIsEditing(false)} disabled={editSaving}
-                    className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">取消编辑</button>
-                  <button onClick={handleEditSave} disabled={editSaving}
-                    className="px-5 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
-                    {editSaving ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> 保存中...</> : '保存'}
-                  </button>
-                </>
-              ) : (
-                <button onClick={() => setShowDetailDialog(false)}
-                  className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">关闭</button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <CaseDetailDialog
+        show={showDetailDialog}
+        selectedTestCase={selectedTestCase}
+        isEditing={isEditing}
+        editForm={editForm}
+        editSaving={editSaving}
+        onClose={() => { setShowDetailDialog(false); setIsEditing(false) }}
+        onEnterEdit={enterEditMode}
+        onCancelEdit={() => setIsEditing(false)}
+        onSave={handleEditSave}
+        onEditFormChange={(patch) => setEditForm(p => ({ ...p, ...patch }))}
+        onEditStepChange={handleEditStepChange}
+        onAddStep={handleAddStep}
+        onRemoveStep={handleRemoveStep}
+      />
 
       {/* 脚本生成对话框 */}
       {showScriptDialog && selectedTestCase && (
@@ -3092,230 +2247,19 @@ export default function TestCases() {
         </div>
       )}
 
-      {/* P1-8: AI 评审结果弹窗 */}
-      {showReviewDialog && reviewResult && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-[800px] max-h-[85vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-bold">AI 用例评审报告</h2>
-              <div className="flex items-center gap-2">
-                <span className={`text-xs px-2 py-1 rounded ${reviewResult.ai_enhanced ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-600'}`}>
-                  {reviewResult.ai_enhanced ? '规则+AI' : '规则评审'}
-                </span>
-                <button onClick={() => setShowReviewDialog(false)} className="text-gray-400 hover:text-gray-600 text-xl">✕</button>
-              </div>
-            </div>
 
-            <div className="flex items-center gap-6 mb-5 p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg">
-              <div className="text-center">
-                <div className={`text-4xl font-bold ${reviewResult.quality_score >= 80 ? 'text-green-600' : reviewResult.quality_score >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
-                  {reviewResult.quality_score}
-                </div>
-                <div className="text-xs text-gray-500 mt-1">质量评分</div>
-              </div>
-              <div className="flex-1 grid grid-cols-4 gap-3 text-center text-sm">
-                <div><div className="text-lg font-bold">{reviewResult.total_cases}</div><div className="text-xs text-gray-500">总用例</div></div>
-                <div><div className="text-lg font-bold text-green-600">{reviewResult.automatable_cases}</div><div className="text-xs text-gray-500">可自动化</div></div>
-                <div><div className="text-lg font-bold text-red-600">{reviewResult.missing_assertion_count}</div><div className="text-xs text-gray-500">缺少断言</div></div>
-                <div><div className="text-lg font-bold text-orange-600">{reviewResult.high_risk_count}</div><div className="text-xs text-gray-500">高风险接口</div></div>
-              </div>
-            </div>
+      <AiReviewDialog
+        show={showReviewDialog}
+        reviewResult={reviewResult}
+        healingCases={healingCases}
+        healPreviews={healPreviews}
+        onClose={() => setShowReviewDialog(false)}
+        onHealPreview={handleHealPreview}
+        onHealRetry={handleHealRetry}
+        onShowHealDialog={(preview) => { setHealDialogCase(preview); setShowHealDialog(true) }}
+        onLocateCase={(caseId) => { setShowReviewDialog(false); setSearchQuery(caseId) }}
+      />
 
-            {reviewResult.risk_summary && (
-              <div className="mb-4 flex gap-3">
-                <span className="px-3 py-1 bg-red-100 text-red-700 rounded text-sm font-medium">高风险 {reviewResult.risk_summary.high}</span>
-                <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded text-sm font-medium">中风险 {reviewResult.risk_summary.medium}</span>
-                <span className="px-3 py-1 bg-green-100 text-green-700 rounded text-sm font-medium">低风险 {reviewResult.risk_summary.low}</span>
-              </div>
-            )}
-
-            <div className="grid grid-cols-3 gap-3 mb-4 text-sm">
-              <div className="p-3 bg-gray-50 rounded"><span className="text-gray-500">缺少预期:</span> <span className="font-bold">{reviewResult.missing_expected_count}</span></div>
-              <div className="p-3 bg-gray-50 rounded"><span className="text-gray-500">缺少步骤:</span> <span className="font-bold">{reviewResult.missing_steps_count}</span></div>
-              <div className="p-3 bg-gray-50 rounded"><span className="text-gray-500">重复用例:</span> <span className="font-bold">{reviewResult.duplicate_count}</span></div>
-            </div>
-
-            {reviewResult.improvement_suggestions?.length > 0 && (
-              <div className="mb-4">
-                <h3 className="text-sm font-semibold mb-2">改进建议</h3>
-                <ul className="space-y-1">
-                  {reviewResult.improvement_suggestions.map((s, i) => (
-                    <li key={i} className="text-sm text-gray-700 bg-yellow-50 p-2 rounded">
-                      {typeof s === 'string' ? s : (
-                        <>
-                          <span>{s.suggestion}</span>
-                          {s.affected_cases?.length > 0 && <span className="ml-2 text-gray-500">[{s.affected_cases.join(', ')}]</span>}
-                          {s.impact && <span className={`ml-2 px-1 rounded text-xs ${s.impact === 'high' ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'}`}>{s.impact}</span>}
-                        </>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {reviewResult.ai_suggestions?.length > 0 && (
-              <div className="mb-4">
-                <h3 className="text-sm font-semibold mb-2 text-purple-700">AI 补充建议</h3>
-                <ul className="space-y-1">
-                  {reviewResult.ai_suggestions.map((s, i) => (
-                    <li key={i} className="text-sm text-purple-700 bg-purple-50 p-2 rounded">
-                      {typeof s === 'string' ? s : (
-                        <>
-                          <span>{s.suggestion}</span>
-                          {s.affected_cases?.length > 0 && <span className="ml-2 text-gray-500">[{s.affected_cases.join(', ')}]</span>}
-                          {s.impact && <span className={`ml-2 px-1 rounded text-xs ${s.impact === 'high' ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'}`}>{s.impact}</span>}
-                        </>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {reviewResult.priority_recommendations?.length > 0 && (
-              <div className="mb-4">
-                <h3 className="text-sm font-semibold mb-2">优先处理用例</h3>
-                <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {reviewResult.priority_recommendations.map((r, i) => (
-                    <div key={i} className="text-xs p-2 bg-red-50 rounded flex gap-2">
-                      {typeof r === 'string' ? <span>{r}</span> : (
-                        <>
-                          <span className="font-mono font-bold text-red-700">{r.case_id}</span>
-                          <span className="text-gray-600">{r.reason}</span>
-                          {r.current_priority && r.suggested_priority && <span className="text-orange-600 text-xs">{r.current_priority} → {r.suggested_priority}</span>}
-                        </>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {reviewResult.duplicate_groups?.length > 0 && (
-              <div className="mb-4">
-                <h3 className="text-sm font-semibold mb-2">疑似重复用例</h3>
-                <div className="space-y-1 max-h-32 overflow-y-auto">
-                  {reviewResult.duplicate_groups.map((g, i) => (
-                    <div key={i} className="text-xs p-2 bg-orange-50 rounded">
-                      <span className="font-mono">{g.signature}</span> x{g.count}: {g.case_ids.join(', ')}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* AI 总评 */}
-            {reviewResult.overall_assessment && (
-              <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded">
-                <h3 className="text-sm font-semibold mb-1 text-blue-800">AI 总评</h3>
-                <p className="text-sm text-blue-700">{reviewResult.overall_assessment}</p>
-              </div>
-            )}
-
-            {/* AI 逐条问题 + 自愈（两步确认） */}
-            {reviewResult.ai_case_issues?.length > 0 && (
-              <div className="mb-4">
-                <h3 className="text-sm font-semibold mb-2 text-red-700">问题用例（AI 诊断）</h3>
-                <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {reviewResult.ai_case_issues.map((c, i) => (
-                    <div key={i} className={`text-xs p-2 rounded border ${healingCases[c.case_id] === 'done' ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-100'}`}>
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono font-bold text-red-700">{c.case_id}</span>
-                        <div className="flex items-center gap-2">
-                          {healingCases[c.case_id] === 'done' ? (
-                            <span className="text-green-600 font-medium">✓ 已修复</span>
-                          ) : healingCases[c.case_id] === 'loading' ? (
-                            <span className="text-blue-600 animate-pulse">生成中...</span>
-                          ) : healingCases[c.case_id] === 'preview' ? (
-                            <button
-                              onClick={() => { setHealDialogCase(healPreviews[c.case_id]); setShowHealDialog(true) }}
-                              className="px-2 py-0.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-xs"
-                            >查看建议</button>
-                          ) : healingCases[c.case_id] === 'error' ? (
-                            <button onClick={() => handleHealRetry(c)} className="text-orange-600 hover:underline text-xs">重试</button>
-                          ) : (
-                            <button
-                              onClick={() => handleHealPreview(c)}
-                              className="px-2 py-0.5 bg-green-600 text-white rounded hover:bg-green-700 text-xs"
-                            >AI 自愈</button>
-                          )}
-                          <button
-                            onClick={() => { setShowReviewDialog(false); setSearchQuery(c.case_id) }}
-                            className="text-blue-600 hover:underline text-xs"
-                          >定位</button>
-                        </div>
-                      </div>
-                      {c.issues?.map((issue, j) => <div key={j} className="text-gray-600 mt-1">- {typeof issue === 'string' ? issue : JSON.stringify(issue)}</div>)}
-                      {c.fix_suggestion && <div className="mt-1 text-green-700 font-medium">修复: {typeof c.fix_suggestion === 'string' ? c.fix_suggestion : JSON.stringify(c.fix_suggestion)}</div>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 覆盖缺口 */}
-            {reviewResult.coverage_gaps?.length > 0 && (
-              <div className="mb-4">
-                <h3 className="text-sm font-semibold mb-2">覆盖缺口</h3>
-                <ul className="space-y-1">
-                  {reviewResult.coverage_gaps.map((g, i) => (
-                    <li key={i} className="text-sm text-gray-700 bg-amber-50 p-2 rounded">{g}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* 漏测场景 */}
-            {reviewResult.missing_scenarios?.length > 0 && (
-              <div className="mb-4">
-                <h3 className="text-sm font-semibold mb-2 text-purple-700">建议补充场景</h3>
-                <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {reviewResult.missing_scenarios.map((s, i) => (
-                    <div key={i} className="text-xs p-2 bg-purple-50 rounded">
-                      {typeof s === 'string' ? s : (
-                        <>
-                          <span className="font-medium">{s.scenario}</span>
-                          {s.api && <span className="ml-2 text-gray-500">[{s.api}]</span>}
-                          {s.priority && <span className={`ml-2 px-1 rounded ${s.priority === 'high' ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'}`}>{s.priority}</span>}
-                          {s.reason && <div className="text-gray-500 mt-0.5">{s.reason}</div>}
-                        </>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* 规则问题用例明细 */}
-            {reviewResult.case_details?.some(c => c.issues?.length > 0) && (
-              <details className="mb-4">
-                <summary className="text-sm font-semibold cursor-pointer text-gray-700">
-                  规则检出问题用例 ({reviewResult.case_details.filter(c => c.issues?.length > 0).length} 条)
-                </summary>
-                <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
-                  {reviewResult.case_details.filter(c => c.issues?.length > 0).map((c, i) => (
-                    <div key={i} className="text-xs p-2 bg-gray-50 rounded flex items-start gap-2">
-                      <span className={`px-1.5 py-0.5 rounded font-bold ${c.risk_level === 'high' ? 'bg-red-100 text-red-700' : c.risk_level === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>{c.score}</span>
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between">
-                          <span className="font-mono text-gray-500">{c.case_id}</span>
-                          <button onClick={() => { setShowReviewDialog(false); setSearchQuery(c.case_id) }} className="text-blue-600 hover:underline text-xs">定位</button>
-                        </div>
-                        <div className="text-gray-600">{c.issues.join(' | ')}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </details>
-            )}
-
-            <div className="mt-4 flex justify-end">
-              <button onClick={() => setShowReviewDialog(false)} className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 text-sm">关闭</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* AI 自愈预览确认对话框 */}
       {showHealDialog && healDialogCase && (
@@ -3492,119 +2436,21 @@ export default function TestCases() {
           </div>
         </div>
       )}
-      {/* P2-6B: Performance Test Config Modal */}
-      {showPerfDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
-          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-md">
-            <h2 className="text-lg font-bold text-slate-900 mb-4">API 性能测试配置</h2>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">并发数 (1-50)</label>
-                <input type="number" min={1} max={50} value={perfConfig.concurrency}
-                  onChange={e => setPerfConfig(p => ({ ...p, concurrency: Number(e.target.value) }))}
-                  className="w-full px-3 py-2 border rounded-lg text-sm" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">持续时间 (秒, 1-300)</label>
-                <input type="number" min={1} max={300} value={perfConfig.duration_seconds}
-                  onChange={e => setPerfConfig(p => ({ ...p, duration_seconds: Number(e.target.value) }))}
-                  className="w-full px-3 py-2 border rounded-lg text-sm" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Ramp-up (秒)</label>
-                <input type="number" min={0} value={perfConfig.ramp_up_seconds}
-                  onChange={e => setPerfConfig(p => ({ ...p, ramp_up_seconds: Number(e.target.value) }))}
-                  className="w-full px-3 py-2 border rounded-lg text-sm" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">请求间隔 (ms)</label>
-                <input type="number" min={0} value={perfConfig.think_time_ms}
-                  onChange={e => setPerfConfig(p => ({ ...p, think_time_ms: Number(e.target.value) }))}
-                  className="w-full px-3 py-2 border rounded-lg text-sm" />
-              </div>
-              <p className="text-xs text-slate-500">将对 {selectedIds.length > 0 ? selectedIds.length : '所有'} 个 API 用例执行性能测试</p>
-            </div>
-            <div className="mt-5 flex justify-end space-x-3">
-              <button onClick={() => setShowPerfDialog(false)} className="px-4 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50">取消</button>
-              <button onClick={handlePerfTest} disabled={perfLoading}
-                className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 text-sm disabled:opacity-50">
-                {perfLoading ? '执行中...' : '开始性能测试'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <PerfConfigDialog
+        show={showPerfDialog}
+        perfConfig={perfConfig}
+        perfLoading={perfLoading}
+        selectedCount={selectedIds.length}
+        onConfigChange={(patch) => setPerfConfig(p => ({ ...p, ...patch }))}
+        onStart={handlePerfTest}
+        onClose={() => setShowPerfDialog(false)}
+      />
 
-      {/* P2-6B: Performance Test Result Dialog */}
-      {showPerfResult && perfResult && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
-          <div className="bg-white rounded-xl shadow-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-bold text-slate-900">性能测试结果</h2>
-              <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                perfResult.performance_summary?.threshold_passed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-              }`}>{perfResult.performance_summary?.threshold_passed ? 'PASSED' : 'FAILED'}</span>
-            </div>
-            {perfResult.performance_summary && (() => {
-              const ps = perfResult.performance_summary
-              return (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-3 gap-3">
-                    <div className="bg-blue-50 rounded-lg p-3 text-center">
-                      <div className="text-2xl font-bold text-blue-700">{ps.total_requests}</div>
-                      <div className="text-xs text-blue-600">总请求数</div>
-                    </div>
-                    <div className="bg-green-50 rounded-lg p-3 text-center">
-                      <div className="text-2xl font-bold text-green-700">{ps.qps}</div>
-                      <div className="text-xs text-green-600">QPS</div>
-                    </div>
-                    <div className="bg-orange-50 rounded-lg p-3 text-center">
-                      <div className="text-2xl font-bold text-orange-700">{(ps.error_rate * 100).toFixed(1)}%</div>
-                      <div className="text-xs text-orange-600">错误率</div>
-                    </div>
-                  </div>
-                  <div className="bg-slate-50 rounded-lg p-4">
-                    <h3 className="text-sm font-semibold text-slate-700 mb-2">响应时间</h3>
-                    <div className="grid grid-cols-2 gap-2 text-sm">
-                      <div className="flex justify-between"><span className="text-slate-500">平均</span><span className="font-medium">{ps.avg_response_time_ms} ms</span></div>
-                      <div className="flex justify-between"><span className="text-slate-500">最小</span><span className="font-medium">{ps.min_response_time_ms} ms</span></div>
-                      <div className="flex justify-between"><span className="text-slate-500">P50</span><span className="font-medium">{ps.p50_ms} ms</span></div>
-                      <div className="flex justify-between"><span className="text-slate-500">P95</span><span className="font-medium">{ps.p95_ms} ms</span></div>
-                      <div className="flex justify-between"><span className="text-slate-500">P99</span><span className="font-medium">{ps.p99_ms} ms</span></div>
-                      <div className="flex justify-between"><span className="text-slate-500">最大</span><span className="font-medium">{ps.max_response_time_ms} ms</span></div>
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3 text-sm">
-                    <div className="flex justify-between"><span className="text-slate-500">成功</span><span className="text-green-600 font-medium">{ps.success_requests}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-500">失败</span><span className="text-red-600 font-medium">{ps.failed_requests}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-500">并发</span><span className="font-medium">{ps.concurrency}</span></div>
-                    <div className="flex justify-between"><span className="text-slate-500">持续</span><span className="font-medium">{ps.duration_seconds}s</span></div>
-                  </div>
-                  {ps.threshold_failures?.length > 0 && (
-                    <div className="bg-red-50 rounded-lg p-3">
-                      <h3 className="text-sm font-semibold text-red-700 mb-1">阈值未通过</h3>
-                      {ps.threshold_failures.map((f, i) => (
-                        <div key={i} className="text-xs text-red-600">{f.metric}: 实际 {f.actual} &gt; 期望 {f.expected}</div>
-                      ))}
-                    </div>
-                  )}
-                  {ps.failure_samples?.length > 0 && (
-                    <div className="bg-amber-50 rounded-lg p-3">
-                      <h3 className="text-sm font-semibold text-amber-700 mb-1">失败样本 (前{ps.failure_samples.length}个)</h3>
-                      {ps.failure_samples.slice(0, 5).map((s, i) => (
-                        <div key={i} className="text-xs text-amber-600">{s.method} {s.url} → {s.error} ({s.duration_ms}ms)</div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )
-            })()}
-            <div className="mt-5 flex justify-end">
-              <button onClick={() => setShowPerfResult(false)} className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 text-sm">关闭</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <PerfResultDialog
+        show={showPerfResult}
+        perfResult={perfResult}
+        onClose={() => setShowPerfResult(false)}
+      />
     </div>
   )
 }
