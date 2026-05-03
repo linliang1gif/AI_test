@@ -585,9 +585,24 @@ def _execute_web_ui_case(tc, req, db):
             detail="Playwright 未安装。请运行: pip install playwright && python -m playwright install chromium"
         )
 
+    from services.web_ui_stability import (
+        analyze_selectors, analyze_wait_strategies, preflight_check,
+        categorize_failure, should_retry,
+    )
+
     exec_config = tc.execution_config or {}
     steps = tc.steps or []
     assertions = tc.assertions or []
+
+    # P2-9B: preflight check
+    pf = preflight_check(getattr(tc, 'case_type', 'web_ui'), steps, assertions, exec_config)
+    if not pf["ok"]:
+        err_msg = "执行前检查失败: " + "; ".join(pf["errors"])
+        raise HTTPException(status_code=400, detail=err_msg)
+
+    # P2-9B: selector & wait analysis
+    sel_analysis = analyze_selectors(steps)
+    wait_analysis = analyze_wait_strategies(steps)
 
     # P2-5: generate run_id first so visual regression can use it for file naming
     run_id = f"RUN_{datetime.now().strftime('%Y%m%d%H%M%S')}_{_uuid.uuid4().hex[:8]}"
@@ -599,6 +614,28 @@ def _execute_web_ui_case(tc, req, db):
         case_id=tc.id,
         run_id=run_id,
     )
+
+    # P2-9B: retry logic
+    first_pw_result = None
+    retry_attempt = 0
+    is_flaky = False
+    retry_enabled = exec_config.get("retry_enabled", False)
+    retry_count_cfg = min(exec_config.get("retry_count", 1), 3)
+    retry_on = exec_config.get("retry_on", ["page_timeout", "network_error", "selector_not_found"])
+
+    if pw_result.status not in ("passed",) and retry_enabled:
+        failure_cat = categorize_failure(pw_result.error_message or "")
+        if should_retry(failure_cat, retry_on):
+            first_pw_result = pw_result
+            for attempt in range(1, retry_count_cfg + 1):
+                retry_attempt = attempt
+                pw_result = execute_web_ui(
+                    steps=steps, assertions=assertions,
+                    execution_config=exec_config, case_id=tc.id, run_id=run_id,
+                )
+                if pw_result.status == "passed":
+                    is_flaky = True
+                    break
 
     if pw_result.status == "error" and "仅支持 chromium" in pw_result.error_message:
         raise HTTPException(status_code=400, detail=pw_result.error_message)
@@ -619,7 +656,14 @@ def _execute_web_ui_case(tc, req, db):
             passed_cases=1 if final_status == "passed" else 0,
             failed_cases=1 if final_status == "failed" else 0,
             summary=json.dumps({"engine": "playwright", "case_type": "web_ui", "skipped_count": pw_result.skipped_count,
-                                "has_high_risk_actions": pw_result.has_high_risk_actions}, ensure_ascii=False),
+                                "has_high_risk_actions": pw_result.has_high_risk_actions,
+                                # P2-9B
+                                "retry_enabled": retry_enabled, "retry_attempt": retry_attempt,
+                                "flaky_candidate": is_flaky,
+                                "selector_score": sel_analysis["selector_score"],
+                                "selector_low_score_count": sel_analysis["low_score_count"],
+                                "wait_strategy_warnings": wait_analysis["warning_count"],
+                                }, ensure_ascii=False),
         )
         db.add(test_run)
 
@@ -643,10 +687,20 @@ def _execute_web_ui_case(tc, req, db):
             request_snapshot={"engine": "playwright", "steps_count": len(steps), "assertions_count": len(assertions)},
             response_snapshot={"screenshots": [sr.screenshot_path for sr in pw_result.step_results if sr.screenshot_path],
                                "failure_screenshot": pw_result.failure_screenshot,
+                               "first_failure_screenshot": first_pw_result.failure_screenshot if first_pw_result else "",
                                "visual_results": pw_result.visual_results,
                                "trace_path": pw_result.trace_path,
                                "console_error_count": len(pw_result.console_logs),
-                               "network_error_count": len(pw_result.network_errors)},
+                               "network_error_count": len(pw_result.network_errors),
+                               # P2-9B
+                               "retry_attempt": retry_attempt,
+                               "flaky_candidate": is_flaky,
+                               "recovered_by_retry": is_flaky,
+                               "first_failure_category": categorize_failure(first_pw_result.error_message) if first_pw_result else "",
+                               "selector_score": sel_analysis["selector_score"],
+                               "unstable_selectors": sel_analysis["unstable_selectors"],
+                               "wait_warnings": wait_analysis["wait_strategy_warnings"],
+                               },
             assertions_passed=a_passed,
             assertions_failed=a_failed,
             assertion_details=assertion_details,
@@ -753,6 +807,13 @@ def _execute_web_ui_case(tc, req, db):
             "trace_path": pw_result.trace_path,
             "console_logs": pw_result.console_logs[:50],
             "network_errors": pw_result.network_errors[:50],
+            # P2-9B: stability info
+            "retry_attempt": retry_attempt,
+            "flaky_candidate": is_flaky,
+            "recovered_by_retry": is_flaky,
+            "selector_score": sel_analysis["selector_score"],
+            "unstable_selectors": sel_analysis["unstable_selectors"],
+            "wait_warnings": wait_analysis["wait_strategy_warnings"],
         },
     )
 

@@ -114,6 +114,11 @@ def batch_run_web_ui(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"创建 TestRun 失败: {e}")
 
+    # P2-9B: retry config
+    retry_enabled = base_config.get("retry_enabled", False)
+    retry_count = min(base_config.get("retry_count", 1), 3)  # cap at 3
+    retry_on = base_config.get("retry_on", ["page_timeout", "network_error", "selector_not_found"])
+
     # 5. 逐条执行 (单条失败不中断)
     passed = 0
     failed = 0
@@ -121,7 +126,17 @@ def batch_run_web_ui(
     trace_count = 0
     total_console_errors = 0
     total_network_errors = 0
+    retried_cases = 0
+    recovered_cases = 0
+    flaky_candidate_count = 0
+    total_selector_low_score = 0
+    total_wait_warnings = 0
     case_results = []
+
+    from services.web_ui_stability import (
+        analyze_selectors, analyze_wait_strategies, preflight_check,
+        categorize_failure, should_retry,
+    )
 
     for tc in webui_cases:
         exec_config = dict(base_config)
@@ -136,6 +151,28 @@ def batch_run_web_ui(
         steps = tc.steps or []
         assertions = tc.assertions or []
 
+        # P2-9B: selector & wait analysis (pre-execution)
+        sel_analysis = analyze_selectors(steps)
+        wait_analysis = analyze_wait_strategies(steps)
+        total_selector_low_score += sel_analysis["low_score_count"]
+        total_wait_warnings += wait_analysis["warning_count"]
+
+        # P2-9B: preflight check
+        pf = preflight_check(getattr(tc, 'case_type', 'web_ui'), steps, assertions, exec_config)
+        if not pf["ok"]:
+            failed += 1
+            err_msg = "执行前检查失败: " + "; ".join(pf["errors"])
+            _write_run_case(db, run_id, tc, "failed", 0, err_msg, None)
+            case_results.append({"case_id": tc.id, "title": tc.title, "status": "failed",
+                                 "error": err_msg, "preflight_warnings": pf["warnings"]})
+            continue
+
+        # P2-9B: first execution attempt
+        first_pw_result = None
+        pw_result = None
+        retry_attempt = 0
+        is_flaky = False
+
         try:
             pw_result = execute_web_ui(
                 steps=steps,
@@ -147,6 +184,32 @@ def batch_run_web_ui(
         except Exception as e:
             logger.error(f"Web UI case {tc.id} execution exception: {e}")
             pw_result = None
+
+        # P2-9B: retry logic
+        if pw_result and pw_result.status not in ("passed",) and retry_enabled:
+            failure_cat = categorize_failure(pw_result.error_message or "")
+            if should_retry(failure_cat, retry_on):
+                first_pw_result = pw_result  # preserve first failure evidence
+                for attempt in range(1, retry_count + 1):
+                    retry_attempt = attempt
+                    retried_cases += 1
+                    logger.info(f"P2-9B retry {attempt}/{retry_count} for case {tc.id} (category={failure_cat})")
+                    try:
+                        pw_result = execute_web_ui(
+                            steps=steps,
+                            assertions=assertions,
+                            execution_config=exec_config,
+                            case_id=tc.id,
+                            run_id=run_id,
+                        )
+                    except Exception as e:
+                        logger.error(f"Web UI case {tc.id} retry {attempt} exception: {e}")
+                        pw_result = None
+                    if pw_result and pw_result.status == "passed":
+                        is_flaky = True
+                        recovered_cases += 1
+                        flaky_candidate_count += 1
+                        break
 
         if pw_result is None:
             # Treat as failed
@@ -170,7 +233,7 @@ def batch_run_web_ui(
         # Write RunCase + RunSteps
         _write_run_case_full(db, run_id, tc, pw_result, final_status)
 
-        case_results.append({
+        case_result_entry = {
             "case_id": tc.id,
             "title": tc.title,
             "status": final_status,
@@ -180,7 +243,20 @@ def batch_run_web_ui(
             "console_error_count": len(pw_result.console_logs),
             "network_error_count": len(pw_result.network_errors),
             "screenshot_count": sum(1 for sr in pw_result.step_results if sr.screenshot_path),
-        })
+            "selector_score": sel_analysis["selector_score"],
+            "unstable_selectors": sel_analysis["unstable_selectors"],
+            "wait_warnings": wait_analysis["wait_strategy_warnings"],
+        }
+        # P2-9B: retry & flaky metadata
+        if retry_attempt > 0:
+            case_result_entry["retry_attempt"] = retry_attempt
+            case_result_entry["flaky_candidate"] = is_flaky
+            if first_pw_result:
+                case_result_entry["first_failure_category"] = categorize_failure(first_pw_result.error_message or "")
+                case_result_entry["first_failure_screenshot"] = first_pw_result.failure_screenshot
+            case_result_entry["recovered_by_retry"] = is_flaky
+
+        case_results.append(case_result_entry)
 
     # 6. 更新 TestRun
     test_run.status = "passed" if failed == 0 else "failed"
@@ -198,6 +274,14 @@ def batch_run_web_ui(
         "trace_count": trace_count,
         "console_error_count": total_console_errors,
         "network_error_count": total_network_errors,
+        # P2-9B: stability summary
+        "retry_enabled": retry_enabled,
+        "retry_count": retry_count if retry_enabled else 0,
+        "retried_cases": retried_cases,
+        "recovered_cases": recovered_cases,
+        "flaky_candidate_count": flaky_candidate_count,
+        "selector_low_score_count": total_selector_low_score,
+        "wait_strategy_warnings": total_wait_warnings,
     }, ensure_ascii=False)
     try:
         db.commit()
@@ -225,6 +309,14 @@ def batch_run_web_ui(
             "trace_count": trace_count,
             "console_error_count": total_console_errors,
             "network_error_count": total_network_errors,
+            # P2-9B: stability summary
+            "retry_enabled": retry_enabled,
+            "retry_count": retry_count if retry_enabled else 0,
+            "retried_cases": retried_cases,
+            "recovered_cases": recovered_cases,
+            "flaky_candidate_count": flaky_candidate_count,
+            "selector_low_score_count": total_selector_low_score,
+            "wait_strategy_warnings": total_wait_warnings,
         },
     )
 

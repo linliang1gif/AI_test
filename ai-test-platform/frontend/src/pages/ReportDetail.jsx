@@ -149,6 +149,39 @@ export default function ReportDetail() {
               <div><span className="text-slate-500">通过:</span> <span className="text-green-600 font-bold">{ws.passed_cases || 0}</span></div>
               <div><span className="text-slate-500">失败:</span> <span className="text-red-600 font-bold">{ws.failed_cases || 0}</span></div>
             </div>
+
+            {/* P2-9B: 稳定性摘要 */}
+            {(ws.retry_enabled || ws.flaky_candidate_count > 0 || ws.selector_low_score_count > 0 || ws.wait_strategy_warnings > 0) && (
+              <div className="mt-3 pt-3 border-t border-violet-100">
+                <h3 className="text-sm font-semibold text-violet-700 mb-2">稳定性摘要</h3>
+                <div className="grid grid-cols-5 gap-2">
+                  {ws.retry_enabled && (
+                    <div className="bg-blue-50 rounded-lg p-2 text-center">
+                      <div className="text-lg font-bold text-blue-700">{ws.retried_cases || 0}</div>
+                      <div className="text-xs text-blue-600">重试次数</div>
+                    </div>
+                  )}
+                  {ws.retry_enabled && (
+                    <div className="bg-green-50 rounded-lg p-2 text-center">
+                      <div className="text-lg font-bold text-green-700">{ws.recovered_cases || 0}</div>
+                      <div className="text-xs text-green-600">重试恢复</div>
+                    </div>
+                  )}
+                  <div className="bg-orange-50 rounded-lg p-2 text-center">
+                    <div className="text-lg font-bold text-orange-700">{ws.flaky_candidate_count || 0}</div>
+                    <div className="text-xs text-orange-600">Flaky 候选</div>
+                  </div>
+                  <div className="bg-amber-50 rounded-lg p-2 text-center">
+                    <div className="text-lg font-bold text-amber-700">{ws.selector_low_score_count || 0}</div>
+                    <div className="text-xs text-amber-600">低稳定 Selector</div>
+                  </div>
+                  <div className="bg-yellow-50 rounded-lg p-2 text-center">
+                    <div className="text-lg font-bold text-yellow-700">{ws.wait_strategy_warnings || 0}</div>
+                    <div className="text-xs text-yellow-600">等待策略警告</div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )
       })()}

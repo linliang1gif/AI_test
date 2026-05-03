@@ -535,10 +535,62 @@ export default function TestRunDetailV2() {
                     <div className="space-y-1 max-h-40 overflow-y-auto">
                       {cd.response_snapshot.network_errors.map((ne, i) => (
                         <div key={i} className="text-xs p-1.5 rounded bg-red-50 text-red-700 flex gap-2">
-                          <span className="font-mono font-bold">{ne.method}</span>
-                          <span className="truncate flex-1">{ne.url?.slice(0, 120)}</span>
+                          <span className="font-mono">{ne.method}</span>
+                          <span className="truncate flex-1">{ne.url}</span>
                           {ne.status && <span className="font-bold">{ne.status}</span>}
                           {ne.failure_text && <span className="text-gray-500">{ne.failure_text}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* P2-9B: Web UI 稳定性信息 */}
+                {cd.response_snapshot?.retry_attempt > 0 && (
+                  <div className="bg-white rounded-lg shadow-sm p-4">
+                    <h4 className="text-sm font-semibold mb-2">重试信息</h4>
+                    <div className="flex gap-3 text-xs">
+                      <span className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded">重试 {cd.response_snapshot.retry_attempt} 次</span>
+                      {cd.response_snapshot.flaky_candidate && <span className="px-2 py-1 bg-orange-100 text-orange-700 rounded">⚠ flaky_candidate</span>}
+                      {cd.response_snapshot.recovered_by_retry && <span className="px-2 py-1 bg-green-100 text-green-700 rounded">✓ 重试后恢复</span>}
+                      {cd.response_snapshot.first_failure_category && <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded">首次: {cd.response_snapshot.first_failure_category}</span>}
+                    </div>
+                  </div>
+                )}
+
+                {cd.response_snapshot?.selector_score != null && (
+                  <div className="bg-white rounded-lg shadow-sm p-4">
+                    <h4 className="text-sm font-semibold mb-2">Selector 稳定性</h4>
+                    <div className="flex items-center gap-3">
+                      <span className={`text-lg font-bold ${cd.response_snapshot.selector_score >= 80 ? 'text-green-600' : cd.response_snapshot.selector_score >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
+                        {cd.response_snapshot.selector_score}分
+                      </span>
+                      {cd.response_snapshot.unstable_selectors?.length > 0 && (
+                        <span className="text-xs text-orange-600">{cd.response_snapshot.unstable_selectors.length} 个低稳定 selector</span>
+                      )}
+                    </div>
+                    {cd.response_snapshot.unstable_selectors?.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {cd.response_snapshot.unstable_selectors.map((s, i) => (
+                          <div key={i} className="text-xs p-1.5 bg-orange-50 rounded flex gap-2">
+                            <span className="text-gray-500">步骤 {s.step_index + 1}</span>
+                            <code className="font-mono text-orange-700">{s.target}</code>
+                            <span className="text-gray-500">{s.reason}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {cd.response_snapshot?.wait_warnings?.length > 0 && (
+                  <div className="bg-white rounded-lg shadow-sm p-4">
+                    <h4 className="text-sm font-semibold mb-2">等待策略警告</h4>
+                    <div className="space-y-1">
+                      {cd.response_snapshot.wait_warnings.map((w, i) => (
+                        <div key={i} className="text-xs p-1.5 bg-yellow-50 rounded flex gap-2">
+                          <span className="text-gray-500">步骤 {w.step_index + 1}</span>
+                          <span className="text-yellow-700">{w.reason}</span>
                         </div>
                       ))}
                     </div>
@@ -549,7 +601,6 @@ export default function TestRunDetailV2() {
           </div>
         </div>
       )}
-
       {/* ═══ Tab: 模块分组 ═══ */}
       {activeTab === 'modules' && (
         <div className="mt-6 space-y-4">

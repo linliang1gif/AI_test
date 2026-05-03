@@ -457,8 +457,39 @@ def _execute_step(engine_ctx: dict, step, idx: int, base_url: str, case_id: str,
             sr.current_url = page.url
 
         elif action == "wait_for":
-            if target.isdigit():
+            # P2-9B: enhanced wait strategies via value field
+            wait_type = value.strip().lower() if value else ""
+            if target.isdigit() and wait_type != "url_contains":
                 page.wait_for_timeout(int(target))
+            elif wait_type == "url_contains":
+                # wait until URL contains target string
+                try:
+                    page.wait_for_url(f"**{target}**" if '*' not in target else target, timeout=10000)
+                except Exception:
+                    _fail_or_skip(f"等待URL包含 '{target}' 超时(当前URL: {page.url})")
+                    sr.current_url = page.url
+                    sr.duration_ms = (time.time() - t0) * 1000
+                    return sr
+            elif wait_type == "text_visible":
+                # wait until text is visible on page
+                try:
+                    page.get_by_text(target).first.wait_for(state="visible", timeout=10000)
+                except Exception:
+                    _fail_or_skip(f"等待文本 '{target}' 可见超时(当前URL: {page.url})")
+                    sr.current_url = page.url
+                    sr.duration_ms = (time.time() - t0) * 1000
+                    return sr
+            elif wait_type in ("visible", "attached", "detached", "hidden"):
+                try:
+                    frame.wait_for_selector(target, state=wait_type, timeout=10000)
+                except Exception:
+                    _fail_or_skip(f"等待 {target} {wait_type} 超时(当前URL: {page.url})")
+                    sr.current_url = page.url
+                    sr.duration_ms = (time.time() - t0) * 1000
+                    return sr
+            elif wait_type == "network_idle":
+                # P2-9B: basic network idle — wait a bit for pending requests to finish
+                page.wait_for_load_state("networkidle", timeout=15000)
             else:
                 try:
                     frame.wait_for_selector(target, timeout=10000)
