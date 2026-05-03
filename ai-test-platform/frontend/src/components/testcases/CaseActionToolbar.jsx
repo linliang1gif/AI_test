@@ -14,6 +14,7 @@ export default function CaseActionToolbar({
   onAiReview,
   onExportExcel,
   onBatchDelete,
+  onAddToSuite,
   onClearSelection,
 }) {
   if (selectedCaseAnalysis.count === 0) return null
@@ -53,6 +54,10 @@ export default function CaseActionToolbar({
       </button>
       <button onClick={onExportExcel}
         className="px-3 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 text-xs">导出</button>
+      {onAddToSuite && (
+        <button onClick={onAddToSuite}
+          className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-xs">加入测试集</button>
+      )}
       <button onClick={onBatchDelete} disabled={isDeleting}
         className="px-3 py-1.5 bg-red-600 text-white rounded-lg hover:bg-red-700 text-xs disabled:opacity-50">
         {isDeleting ? '删除中...' : '删除'}

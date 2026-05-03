@@ -113,6 +113,30 @@ def _run_migrations():
         logger.warning(f"Phase 19 迁移失败: {e}")
 
 
+    # P2-10 test_suites + test_suite_cases 表
+    try:
+        from database import get_db_session
+        from sqlalchemy import inspect as sa_inspect
+        with get_db_session() as db:
+            inspector = sa_inspect(db.bind)
+            tables = inspector.get_table_names()
+            created = []
+            if "test_suites" not in tables:
+                from database.models import TestSuite
+                TestSuite.__table__.create(db.bind)
+                created.append("test_suites")
+            if "test_suite_cases" not in tables:
+                from database.models import TestSuiteCase
+                TestSuiteCase.__table__.create(db.bind)
+                created.append("test_suite_cases")
+            if created:
+                logger.info(f"P2-10 迁移: 已创建 {created}")
+            else:
+                logger.info("P2-10 test_suites/test_suite_cases 表已存在")
+    except Exception as e:
+        logger.warning(f"P2-10 迁移失败: {e}")
+
+
 def _init_optional_modules():
     """初始化可选模块，失败不阻塞"""
     # Pilot Backend

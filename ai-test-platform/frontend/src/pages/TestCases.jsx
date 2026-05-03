@@ -115,6 +115,10 @@ export default function TestCases() {
   const [perfLoading, setPerfLoading] = useState(false)
   const [perfResult, setPerfResult] = useState(null)
   const [showPerfResult, setShowPerfResult] = useState(false)
+  // P2-10: 加入测试集
+  const [showSuitePickerDialog, setShowSuitePickerDialog] = useState(false)
+  const [suitePickerList, setSuitePickerList] = useState([])
+  const [selectedSuiteId, setSelectedSuiteId] = useState('')
   // AI 自愈（P1-8A-Guard 两步确认）
   const [healingCases, setHealingCases] = useState({}) // { case_id: 'loading'|'preview'|'applying'|'done'|'error' }
   const [healPreviews, setHealPreviews] = useState({}) // { case_id: { before, after, changes, ... } }
@@ -1008,6 +1012,30 @@ export default function TestCases() {
     }
   }
 
+  // P2-10: 加入测试集
+  const handleAddToSuite = async () => {
+    if (selectedIds.length === 0) { alert('请先选择用例'); return }
+    try {
+      const r = await fetch('/api/v2/test-suites?limit=100')
+      const d = await r.json()
+      setSuitePickerList(d.data || [])
+      setSelectedSuiteId('')
+      setShowSuitePickerDialog(true)
+    } catch (e) { alert('获取测试集列表失败: ' + e.message) }
+  }
+  const handleConfirmAddToSuite = async () => {
+    if (!selectedSuiteId) { alert('请选择测试集'); return }
+    try {
+      const r = await fetch(`/api/v2/test-suites/${selectedSuiteId}/cases`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ case_ids: selectedIds })
+      })
+      const d = await r.json()
+      alert(`已添加 ${d.added?.length || 0} 条, 跳过 ${d.skipped?.length || 0} 条`)
+      setShowSuitePickerDialog(false)
+    } catch (e) { alert('添加失败: ' + e.message) }
+  }
+
   const handleManualTest = (testCase) => {
     setSelectedTestCase(testCase)
     const steps = testCase.steps || []
@@ -1307,6 +1335,7 @@ export default function TestCases() {
             onAiReview={handleAiReview}
             onExportExcel={handleExportExcel}
             onBatchDelete={handleBatchDelete}
+            onAddToSuite={handleAddToSuite}
             onClearSelection={() => setSelectedIds([])}
           />
 
@@ -2451,6 +2480,32 @@ export default function TestCases() {
         perfResult={perfResult}
         onClose={() => setShowPerfResult(false)}
       />
+
+      {/* P2-10: Suite Picker Dialog */}
+      {showSuitePickerDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-[420px] shadow-2xl">
+            <h2 className="text-lg font-bold mb-4">选择测试集</h2>
+            <p className="text-sm text-slate-500 mb-3">将选中的 {selectedIds.length} 条用例添加到测试集</p>
+            {suitePickerList.length === 0 ? (
+              <p className="text-sm text-slate-400 py-4 text-center">暂无测试集，请先在"测试集管理"页面创建</p>
+            ) : (
+              <select value={selectedSuiteId} onChange={e => setSelectedSuiteId(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm mb-4">
+                <option value="">-- 请选择 --</option>
+                {suitePickerList.map(s => (
+                  <option key={s.id} value={s.id}>{s.name} ({s.suite_type}, {s.case_count} 条用例)</option>
+                ))}
+              </select>
+            )}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowSuitePickerDialog(false)} className="px-4 py-2 border rounded-lg text-sm">取消</button>
+              <button onClick={handleConfirmAddToSuite} disabled={!selectedSuiteId}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50">添加</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

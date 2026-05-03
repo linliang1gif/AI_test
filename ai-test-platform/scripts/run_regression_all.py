@@ -15,11 +15,14 @@ import subprocess
 import time
 import os
 import shutil
+import signal
 import requests
 
 # ── 配置 ──────────────────────────────────────────────
 BASE_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
 TIMEOUT_PER_SCRIPT = 180  # 每个脚本最大运行秒数
+DEFAULT_TESTING_KEY = "regression-test-key-auto"
+MANAGE_BACKEND = os.getenv("REGRESSION_MANAGE_BACKEND", "true").lower() == "true"
 
 # 回归脚本列表: (名称, 路径, 是否关键, 是否依赖AI, 外部依赖标记)
 # 外部依赖标记: None=无, "external_api"=外部API, "browser"=浏览器
@@ -38,6 +41,7 @@ REGRESSION_SCRIPTS = [
     ("P2-7 Web UI Batch/Trace",        "scripts/test_p2_7_web_ui_batch_trace.py",   True, False, "browser"),
     ("P2-8 AI UI Failure Analysis",   "scripts/test_p2_8_ai_ui_failure_analysis.py", True, False, "browser"),
     ("P2-9B Web UI Stability",        "scripts/test_p2_9b_web_ui_stability.py",  True, False, "browser"),
+    ("P2-10 Test Suite Management",    "scripts/test_p2_10_test_suite_management.py", True, False, None),
     ("P1-8A AI Heal Guard",            "scripts/test_p1_8a_ai_heal_guard.py",   False, True,  None),
     ("P1-8 AI Case Review",            "scripts/test_p1_8_ai_case_review.py",   False, True,  None),
 ]
@@ -78,10 +82,66 @@ def wait_for_backend(url: str, max_wait: int = 60) -> bool:
     return False
 
 
+# ── 后端生命周期管理 ──────────────────────────────────
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_backend_proc = None
+
+def _testing_key():
+    return os.getenv("TESTING_KEY", "") or DEFAULT_TESTING_KEY
+
+def start_managed_backend():
+    """启动一个带 TESTING=true + TESTING_KEY 的后端进程."""
+    global _backend_proc
+    # 先检查是否已有后端在运行
+    try:
+        r = requests.get(f"{BASE_URL}/health", timeout=3)
+        if r.ok:
+            print("  ⚠️ 已检测到运行中的后端, 先关闭...")
+            stop_managed_backend(force_kill_port=True)
+            time.sleep(2)
+    except Exception:
+        pass
+
+    env = {
+        **os.environ,
+        "TESTING": "true",
+        "TESTING_KEY": _testing_key(),
+        "PYTHONIOENCODING": "utf-8",
+    }
+    _backend_proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "backend.app:create_app",
+         "--host", "0.0.0.0", "--port", "8000", "--factory"],
+        cwd=PROJECT_ROOT, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    )
+    print(f"  🚀 已启动后端进程 PID={_backend_proc.pid}")
+
+
+def stop_managed_backend(force_kill_port=False):
+    global _backend_proc
+    if _backend_proc:
+        try:
+            _backend_proc.terminate()
+            _backend_proc.wait(timeout=10)
+        except Exception:
+            _backend_proc.kill()
+        _backend_proc = None
+    if force_kill_port:
+        # Windows: kill process on port 8000
+        try:
+            out = subprocess.check_output("netstat -ano | findstr :8000 | findstr LISTEN", shell=True, text=True)
+            for line in out.strip().split("\n"):
+                pid = line.strip().split()[-1]
+                if pid.isdigit():
+                    subprocess.run(["taskkill", "/PID", pid, "/F"], capture_output=True)
+        except Exception:
+            pass
+
+
 # ── 运行单个脚本 ──────────────────────────────────────
 def run_script(name: str, path: str) -> dict:
     """运行脚本并返回 {status, name, duration, output}"""
-    abs_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), path)
+    abs_path = os.path.join(PROJECT_ROOT, path)
     if not os.path.exists(abs_path):
         return {"status": "SKIP", "name": name, "duration": 0, "reason": f"文件不存在: {path}"}
 
@@ -90,8 +150,8 @@ def run_script(name: str, path: str) -> dict:
         result = subprocess.run(
             [sys.executable, abs_path],
             capture_output=True, timeout=TIMEOUT_PER_SCRIPT,
-            env={**os.environ, "PYTHONIOENCODING": "utf-8", "TESTING": "true", "TESTING_KEY": os.getenv("TESTING_KEY", "")},
-            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            env={**os.environ, "PYTHONIOENCODING": "utf-8", "TESTING": "true", "TESTING_KEY": _testing_key()},
+            cwd=PROJECT_ROOT,
         )
         duration = round(time.time() - start, 1)
         status = "PASS" if result.returncode == 0 else "FAIL"
@@ -113,9 +173,14 @@ def main():
     print("  AI Test Platform — 统一回归测试")
     print("=" * 70)
 
-    # 1. 等待后端
+    # 1. 启动/等待后端（带 TESTING=true + TESTING_KEY）
+    if MANAGE_BACKEND:
+        print(f"\n🔧 回归管理模式: 自动启动后端 (TESTING=true, TESTING_KEY={_testing_key()[:8]}...)")
+        start_managed_backend()
     if not wait_for_backend(BASE_URL):
         print("\n❌ 后端未启动，回归测试中止")
+        if MANAGE_BACKEND:
+            stop_managed_backend()
         sys.exit(1)
 
     # 2. 检测浏览器可用性
@@ -199,6 +264,10 @@ def main():
         name, path, critical = entry[0], entry[1], entry[2]
         if critical and results[i]["status"] == "FAIL":
             critical_failures.append(name)
+
+    if MANAGE_BACKEND:
+        print("\n🛑 关闭回归管理的后端进程...")
+        stop_managed_backend()
 
     if critical_failures:
         print(f"\n🚨 关键测试失败 ({len(critical_failures)} 个):")

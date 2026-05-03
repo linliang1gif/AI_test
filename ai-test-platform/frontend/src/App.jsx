@@ -20,6 +20,7 @@ import AIConfigPage from './pages/AIConfigPage'
 import BatchRunCenter from './pages/BatchRunCenter'
 import Dashboard from './pages/Dashboard'
 import RealProjectOnboarding from './pages/RealProjectOnboarding'
+import TestSuites from './pages/TestSuites'
 
 // 健康检查轮询间隔（毫秒）
 const HEALTH_CHECK_INTERVAL = 30000
@@ -219,6 +220,7 @@ function App() {
                 { to: '/dashboard', icon: '■', label: '仪表盘' },
                 { to: '/projects-v2', icon: '■', label: '项目列表' },
                 { to: '/test-cases', icon: '■', label: '测试用例' },
+                { to: '/test-suites', icon: '■', label: '测试集管理' },
               ].map(item => (
                 <NavLink 
                   key={item.to}
@@ -445,6 +447,7 @@ function App() {
               <Route path="/ai-config" element={<AIConfigPage />} />
               <Route path="/executor-v2" element={<ExecutorV2 />} />
               <Route path="/batch-run" element={<BatchRunCenter />} />
+              <Route path="/test-suites" element={<TestSuites />} />
               <Route path="/real-project-onboarding" element={<RealProjectOnboarding />} />
               
               {/* 旧版页面 - 重定向到V2或占位页 */}

@@ -18,7 +18,9 @@ from .models import (
     Report,
     HealingRecord,
     SystemSettings,
-    RunStatusHistory
+    RunStatusHistory,
+    TestSuite,
+    TestSuiteCase
 )
 from .repository import (
     BaseRepository,
@@ -59,6 +61,8 @@ __all__ = [
     'HealingRecord',
     'SystemSettings',
     'RunStatusHistory',
+    'TestSuite',
+    'TestSuiteCase',
     # Repositories
     'BaseRepository',
     'ProjectRepository',

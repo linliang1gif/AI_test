@@ -186,6 +186,34 @@ export default function ReportDetail() {
         )
       })()}
 
+      {/* P2-10: Suite Summary */}
+      {run && (() => {
+        let ws = null
+        try { ws = JSON.parse(run.summary || '{}') } catch {}
+        const ss = ws?.suite_summary
+        if (!ss) return null
+        return (
+          <div className="bg-indigo-50 rounded-xl p-5 border border-indigo-100">
+            <h2 className="text-sm font-bold text-indigo-800 mb-3">测试集摘要</h2>
+            <div className="grid grid-cols-4 gap-3 text-sm">
+              <div><span className="text-slate-500">测试集:</span> <span className="font-semibold">{ss.suite_name}</span></div>
+              <div><span className="text-slate-500">类型:</span> <span className="font-semibold">{ss.suite_type}</span></div>
+              <div><span className="text-slate-500">总用例:</span> <span className="font-semibold">{ss.total_cases}</span></div>
+              <div><span className="text-slate-500">耗时:</span> <span className="font-semibold">{ss.duration_ms}ms</span></div>
+              {ss.api_cases > 0 && <div><span className="text-slate-500">API:</span> <span>{ss.api_cases}</span></div>}
+              {ss.web_ui_cases > 0 && <div><span className="text-slate-500">Web UI:</span> <span>{ss.web_ui_cases}</span></div>}
+              {ss.performance_cases > 0 && <div><span className="text-slate-500">性能:</span> <span>{ss.performance_cases}</span></div>}
+              {ss.visual_cases > 0 && <div><span className="text-slate-500">视觉:</span> <span>{ss.visual_cases}</span></div>}
+            </div>
+            <div className="flex gap-4 mt-3 pt-3 border-t border-indigo-100 text-sm">
+              <span className="text-green-700 font-semibold">通过: {ss.passed_cases}</span>
+              <span className="text-red-700 font-semibold">失败: {ss.failed_cases}</span>
+              <span className="text-slate-500">跳过: {ss.skipped_cases}</span>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* P2-8: UI Failure Analysis Summary */}
       {run && (() => {
         let ws = null

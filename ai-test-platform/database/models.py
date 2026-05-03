@@ -325,6 +325,43 @@ class AiReportAnalysis(Base):
     created_at = Column(DateTime, default=datetime.now)
 
 
+class TestSuite(Base):
+    """测试集表"""
+    __tablename__ = 'test_suites'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(300), nullable=False)
+    description = Column(Text)
+    project_id = Column(Integer, ForeignKey('projects.id'))
+    suite_type = Column(String(50), default='mixed')  # smoke/regression/release/api/web_ui/visual/performance/mixed
+    priority = Column(String(50), default='medium')  # critical/high/medium/low
+    status = Column(String(50), default='active')  # active/archived/deleted
+    created_by = Column(String(100), default='system')
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    # 关联
+    project = relationship("Project")
+    suite_cases = relationship("TestSuiteCase", back_populates="suite", cascade="all, delete-orphan")
+
+
+class TestSuiteCase(Base):
+    """测试集-用例关联表"""
+    __tablename__ = 'test_suite_cases'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    suite_id = Column(Integer, ForeignKey('test_suites.id'), nullable=False)
+    case_id = Column(String(100), ForeignKey('test_cases.id'), nullable=False)
+    case_type = Column(String(50), default='api')  # api/web_ui/visual/performance/functional
+    sort_order = Column(Integer, default=0)
+    enabled = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    # 关联
+    suite = relationship("TestSuite", back_populates="suite_cases")
+    test_case = relationship("TestCase")
+
+
 class RunStatusHistory(Base):
     """执行状态历史表"""
     __tablename__ = 'run_status_history'

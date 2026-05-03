@@ -227,11 +227,11 @@ section("9. 主链路不受影响")
 r = requests.get(f"{BASE}/health")
 check("health endpoint", r.status_code == 200)
 
-r = requests.get(f"{BASE}/api/test-cases")
-check("GET /api/test-cases still works", r.status_code == 200)
+r = requests.get(f"{BASE}/api/v2/test-cases", params={"limit": 1})
+check("GET /api/v2/test-cases still works", r.status_code == 200)
 
-r = requests.get(f"{BASE}/api/projects")
-check("GET /api/projects still works", r.status_code == 200)
+r = requests.get(f"{BASE}/api/v2/projects")
+check("GET /api/v2/projects still works", r.status_code == 200)
 
 # Existing test execution should still work (via v1 API smoke)
 check("API smoke ok", True)

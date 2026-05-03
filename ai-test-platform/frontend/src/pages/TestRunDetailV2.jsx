@@ -304,6 +304,7 @@ export default function TestRunDetailV2() {
           <span>创建: {fmt(run.created_at)}</span>
           <span>耗时: {fmtSec(run.duration)}</span>
           <span>触发: {run.trigger_type || 'manual'}</span>
+          {run.trigger_type === 'suite' && (() => { try { const s = JSON.parse(run.summary || '{}')?.suite_summary; return s ? <span className="text-blue-600">测试集: {s.suite_name} ({s.suite_type})</span> : null } catch { return null } })()}
           {run.trace_id && <span>Trace: <code className="font-mono">{run.trace_id}</code></span>}
         </div>
       </div>
