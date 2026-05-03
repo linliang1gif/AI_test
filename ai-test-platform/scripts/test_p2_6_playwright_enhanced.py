@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# P2-9B.1: Windows GBK 编码兼容
+import io, sys
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 """P2-6 Playwright 能力增强 测试脚本
 
 测试新增操作: press, double_click, clear, scroll, switch_frame, switch_main, eval_js, save_cookies

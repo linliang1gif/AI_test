@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# P2-9B.1: Windows GBK 编码兼容
+import io, sys
+if sys.stdout and getattr(sys.stdout, 'encoding', '').lower().replace('-', '') != 'utf8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if sys.stderr and getattr(sys.stderr, 'encoding', '').lower().replace('-', '') != 'utf8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 """
 P2-1 统一回归脚本
 运行所有回归测试并输出汇总结果。
 任何关键测试失败时返回非 0 退出码。
 """
 import subprocess
-import sys
 import time
 import os
 import shutil
