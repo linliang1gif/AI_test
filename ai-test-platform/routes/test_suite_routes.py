@@ -311,11 +311,24 @@ def run_suite(suite_id: int, req: RunSuiteRequest = RunSuiteRequest(), db: Sessi
     all_missing_vars = []
     all_binding_errors = []
     datasets_used_set = set()
+    all_validation_errors = []  # P3-3A
+    all_cleanup_results = []    # P3-3A
     try:
-        from services.test_data_service import resolve_variables, substitute
+        from services.test_data_service import resolve_variables, substitute, validate_case_data, execute_cleanup
         _has_data_service = True
     except Exception:
         _has_data_service = False
+
+    # P3-3A: 执行前数据校验
+    if _has_data_service:
+        for _ct, _cl in cases_by_type.items():
+            for _tc in _cl:
+                try:
+                    _valid, _errs, _warns = validate_case_data(_tc.id, db)
+                    all_validation_errors.extend(_errs)
+                    all_binding_errors.extend(_warns)
+                except Exception as _ve:
+                    all_validation_errors.append(f"validation error for {_tc.id}: {str(_ve)[:100]}")
 
     # 执行用例
     passed = 0
@@ -435,12 +448,28 @@ def run_suite(suite_id: int, req: RunSuiteRequest = RunSuiteRequest(), db: Sessi
     for ct, cl in cases_by_type.items():
         type_counts[f"{ct}_cases"] = len(cl)
 
-    # P3-2: data_summary
+    # P3-3A: 执行后清理
+    if _has_data_service:
+        for ds_id in datasets_used_set:
+            try:
+                from database.models import TestDataset as _TD
+                _ds = db.query(_TD).filter(_TD.id == ds_id).first()
+                if _ds and _ds.dataset_type == "cleanup_rule":
+                    _cr = execute_cleanup(ds_id, "", False, db)  # default dry_run
+                    all_cleanup_results.append({"dataset_id": ds_id, **_cr})
+            except Exception as _ce:
+                all_cleanup_results.append({"dataset_id": ds_id, "status": "failed", "error": str(_ce)[:200]})
+
+    # P3-2 + P3-3A: data_summary
     data_summary = {
         "datasets_used": len(datasets_used_set),
         "missing_variables": len(set(all_missing_vars)),
         "missing_variable_names": list(set(all_missing_vars))[:10],
         "data_binding_errors": len(all_binding_errors),
+        "data_validation_errors": len(all_validation_errors),
+        "data_validation_messages": all_validation_errors[:10],
+        "cleanup_results": all_cleanup_results[:10],
+        "cleanup_failed": sum(1 for r in all_cleanup_results if r.get("status") == "failed"),
     }
 
     suite_summary = {

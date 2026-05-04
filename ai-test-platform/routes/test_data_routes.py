@@ -12,7 +12,10 @@ from sqlalchemy import func
 
 from database import get_db
 from database.models import TestDataset, TestDatasetItem, TestDataBinding, TestCase
-from services.test_data_service import mask_sensitive, is_sensitive_key, resolve_variables, substitute
+from services.test_data_service import (
+    mask_sensitive, is_sensitive_key, resolve_variables, substitute,
+    validate_dataset, execute_cleanup,
+)
 
 router = APIRouter(prefix="/api/v2/test-data", tags=["测试数据管理"])
 
@@ -57,6 +60,11 @@ class BindingCreate(BaseModel):
 class SubstitutePreview(BaseModel):
     case_id: str
     template: Any = None
+
+class CleanupRequest(BaseModel):
+    dataset_id: int
+    case_id: str = ""
+    allow_cleanup: bool = False
 
 
 # ── Helpers ──────────────────────────────────────────────
@@ -312,3 +320,73 @@ def substitute_preview(req: SubstitutePreview, db: Session = Depends(get_db)):
             "warnings": warnings,
         }
     return {"variables": masked_vars, "warnings": warnings}
+
+
+# ── 13. Dataset health validation ──────────────────────
+
+@router.post("/datasets/{dataset_id}/validate")
+def validate_dataset_endpoint(dataset_id: int, db: Session = Depends(get_db)):
+    result = validate_dataset(dataset_id, db)
+    return result
+
+
+# ── 14. Clone dataset ──────────────────────────────────
+
+@router.post("/datasets/{dataset_id}/clone")
+def clone_dataset(dataset_id: int, copy_bindings: bool = False, db: Session = Depends(get_db)):
+    ds = db.query(TestDataset).filter(TestDataset.id == dataset_id).first()
+    if not ds:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+
+    new_ds = TestDataset(
+        name=f"{ds.name}-copy",
+        description=ds.description,
+        project_id=ds.project_id,
+        dataset_type=ds.dataset_type,
+        case_type=ds.case_type,
+        tags=list(ds.tags or []),
+    )
+    db.add(new_ds)
+    db.commit()
+    db.refresh(new_ds)
+
+    # 复制数据项
+    items = db.query(TestDatasetItem).filter(TestDatasetItem.dataset_id == dataset_id).all()
+    for item in items:
+        new_item = TestDatasetItem(
+            dataset_id=new_ds.id,
+            key=item.key,
+            value_json=item.value_json,
+            is_sensitive=item.is_sensitive,
+            enabled=item.enabled,
+            sort_order=item.sort_order,
+        )
+        db.add(new_item)
+
+    # 可选复制绑定
+    bindings_copied = 0
+    if copy_bindings:
+        bindings = db.query(TestDataBinding).filter(TestDataBinding.dataset_id == dataset_id).all()
+        for b in bindings:
+            new_b = TestDataBinding(
+                dataset_id=new_ds.id,
+                case_id=b.case_id,
+                binding_type=b.binding_type,
+            )
+            db.add(new_b)
+            bindings_copied += 1
+
+    db.commit()
+    result = _serialize_dataset(new_ds, db)
+    result["cloned_from"] = dataset_id
+    result["items_copied"] = len(items)
+    result["bindings_copied"] = bindings_copied
+    return result
+
+
+# ── 15. Cleanup run ────────────────────────────────────
+
+@router.post("/cleanup/run")
+def cleanup_run(req: CleanupRequest, db: Session = Depends(get_db)):
+    result = execute_cleanup(req.dataset_id, req.case_id, req.allow_cleanup, db)
+    return result

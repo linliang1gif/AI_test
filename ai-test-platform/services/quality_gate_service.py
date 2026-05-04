@@ -201,6 +201,35 @@ class QualityGateService:
             }
             warnings.append(entry)
 
+        # Rule 10 (P3-3A): data_validation_failed
+        validation_errors = data_summary.get("data_validation_errors", 0)
+        if validation_errors > 0:
+            dv_policy = cfg.get("data_validation_policy", "fail")
+            entry = {
+                "rule": "data_validation_failed",
+                "message": f"数据校验失败: {validation_errors} 个错误",
+                "severity": "blocker" if dv_policy == "fail" else "warning",
+                "details": data_summary.get("data_validation_messages", []),
+            }
+            if dv_policy == "fail":
+                failures.append(entry)
+            else:
+                warnings.append(entry)
+
+        # Rule 11 (P3-3A): cleanup_failed
+        cleanup_failed = data_summary.get("cleanup_failed", 0)
+        if cleanup_failed > 0:
+            cf_policy = cfg.get("cleanup_failure_policy", "warn")
+            entry = {
+                "rule": "cleanup_failed",
+                "message": f"清理失败: {cleanup_failed} 个清理操作失败",
+                "severity": "blocker" if cf_policy == "fail" else "warning",
+            }
+            if cf_policy == "fail":
+                failures.append(entry)
+            else:
+                warnings.append(entry)
+
         gate_status = "failed" if failures else "passed"
 
         return {

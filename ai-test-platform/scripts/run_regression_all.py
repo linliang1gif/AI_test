@@ -44,6 +44,7 @@ REGRESSION_SCRIPTS = [
     ("P2-10 Test Suite Management",    "scripts/test_p2_10_test_suite_management.py", True, False, None),
     ("P3-1 CI Quality Gate",           "scripts/test_p3_1_ci_quality_gate.py",  True, False, None),
     ("P3-2 Test Data Management",      "scripts/test_p3_2_test_data_management.py", True, False, None),
+    ("P3-3A Test Data Enhancement",    "scripts/test_p3_3a_test_data_enhancement.py", True, False, None),
     ("P1-8A AI Heal Guard",            "scripts/test_p1_8a_ai_heal_guard.py",   False, True,  None),
     ("P1-8 AI Case Review",            "scripts/test_p1_8_ai_case_review.py",   False, True,  None),
 ]

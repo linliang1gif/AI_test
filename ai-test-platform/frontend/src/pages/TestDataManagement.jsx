@@ -19,6 +19,7 @@ export default function TestDataManagement() {
   const [showDetail, setShowDetail] = useState(null)
   const [showAddItem, setShowAddItem] = useState(null)
   const [showBind, setShowBind] = useState(null)
+  const [healthResult, setHealthResult] = useState(null)
 
   const [form, setForm] = useState({ name: '', description: '', dataset_type: 'common_fixture', case_type: 'api', tags: [] })
   const [itemForm, setItemForm] = useState({ key: '', value_json: '', is_sensitive: false })
@@ -111,6 +112,19 @@ export default function TestDataManagement() {
     if (showDetail) openDetail(showDetail.id)
   }
 
+  const handleValidate = async (id) => {
+    try {
+      const r = await fetch(`${API}/datasets/${id}/validate`, { method: 'POST' })
+      const d = await r.json()
+      setHealthResult(d)
+    } catch (e) { console.error(e) }
+  }
+
+  const handleClone = async (id) => {
+    const r = await fetch(`${API}/datasets/${id}/clone`, { method: 'POST' })
+    if (r.ok) fetchDatasets()
+  }
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex justify-between items-center mb-6">
@@ -164,6 +178,8 @@ export default function TestDataManagement() {
                   <div className="flex justify-center gap-1">
                     <button onClick={() => { setShowAddItem(ds) }} className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100">添加数据</button>
                     <button onClick={() => openBind(ds)} className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100">绑定用例</button>
+                    <button onClick={() => handleValidate(ds.id)} className="px-2 py-1 text-xs bg-amber-50 text-amber-700 rounded hover:bg-amber-100">健康检查</button>
+                    <button onClick={() => handleClone(ds.id)} className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100">复制</button>
                     <button onClick={() => openEdit(ds)} className="px-2 py-1 text-xs bg-slate-50 text-slate-600 rounded hover:bg-slate-100">编辑</button>
                     <button onClick={() => handleDelete(ds.id)} className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100">删除</button>
                   </div>
@@ -254,7 +270,15 @@ export default function TestDataManagement() {
               </table>
             ) : <p className="text-sm text-slate-400 py-2 text-center mb-4">暂无数据项</p>}
 
-            <button onClick={() => setShowAddItem(showDetail)} className="px-3 py-1.5 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100 mb-4">+ 添加数据项</button>
+            <div className="flex gap-2 mb-4">
+              <button onClick={() => setShowAddItem(showDetail)} className="px-3 py-1.5 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100">+ 添加数据项</button>
+              <button onClick={() => handleValidate(showDetail.id)} className="px-3 py-1.5 text-xs bg-amber-50 text-amber-700 rounded hover:bg-amber-100">健康检查</button>
+            </div>
+            {showDetail.dataset_type === 'cleanup_rule' && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4 text-xs text-amber-800">
+                <strong>清理规则说明:</strong> 数据项的 value 应为 JSON 格式 {'{"method": "DELETE", "url": "/api/...", "headers": {}, "body": {}}'}
+              </div>
+            )}
 
             {/* Bindings */}
             <h3 className="font-semibold text-sm text-slate-700 mb-2">绑定用例 ({showDetail.bindings?.length || 0})</h3>
@@ -313,6 +337,50 @@ export default function TestDataManagement() {
       )}
 
       {/* Bind Dialog */}
+      {/* Health Check Result */}
+      {healthResult && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-[500px] max-h-[70vh] overflow-y-auto shadow-2xl">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold">数据集健康检查</h2>
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${healthResult.valid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                {healthResult.valid ? '✓ 健康' : '✗ 异常'}
+              </span>
+            </div>
+            {healthResult.errors?.length > 0 && (
+              <div className="mb-3">
+                <h3 className="text-sm font-semibold text-red-600 mb-1">错误 ({healthResult.errors.length})</h3>
+                {healthResult.errors.map((e, i) => <p key={i} className="text-xs text-red-600 bg-red-50 p-2 rounded mb-1">{e}</p>)}
+              </div>
+            )}
+            {healthResult.warnings?.length > 0 && (
+              <div className="mb-3">
+                <h3 className="text-sm font-semibold text-amber-600 mb-1">警告 ({healthResult.warnings.length})</h3>
+                {healthResult.warnings.map((w, i) => <p key={i} className="text-xs text-amber-700 bg-amber-50 p-2 rounded mb-1">{w}</p>)}
+              </div>
+            )}
+            {healthResult.sensitive_fields?.length > 0 && (
+              <div className="mb-3">
+                <h3 className="text-sm font-semibold text-slate-600 mb-1">敏感字段</h3>
+                <div className="flex flex-wrap gap-1">{healthResult.sensitive_fields.map((f, i) => <span key={i} className="px-2 py-0.5 bg-red-50 text-red-600 rounded text-xs">{f}</span>)}</div>
+              </div>
+            )}
+            {healthResult.suggestions?.length > 0 && (
+              <div className="mb-3">
+                <h3 className="text-sm font-semibold text-blue-600 mb-1">建议</h3>
+                {healthResult.suggestions.map((s, i) => <p key={i} className="text-xs text-blue-700 bg-blue-50 p-2 rounded mb-1">{s}</p>)}
+              </div>
+            )}
+            {healthResult.errors?.length === 0 && healthResult.warnings?.length === 0 && (
+              <p className="text-sm text-green-600 text-center py-4">所有检查项均通过</p>
+            )}
+            <div className="flex justify-end mt-4">
+              <button onClick={() => setHealthResult(null)} className="px-4 py-2 border rounded-lg text-sm">关闭</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showBind && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 w-[500px] shadow-2xl">
