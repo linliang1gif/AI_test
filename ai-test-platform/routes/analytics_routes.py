@@ -1,12 +1,7 @@
 """
-P3-4A: 质量驾驶舱 API 路由
-GET /api/v2/analytics/overview
-GET /api/v2/analytics/test-suite-trend
-GET /api/v2/analytics/gate-trend
-GET /api/v2/analytics/failure-modules
-GET /api/v2/analytics/failure-categories
-GET /api/v2/analytics/defect-summary
-GET /api/v2/analytics/data-issues
+P3-4A/B: 质量驾驶舱 API 路由
+P3-4A: overview / test-suite-trend / gate-trend / failure-modules / failure-categories / defect-summary / data-issues
+P3-4B: case-trend / defect-trend / data-issue-trend / flaky-trend / performance-trend / visual-trend / module-risk / quality-regression
 """
 from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
@@ -20,6 +15,14 @@ from services.analytics_service import (
     get_failure_categories,
     get_defect_summary,
     get_data_issues,
+    get_case_trend,
+    get_defect_trend,
+    get_data_issue_trend,
+    get_flaky_trend,
+    get_performance_trend,
+    get_visual_trend,
+    get_module_risk,
+    get_quality_regression,
     MAX_DAYS,
 )
 
@@ -103,3 +106,86 @@ def api_data_issues(
 ):
     days = _validate_days(days)
     return get_data_issues(db, project_id=project_id, days=days)
+
+
+# ── P3-4B: 趋势 + 风险 ──────────────────────────────────────
+
+@router.get("/case-trend")
+def api_case_trend(
+    project_id: Optional[int] = Query(None),
+    days: int = Query(14, ge=1),
+    db: Session = Depends(get_db),
+):
+    days = _validate_days(days)
+    return get_case_trend(db, project_id=project_id, days=days)
+
+
+@router.get("/defect-trend")
+def api_defect_trend(
+    project_id: Optional[int] = Query(None),
+    days: int = Query(14, ge=1),
+    db: Session = Depends(get_db),
+):
+    days = _validate_days(days)
+    return get_defect_trend(db, project_id=project_id, days=days)
+
+
+@router.get("/data-issue-trend")
+def api_data_issue_trend(
+    project_id: Optional[int] = Query(None),
+    days: int = Query(14, ge=1),
+    db: Session = Depends(get_db),
+):
+    days = _validate_days(days)
+    return get_data_issue_trend(db, project_id=project_id, days=days)
+
+
+@router.get("/flaky-trend")
+def api_flaky_trend(
+    project_id: Optional[int] = Query(None),
+    days: int = Query(14, ge=1),
+    db: Session = Depends(get_db),
+):
+    days = _validate_days(days)
+    return get_flaky_trend(db, project_id=project_id, days=days)
+
+
+@router.get("/performance-trend")
+def api_performance_trend(
+    project_id: Optional[int] = Query(None),
+    days: int = Query(14, ge=1),
+    db: Session = Depends(get_db),
+):
+    days = _validate_days(days)
+    return get_performance_trend(db, project_id=project_id, days=days)
+
+
+@router.get("/visual-trend")
+def api_visual_trend(
+    project_id: Optional[int] = Query(None),
+    days: int = Query(14, ge=1),
+    db: Session = Depends(get_db),
+):
+    days = _validate_days(days)
+    return get_visual_trend(db, project_id=project_id, days=days)
+
+
+@router.get("/module-risk")
+def api_module_risk(
+    project_id: Optional[int] = Query(None),
+    days: int = Query(14, ge=1),
+    module: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    days = _validate_days(days)
+    return get_module_risk(db, project_id=project_id, days=days, module=module)
+
+
+@router.get("/quality-regression")
+def api_quality_regression(
+    project_id: Optional[int] = Query(None),
+    days: int = Query(7, ge=1),
+    db: Session = Depends(get_db),
+):
+    days = _validate_days(days)
+    return get_quality_regression(db, project_id=project_id, days=days)
