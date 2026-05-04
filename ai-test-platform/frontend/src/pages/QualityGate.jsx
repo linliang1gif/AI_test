@@ -80,8 +80,11 @@ export default function QualityGate() {
               <select value={selectedSuite} onChange={e => setSelectedSuite(e.target.value)}
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
                 <option value="">选择测试集...</option>
-                {suites.filter(s => s.status === 'active').map(s => (
-                  <option key={s.id} value={s.id}>{s.name} ({s.suite_type}) — {s.case_count || 0} 用例</option>
+                {suites
+                  .filter(s => s.status === 'active' && (s.case_count || 0) > 0)
+                  .sort((a, b) => (b.case_count || 0) - (a.case_count || 0))
+                  .map(s => (
+                  <option key={s.id} value={s.id}>{s.name} ({s.suite_type}) — {s.case_count} 用例</option>
                 ))}
               </select>
             </div>

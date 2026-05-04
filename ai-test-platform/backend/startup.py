@@ -137,6 +137,34 @@ def _run_migrations():
         logger.warning(f"P2-10 迁移失败: {e}")
 
 
+    # P3-2 test_datasets + test_dataset_items + test_data_bindings 表
+    try:
+        from database import get_db_session
+        from sqlalchemy import inspect as sa_inspect
+        with get_db_session() as db:
+            inspector = sa_inspect(db.bind)
+            tables = inspector.get_table_names()
+            created = []
+            if "test_datasets" not in tables:
+                from database.models import TestDataset
+                TestDataset.__table__.create(db.bind)
+                created.append("test_datasets")
+            if "test_dataset_items" not in tables:
+                from database.models import TestDatasetItem
+                TestDatasetItem.__table__.create(db.bind)
+                created.append("test_dataset_items")
+            if "test_data_bindings" not in tables:
+                from database.models import TestDataBinding
+                TestDataBinding.__table__.create(db.bind)
+                created.append("test_data_bindings")
+            if created:
+                logger.info(f"P3-2 迁移: 已创建 {created}")
+            else:
+                logger.info("P3-2 test_datasets/test_dataset_items/test_data_bindings 表已存在")
+    except Exception as e:
+        logger.warning(f"P3-2 迁移失败: {e}")
+
+
 def _init_optional_modules():
     """初始化可选模块，失败不阻塞"""
     # Pilot Backend

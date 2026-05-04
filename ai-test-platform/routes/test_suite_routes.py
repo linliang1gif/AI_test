@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database.session import get_db
-from database.models import TestSuite, TestSuiteCase, TestCase, TestRun, RunCase
+from database.models import TestSuite, TestSuiteCase, TestCase, TestRun, RunCase, TestDataBinding
 
 logger = logging.getLogger("test_suite_routes")
 
@@ -307,6 +307,16 @@ def run_suite(suite_id: int, req: RunSuiteRequest = RunSuiteRequest(), db: Sessi
     db.add(test_run)
     db.commit()
 
+    # P3-2: 变量替换准备
+    all_missing_vars = []
+    all_binding_errors = []
+    datasets_used_set = set()
+    try:
+        from services.test_data_service import resolve_variables, substitute
+        _has_data_service = True
+    except Exception:
+        _has_data_service = False
+
     # 执行用例
     passed = 0
     failed = 0
@@ -328,6 +338,23 @@ def run_suite(suite_id: int, req: RunSuiteRequest = RunSuiteRequest(), db: Sessi
             db.add(rc)
             db.commit()
             db.refresh(rc)
+
+            # P3-2: 变量替换
+            if _has_data_service:
+                try:
+                    _vars, _warns = resolve_variables(tc.id, db)
+                    if _vars:
+                        for _b in db.query(TestDataBinding).filter(TestDataBinding.case_id == tc.id).all():
+                            datasets_used_set.add(_b.dataset_id)
+                        if tc.execution_config:
+                            tc.execution_config, _, _miss = substitute(tc.execution_config, _vars)
+                            all_missing_vars.extend(_miss)
+                        if tc.steps:
+                            tc.steps, _, _miss = substitute(tc.steps, _vars)
+                            all_missing_vars.extend(_miss)
+                    all_binding_errors.extend(_warns)
+                except Exception as _de:
+                    all_binding_errors.append(f"data resolve error for {tc.id}: {str(_de)[:100]}")
 
             try:
                 if case_type == "functional":
@@ -408,6 +435,14 @@ def run_suite(suite_id: int, req: RunSuiteRequest = RunSuiteRequest(), db: Sessi
     for ct, cl in cases_by_type.items():
         type_counts[f"{ct}_cases"] = len(cl)
 
+    # P3-2: data_summary
+    data_summary = {
+        "datasets_used": len(datasets_used_set),
+        "missing_variables": len(set(all_missing_vars)),
+        "missing_variable_names": list(set(all_missing_vars))[:10],
+        "data_binding_errors": len(all_binding_errors),
+    }
+
     suite_summary = {
         "suite_id": suite.id,
         "suite_name": suite.name,
@@ -418,6 +453,7 @@ def run_suite(suite_id: int, req: RunSuiteRequest = RunSuiteRequest(), db: Sessi
         "failed_cases": failed,
         "skipped_cases": skipped,
         "duration_ms": duration_ms,
+        "data_summary": data_summary,
     }
 
     # 更新 test_run

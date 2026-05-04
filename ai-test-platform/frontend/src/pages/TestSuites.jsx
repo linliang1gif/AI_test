@@ -72,7 +72,7 @@ export default function TestSuites() {
     setShowAddCases(suite)
     const r = await fetch('/api/v2/test-cases?limit=200')
     const d = await r.json()
-    setAvailableCases(d.data || d || [])
+    setAvailableCases(d.data || d.test_cases || d || [])
     setSelectedCases([])
   }
 

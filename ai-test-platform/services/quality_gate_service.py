@@ -188,6 +188,19 @@ class QualityGateService:
             else:
                 warnings.append(entry)
 
+        # Rule 9 (P3-2): data_missing — check data_summary for missing variables
+        data_summary = suite_summary.get("data_summary", {})
+        missing_vars = data_summary.get("missing_variables", 0)
+        binding_errors = data_summary.get("data_binding_errors", 0)
+        if missing_vars > 0 or binding_errors > 0:
+            entry = {
+                "rule": "data_missing",
+                "message": f"数据缺失: {missing_vars} 个变量未解析, {binding_errors} 个绑定错误",
+                "severity": "warning",
+                "missing_variable_names": data_summary.get("missing_variable_names", []),
+            }
+            warnings.append(entry)
+
         gate_status = "failed" if failures else "passed"
 
         return {

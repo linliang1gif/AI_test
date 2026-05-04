@@ -362,6 +362,56 @@ class TestSuiteCase(Base):
     test_case = relationship("TestCase")
 
 
+class TestDataset(Base):
+    """测试数据集"""
+    __tablename__ = 'test_datasets'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(200), nullable=False)
+    description = Column(Text, default='')
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=True)
+    dataset_type = Column(String(50), default='common_fixture')  # account/api_payload/ui_form/performance_pool/common_fixture/cleanup_rule
+    case_type = Column(String(50), default='api')  # api/web_ui/visual/performance
+    status = Column(String(50), default='active')  # active/archived/deleted
+    tags = Column(JSON, default=list)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    items = relationship("TestDatasetItem", back_populates="dataset", cascade="all, delete-orphan")
+    bindings = relationship("TestDataBinding", back_populates="dataset", cascade="all, delete-orphan")
+
+
+class TestDatasetItem(Base):
+    """测试数据集数据项"""
+    __tablename__ = 'test_dataset_items'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    dataset_id = Column(Integer, ForeignKey('test_datasets.id'), nullable=False)
+    key = Column(String(200), nullable=False)
+    value_json = Column(JSON, default=None)
+    is_sensitive = Column(Boolean, default=False)
+    enabled = Column(Boolean, default=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    dataset = relationship("TestDataset", back_populates="items")
+
+
+class TestDataBinding(Base):
+    """测试数据集-用例绑定"""
+    __tablename__ = 'test_data_bindings'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    dataset_id = Column(Integer, ForeignKey('test_datasets.id'), nullable=False)
+    case_id = Column(String(100), ForeignKey('test_cases.id'), nullable=False)
+    binding_type = Column(String(50), default='input')  # input/fixture/cleanup
+    created_at = Column(DateTime, default=datetime.now)
+
+    dataset = relationship("TestDataset", back_populates="bindings")
+    test_case = relationship("TestCase")
+
+
 class RunStatusHistory(Base):
     """执行状态历史表"""
     __tablename__ = 'run_status_history'
