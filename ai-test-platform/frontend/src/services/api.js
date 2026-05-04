@@ -252,21 +252,21 @@ export const api = {
   datasets: {
     getAll: (params = {}) => {
       const query = new URLSearchParams(params).toString()
-      return request(`${API_BASE_URL}/test-data/datasets${query ? '?' + query : ''}`)
+      return request(`${PILOT_API_BASE_URL}/test-data/datasets${query ? '?' + query : ''}`)
     },
-    create: (data) => request(`${API_BASE_URL}/test-data/datasets`, {
+    create: (data) => request(`${PILOT_API_BASE_URL}/test-data/datasets`, {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-    get: (id) => request(`${API_BASE_URL}/test-data/datasets/${id}`),
-    update: (id, data) => request(`${API_BASE_URL}/test-data/datasets/${id}`, {
+    get: (id) => request(`${PILOT_API_BASE_URL}/test-data/datasets/${id}`),
+    update: (id, data) => request(`${PILOT_API_BASE_URL}/test-data/datasets/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
-    delete: (id) => request(`${API_BASE_URL}/test-data/datasets/${id}`, {
+    delete: (id) => request(`${PILOT_API_BASE_URL}/test-data/datasets/${id}`, {
       method: 'DELETE',
     }),
-    use: (id) => request(`${API_BASE_URL}/test-data/datasets/${id}/use`, {
+    use: (id) => request(`${PILOT_API_BASE_URL}/test-data/datasets/${id}/use`, {
       method: 'POST',
     }),
   },

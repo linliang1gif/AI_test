@@ -194,7 +194,7 @@ export default function TestCases() {
   const loadDatasets = async () => {
     try {
       const result = await api.datasets.getAll()
-      setDatasets(result.datasets || [])
+      setDatasets(result.data || result.datasets || [])
     } catch (error) {
       console.error('加载数据集失败:', error)
     }
