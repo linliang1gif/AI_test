@@ -87,6 +87,29 @@ def wait_for_backend(url: str, max_wait: int = 60) -> bool:
     return False
 
 
+def ensure_backend_ready(url: str, max_wait: int = 30, label: str = "") -> bool:
+    """每个脚本执行前确认后端可用: 优先 /readiness, 回退 /health, 最多重试 max_wait 秒."""
+    for i in range(max_wait):
+        # 优先 /readiness
+        try:
+            r = requests.get(f"{url}/readiness", timeout=3)
+            if r.ok:
+                return True
+        except Exception:
+            pass
+        # 回退 /health
+        try:
+            r = requests.get(f"{url}/health", timeout=3)
+            if r.ok:
+                return True
+        except Exception:
+            pass
+        time.sleep(1)
+    tag = f" ({label})" if label else ""
+    print(f"  ⚠️ Backend readiness timeout ({max_wait}s){tag}")
+    return False
+
+
 # ── 后端生命周期管理 ──────────────────────────────────
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _backend_proc = None
@@ -226,6 +249,13 @@ def main():
         print(f"▶ {name}")
         print(f"  {path}")
         print(f"{'─'*50}")
+        # P3-4A.1: 每个脚本执行前确认后端 readiness
+        if not ensure_backend_ready(BASE_URL, max_wait=30, label=name):
+            results.append({"status": "FAIL", "name": name, "duration": 0,
+                            "reason": "Backend readiness timeout", "ext_dep": ext_dep})
+            icon = "❌"
+            print(f"  {icon} FAIL  (Backend readiness timeout)")
+            continue
         r = run_script(name, path)
         r["ext_dep"] = ext_dep
         # 外部 API 依赖失败 -> XFAIL（仅限 external_api，浏览器可用时不自动 XFAIL）

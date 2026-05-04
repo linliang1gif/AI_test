@@ -15,7 +15,7 @@ P2-3 Web UI 用例模型 — 回归测试脚本
 10. functional 用例不受影响
 11. Web UI 用例执行时返回友好提示
 """
-import sys, os, requests, json
+import sys, os, requests, json, time
 
 BASE = os.getenv("BACKEND_URL", "http://localhost:8000")
 PASS = FAIL = SKIP = TOTAL = 0
@@ -38,11 +38,29 @@ def api(method, path, **kw):
     return r
 
 
+def wait_for_backend(max_wait=30):
+    """等待后端就绪: 优先 /readiness, 回退 /health, 最多 max_wait 秒."""
+    for i in range(max_wait):
+        for endpoint in ["/readiness", "/health"]:
+            try:
+                r = requests.get(f"{BASE}{endpoint}", timeout=3)
+                if r.ok:
+                    return True
+            except Exception:
+                pass
+        time.sleep(1)
+    print(f"  ❌ Backend readiness timeout ({max_wait}s)")
+    return False
+
+
 # ── 0. Health ───────────────────────────────────────
 print("\n" + "=" * 60)
 print("  P2-3 Web UI Case Model Tests")
 print("=" * 60)
 
+if not wait_for_backend():
+    print("❌ 后端未就绪，测试中止")
+    sys.exit(1)
 h = api("get", "/health")
 check("Backend healthy", h.ok, h.text[:200])
 
@@ -100,13 +118,13 @@ check("execution_config.base_url 保存", ec.get("base_url") == "http://localhos
 
 # ── 3. 列表和筛选 ──────────────────────────────────
 print("\n── 列表和筛选 ──")
-r3 = api("get", "/api/v2/test-cases", params={"case_type": "web_ui", "limit": 500})
+r3 = api("get", "/api/v2/test-cases", params={"case_type": "web_ui", "limit": 5000})
 check("列表查询成功", r3.ok)
 all_cases = r3.json().get("test_cases", [])
 webui_found = any(c["id"] == webui_id for c in all_cases)
 check("列表中能找到 Web UI 用例", webui_found)
 
-r4 = api("get", "/api/v2/test-cases", params={"case_type": "web_ui", "limit": 500})
+r4 = api("get", "/api/v2/test-cases", params={"case_type": "web_ui", "limit": 5000})
 check("case_type=web_ui 筛选成功", r4.ok)
 filtered = r4.json().get("test_cases", [])
 check("筛选结果包含刚创建的用例", any(c["id"] == webui_id for c in filtered))
