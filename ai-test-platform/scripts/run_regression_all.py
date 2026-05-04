@@ -42,6 +42,7 @@ REGRESSION_SCRIPTS = [
     ("P2-8 AI UI Failure Analysis",   "scripts/test_p2_8_ai_ui_failure_analysis.py", True, False, "browser"),
     ("P2-9B Web UI Stability",        "scripts/test_p2_9b_web_ui_stability.py",  True, False, "browser"),
     ("P2-10 Test Suite Management",    "scripts/test_p2_10_test_suite_management.py", True, False, None),
+    ("P3-1 CI Quality Gate",           "scripts/test_p3_1_ci_quality_gate.py",  True, False, None),
     ("P1-8A AI Heal Guard",            "scripts/test_p1_8a_ai_heal_guard.py",   False, True,  None),
     ("P1-8 AI Case Review",            "scripts/test_p1_8_ai_case_review.py",   False, True,  None),
 ]

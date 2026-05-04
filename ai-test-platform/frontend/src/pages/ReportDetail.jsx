@@ -2,6 +2,46 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { reportsAPI } from '../services/api'
 
+function GatePanel({ runId }) {
+  const [result, setResult] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const evaluate = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/v2/quality-gates/evaluate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_id: runId })
+      })
+      setResult(await res.json())
+    } catch (err) {
+      setResult({ gate_status: 'error', gate_failures: [{ rule: 'error', message: err.message, severity: 'blocker' }] })
+    } finally { setLoading(false) }
+  }
+  return (
+    <div className="bg-white rounded-xl shadow-sm border p-4 flex items-center gap-4">
+      <button onClick={evaluate} disabled={loading}
+        className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium hover:bg-indigo-700 disabled:opacity-50">
+        {loading ? '评估中...' : '质量门禁评估'}
+      </button>
+      {result && (
+        <div className="flex-1">
+          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${
+            result.gate_status === 'passed' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+          }`}>
+            {result.gate_status === 'passed' ? '✅ Gate Passed' : '❌ Gate Failed'}
+          </span>
+          {result.gate_failures?.map((f, i) => (
+            <div key={i} className="text-xs text-red-600 mt-1">⛔ [{f.rule}] {f.message}</div>
+          ))}
+          {result.gate_warnings?.map((w, i) => (
+            <div key={i} className="text-xs text-yellow-600 mt-1">⚠️ [{w.rule}] {w.message}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ReportDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -213,6 +253,9 @@ export default function ReportDetail() {
           </div>
         )
       })()}
+
+      {/* P3-1: Quality Gate */}
+      {run && <GatePanel runId={run.id} />}
 
       {/* P2-8: UI Failure Analysis Summary */}
       {run && (() => {

@@ -1,4 +1,4 @@
-name: CI - Regression Tests
+name: CI - Regression + Quality Gate
 
 on:
   push:
@@ -11,6 +11,7 @@ env:
   USE_MOCK_DATA: "false"
   AI_PROVIDER: none
   TESTING: "true"
+  TESTING_KEY: ${{ secrets.TESTING_KEY || 'ci-test-key-auto' }}
   PYTHONIOENCODING: utf-8
 
 jobs:
@@ -31,24 +32,23 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Start backend
-        run: |
-          python backend_api_server.py &
-          echo "Waiting for backend..."
-          for i in $(seq 1 30); do
-            if python -c "import requests; r=requests.get('http://localhost:8000/health',timeout=2); exit(0 if r.ok else 1)" 2>/dev/null; then
-              echo "Backend ready (${i}s)"
-              break
-            fi
-            sleep 1
-          done
+      - name: Install Playwright Chromium
+        run: python -m playwright install chromium || true
 
-      - name: Run regression tests
+      - name: Run regression tests (managed backend)
         run: python scripts/run_regression_all.py
 
-      - name: Stop backend
+      - name: Upload regression artifacts
         if: always()
-        run: pkill -f backend_api_server.py || true
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-artifacts
+          path: |
+            data/regression_backend.log
+            data/reports/
+            data/artifacts/
+          retention-days: 7
+          if-no-files-found: ignore
 
   frontend-build:
     name: Frontend Build Check

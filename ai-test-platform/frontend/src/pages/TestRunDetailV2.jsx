@@ -79,6 +79,8 @@ export default function TestRunDetailV2() {
   const [faLoading, setFaLoading] = useState(false)
   const [faResults, setFaResults] = useState([])
   const [faSummary, setFaSummary] = useState(null)
+  const [gateResult, setGateResult] = useState(null)
+  const [gateLoading, setGateLoading] = useState(false)
 
   useEffect(() => { loadRunDetail(); checkReport() }, [runId])
 
@@ -121,6 +123,20 @@ export default function TestRunDetailV2() {
     } catch {}
   }
   useEffect(() => { loadFailureAnalysis() }, [runId])
+
+  const evaluateGate = async () => {
+    try {
+      setGateLoading(true)
+      const res = await fetch('/api/v2/quality-gates/evaluate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ run_id: runId })
+      })
+      const data = await res.json()
+      setGateResult(data)
+    } catch (err) {
+      setGateResult({ gate_status: 'error', gate_failures: [{ rule: 'fetch_error', message: err.message, severity: 'blocker' }] })
+    } finally { setGateLoading(false) }
+  }
 
   const handleRunFailureAnalysis = async () => {
     try {
@@ -307,6 +323,37 @@ export default function TestRunDetailV2() {
           {run.trigger_type === 'suite' && (() => { try { const s = JSON.parse(run.summary || '{}')?.suite_summary; return s ? <span className="text-blue-600">测试集: {s.suite_name} ({s.suite_type})</span> : null } catch { return null } })()}
           {run.trace_id && <span>Trace: <code className="font-mono">{run.trace_id}</code></span>}
         </div>
+      </div>
+
+      {/* ═══ 质量门禁 ═══ */}
+      <div className="bg-white rounded-xl shadow-sm p-5 mt-4 flex items-center gap-4">
+        <button onClick={evaluateGate} disabled={gateLoading}
+          className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 disabled:opacity-50">
+          {gateLoading ? '评估中...' : '质量门禁评估'}
+        </button>
+        {gateResult && (
+          <div className="flex-1">
+            <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-semibold ${
+              gateResult.gate_status === 'passed' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+            }`}>
+              {gateResult.gate_status === 'passed' ? '✅ Gate Passed' : '❌ Gate Failed'}
+            </span>
+            {gateResult.gate_failures?.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {gateResult.gate_failures.map((f, i) => (
+                  <div key={i} className="text-xs text-red-600">⛔ [{f.rule}] {f.message}</div>
+                ))}
+              </div>
+            )}
+            {gateResult.gate_warnings?.length > 0 && (
+              <div className="mt-1 space-y-1">
+                {gateResult.gate_warnings.map((w, i) => (
+                  <div key={i} className="text-xs text-yellow-600">⚠️ [{w.rule}] {w.message}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ═══ Tab 导航 ═══ */}

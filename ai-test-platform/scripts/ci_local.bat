@@ -1,14 +1,16 @@
 @echo off
 chcp 65001 >nul
 echo ======================================================
-echo   AI Test Platform - 本地 CI 回归
+echo   AI Test Platform - 本地 CI 回归 + 质量门禁
 echo ======================================================
 
 set PYTHONIOENCODING=utf-8
+set TESTING=true
+set TESTING_KEY=regression-test-key-auto
 
 REM ── Step 1: 前端构建 ──
 echo.
-echo [Step 1/4] 前端构建检查...
+echo [Step 1/3] 前端构建检查...
 cd /d "%~dp0\..\frontend"
 call npm run build
 if %ERRORLEVEL% NEQ 0 (
@@ -17,45 +19,26 @@ if %ERRORLEVEL% NEQ 0 (
 )
 echo ✅ 前端构建成功
 
-REM ── Step 2: 启动后端 ──
+REM ── Step 2: 运行回归测试（自动管理后端） ──
 echo.
-echo [Step 2/4] 启动后端 (TESTING=true)...
+echo [Step 2/3] 运行回归测试...
 cd /d "%~dp0\.."
-set TESTING=true
-start /b python backend_api_server.py > nul 2>&1
-
-REM 等待后端就绪
-echo 等待后端 /health ...
-set /a WAIT=0
-:WAIT_LOOP
-if %WAIT% GEQ 30 (
-    echo ❌ 后端启动超时
-    exit /b 1
-)
-timeout /t 1 /nobreak >nul
-python -c "import requests; r=requests.get('http://localhost:8000/health',timeout=2); exit(0 if r.ok else 1)" >nul 2>&1
-if %ERRORLEVEL% NEQ 0 (
-    set /a WAIT=%WAIT%+1
-    goto WAIT_LOOP
-)
-echo ✅ 后端就绪
-
-REM ── Step 3: 运行回归测试 ──
-echo.
-echo [Step 3/4] 运行回归测试...
 python scripts/run_regression_all.py
 set REGRESS_RC=%ERRORLEVEL%
 
-REM ── Step 4: 清理 ──
-echo.
-echo [Step 4/4] 清理...
-taskkill /f /im python.exe >nul 2>&1
-
 if %REGRESS_RC% NEQ 0 (
     echo.
-    echo ❌ CI 失败 (exit code: %REGRESS_RC%)
+    echo ❌ 回归测试失败 (exit code: %REGRESS_RC%)
     exit /b %REGRESS_RC%
 )
+echo ✅ 回归测试通过
+
+REM ── Step 3: 质量门禁（可选，需要指定 suite-id） ──
+echo.
+echo [Step 3/3] 质量门禁检查 (可选)...
+REM 如需执行质量门禁，取消下行注释并指定 suite-id:
+REM python scripts/ci_quality_gate.py --suite-id 1 --gate-config configs/quality_gate.json --output data/reports/ci_gate_result.json
+echo   (跳过 - 未指定 suite-id)
 
 echo.
 echo ======================================================
