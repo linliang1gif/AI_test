@@ -2,6 +2,39 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { reportsAPI } from '../services/api'
 
+function DefectSummaryPanel({ runId }) {
+  const [summary, setSummary] = useState(null)
+  useEffect(() => {
+    if (!runId) return
+    fetch(`/api/v2/defects/summary/for-gate?run_id=${runId}`)
+      .then(r => r.json()).then(setSummary).catch(() => {})
+  }, [runId])
+  if (!summary || summary.linked_defects === 0) return null
+  return (
+    <div className="bg-white rounded-xl shadow-sm border p-4">
+      <h2 className="font-semibold text-slate-900 mb-3">缺陷摘要</h2>
+      <div className="grid grid-cols-4 gap-3">
+        <div className="bg-slate-50 rounded-lg p-3 text-center">
+          <div className="text-xl font-bold">{summary.linked_defects}</div>
+          <div className="text-xs text-slate-500">关联缺陷</div>
+        </div>
+        <div className="bg-red-50 rounded-lg p-3 text-center">
+          <div className="text-xl font-bold text-red-600">{summary.open_defects}</div>
+          <div className="text-xs text-red-600">未关闭</div>
+        </div>
+        <div className="bg-amber-50 rounded-lg p-3 text-center">
+          <div className="text-xl font-bold text-amber-600">{summary.known_issues}</div>
+          <div className="text-xs text-amber-600">已知问题</div>
+        </div>
+        <div className={`rounded-lg p-3 text-center ${summary.blocker_defects > 0 ? 'bg-red-100' : 'bg-green-50'}`}>
+          <div className={`text-xl font-bold ${summary.blocker_defects > 0 ? 'text-red-700' : 'text-green-600'}`}>{summary.blocker_defects}</div>
+          <div className={`text-xs ${summary.blocker_defects > 0 ? 'text-red-600' : 'text-green-600'}`}>Blocker</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function GatePanel({ runId }) {
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -256,6 +289,9 @@ export default function ReportDetail() {
 
       {/* P3-1: Quality Gate */}
       {run && <GatePanel runId={run.id} />}
+
+      {/* P3-3B: Defect Summary */}
+      {run && <DefectSummaryPanel runId={run.id} />}
 
       {/* P2-8: UI Failure Analysis Summary */}
       {run && (() => {

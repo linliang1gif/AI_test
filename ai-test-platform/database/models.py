@@ -412,6 +412,54 @@ class TestDataBinding(Base):
     test_case = relationship("TestCase")
 
 
+class Defect(Base):
+    """缺陷主表"""
+    __tablename__ = 'defects'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String(500), nullable=False)
+    description = Column(Text, default='')
+    project_id = Column(Integer, default=None)
+    module = Column(String(200), default='')
+    severity = Column(String(50), default='major')        # blocker/critical/major/minor/trivial
+    priority = Column(String(10), default='P2')            # P0/P1/P2/P3
+    status = Column(String(50), default='open')            # open/confirmed/fixed/verified/closed/rejected/reopened
+    source = Column(String(50), default='manual')          # manual/run_failure/failure_analysis/quality_gate/visual_diff/performance_regression/data_issue
+    failure_category = Column(String(100), default='')
+    case_id = Column(String(100), default=None)
+    run_id = Column(String(100), default=None)
+    run_case_id = Column(String(100), default=None)
+    report_id = Column(String(100), default=None)
+    trace_path = Column(String(500), default=None)
+    screenshot_path = Column(String(500), default=None)
+    evidence_json = Column(JSON, default=None)
+    duplicate_key = Column(String(500), default=None)
+    created_by = Column(String(100), default='system')
+    assigned_to = Column(String(100), default=None)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    closed_at = Column(DateTime, default=None)
+
+    events = relationship("DefectEvent", back_populates="defect", cascade="all, delete-orphan", order_by="DefectEvent.created_at")
+
+
+class DefectEvent(Base):
+    """缺陷事件/状态流转记录"""
+    __tablename__ = 'defect_events'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    defect_id = Column(Integer, ForeignKey('defects.id'), nullable=False)
+    event_type = Column(String(50), nullable=False)        # status_change/comment/link_run/update
+    from_status = Column(String(50), default=None)
+    to_status = Column(String(50), default=None)
+    comment = Column(Text, default='')
+    evidence_json = Column(JSON, default=None)
+    created_by = Column(String(100), default='system')
+    created_at = Column(DateTime, default=datetime.now)
+
+    defect = relationship("Defect", back_populates="events")
+
+
 class RunStatusHistory(Base):
     """执行状态历史表"""
     __tablename__ = 'run_status_history'

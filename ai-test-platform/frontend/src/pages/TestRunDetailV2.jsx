@@ -454,8 +454,23 @@ export default function TestRunDetailV2() {
 
                 {cd.error_message && (
                   <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                    <h4 className="text-sm font-semibold text-red-800 mb-1">错误信息</h4>
-                    <div className="text-sm text-red-700">{cd.error_message}</div>
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="text-sm font-semibold text-red-800 mb-1">错误信息</h4>
+                        <div className="text-sm text-red-700">{cd.error_message}</div>
+                      </div>
+                      {(cd.status === 'failed' || cd.status === 'error') && (
+                        <button onClick={() => {
+                          fetch('/api/v2/defects/from-run-case', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ run_case_id: cd.id, title: `[${cd.status}] ${cd.test_case_id}` })
+                          }).then(r => r.json()).then(d => {
+                            if (d.id) alert(`缺陷已创建: #${d.id}`)
+                            else alert('创建失败: ' + JSON.stringify(d))
+                          }).catch(e => alert('创建失败: ' + e.message))
+                        }} className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 whitespace-nowrap ml-3">创建缺陷</button>
+                      )}
+                    </div>
                   </div>
                 )}
 

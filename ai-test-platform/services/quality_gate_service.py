@@ -230,6 +230,36 @@ class QualityGateService:
             else:
                 warnings.append(entry)
 
+        # Rule 12 (P3-3B): open_blocker_defects
+        defect_summary = suite_summary.get("defect_summary", {})
+        blocker_count = defect_summary.get("blocker_defects", 0)
+        if blocker_count > 0:
+            ob_policy = cfg.get("open_blocker_defects_policy", "fail")
+            entry = {
+                "rule": "open_blocker_defects",
+                "message": f"存在 {blocker_count} 个未关闭的 blocker 缺陷",
+                "severity": "blocker" if ob_policy == "fail" else "warning",
+                "blocker_ids": defect_summary.get("blocker_ids", []),
+            }
+            if ob_policy == "fail":
+                failures.append(entry)
+            else:
+                warnings.append(entry)
+
+        # Rule 13 (P3-3B): known_issue
+        known_count = defect_summary.get("known_issues", 0)
+        if known_count > 0:
+            ki_policy = cfg.get("known_issue_policy", "warn")
+            entry = {
+                "rule": "known_issue",
+                "message": f"存在 {known_count} 个已知问题 (confirmed/fixed)",
+                "severity": "blocker" if ki_policy == "fail" else "warning",
+            }
+            if ki_policy == "fail":
+                failures.append(entry)
+            else:
+                warnings.append(entry)
+
         gate_status = "failed" if failures else "passed"
 
         return {
@@ -242,4 +272,5 @@ class QualityGateService:
             "gate_failures": failures,
             "gate_warnings": warnings,
             "gate_config": cfg,
+            "defect_summary": defect_summary if defect_summary else None,
         }

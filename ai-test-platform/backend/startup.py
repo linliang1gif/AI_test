@@ -165,6 +165,30 @@ def _run_migrations():
         logger.warning(f"P3-2 迁移失败: {e}")
 
 
+    # P3-3B defects + defect_events 表
+    try:
+        from database import get_db_session
+        from sqlalchemy import inspect as sa_inspect
+        with get_db_session() as db:
+            inspector = sa_inspect(db.bind)
+            tables = inspector.get_table_names()
+            created = []
+            if "defects" not in tables:
+                from database.models import Defect
+                Defect.__table__.create(db.bind)
+                created.append("defects")
+            if "defect_events" not in tables:
+                from database.models import DefectEvent
+                DefectEvent.__table__.create(db.bind)
+                created.append("defect_events")
+            if created:
+                logger.info(f"P3-3B 迁移: 已创建 {created}")
+            else:
+                logger.info("P3-3B defects/defect_events 表已存在")
+    except Exception as e:
+        logger.warning(f"P3-3B 迁移失败: {e}")
+
+
 def _init_optional_modules():
     """初始化可选模块，失败不阻塞"""
     # Pilot Backend
