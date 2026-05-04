@@ -108,11 +108,14 @@ def start_managed_backend():
         "TESTING_KEY": _testing_key(),
         "PYTHONIOENCODING": "utf-8",
     }
+    log_dir = os.path.join(PROJECT_ROOT, "data")
+    os.makedirs(log_dir, exist_ok=True)
+    _backend_log = open(os.path.join(log_dir, "regression_backend.log"), "w", encoding="utf-8")
     _backend_proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "backend.app:create_app",
          "--host", "0.0.0.0", "--port", "8000", "--factory"],
         cwd=PROJECT_ROOT, env=env,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        stdout=_backend_log, stderr=subprocess.STDOUT,
     )
     print(f"  🚀 已启动后端进程 PID={_backend_proc.pid}")
 
