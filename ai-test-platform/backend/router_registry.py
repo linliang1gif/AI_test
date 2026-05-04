@@ -71,6 +71,7 @@ def register_routers(app):
         ("routes.quality_gate_routes",       "router", "质量门禁路由"),
         ("routes.test_data_routes",          "router", "测试数据管理路由"),
         ("routes.defect_routes",             "router", "缺陷管理路由"),
+        ("routes.analytics_routes",          "router", "质量驾驶舱路由"),
     ]
     for mod_path, attr, label in _core_routes:
         router = _safe_import(mod_path, attr, label)

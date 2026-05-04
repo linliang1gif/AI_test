@@ -24,6 +24,7 @@ import TestSuites from './pages/TestSuites'
 import QualityGate from './pages/QualityGate'
 import TestDataManagement from './pages/TestDataManagement'
 import DefectManagement from './pages/DefectManagement'
+import QualityDashboard from './pages/QualityDashboard'
 
 // 健康检查轮询间隔（毫秒）
 const HEALTH_CHECK_INTERVAL = 30000
@@ -226,6 +227,7 @@ function App() {
                 { to: '/test-suites', icon: '■', label: '测试集管理' },
                 { to: '/test-data', icon: '■', label: '测试数据' },
                 { to: '/defects', icon: '■', label: '缺陷管理' },
+                { to: '/quality-dashboard', icon: '■', label: '质量驾驶舱' },
               ].map(item => (
                 <NavLink 
                   key={item.to}
@@ -457,6 +459,7 @@ function App() {
               <Route path="/quality-gate" element={<QualityGate />} />
               <Route path="/test-data" element={<TestDataManagement />} />
               <Route path="/defects" element={<DefectManagement />} />
+              <Route path="/quality-dashboard" element={<QualityDashboard />} />
               <Route path="/real-project-onboarding" element={<RealProjectOnboarding />} />
               
               {/* 旧版页面 - 重定向到V2或占位页 */}
