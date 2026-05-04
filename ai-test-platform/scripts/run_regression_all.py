@@ -48,6 +48,7 @@ REGRESSION_SCRIPTS = [
     ("P3-3B Defect Management",        "scripts/test_p3_3b_defect_management.py", True, False, None),
     ("P3-4A Quality Dashboard",        "scripts/test_p3_4a_quality_dashboard.py", True, False, None),
     ("P3-4B Quality Trends Risk",      "scripts/test_p3_4b_quality_trends_risk.py", True, False, None),
+    ("P3-5 Test Selection",            "scripts/test_p3_5_test_selection_recommendation.py", True, False, None),
     ("P1-8A AI Heal Guard",            "scripts/test_p1_8a_ai_heal_guard.py",   False, True,  None),
     ("P1-8 AI Case Review",            "scripts/test_p1_8_ai_case_review.py",   False, True,  None),
 ]
