@@ -16,6 +16,7 @@ import time
 import os
 import shutil
 import signal
+import argparse
 import requests
 
 # ── 配置 ──────────────────────────────────────────────
@@ -24,33 +25,34 @@ TIMEOUT_PER_SCRIPT = 180  # 每个脚本最大运行秒数
 DEFAULT_TESTING_KEY = "regression-test-key-auto"
 MANAGE_BACKEND = os.getenv("REGRESSION_MANAGE_BACKEND", "true").lower() == "true"
 
-# 回归脚本列表: (名称, 路径, 是否关键, 是否依赖AI, 外部依赖标记)
+# 回归脚本列表: (名称, 路径, 是否关键, 是否依赖AI, 外部依赖标记, 分层标签集合)
 # 外部依赖标记: None=无, "external_api"=外部API, "browser"=浏览器
+# 分层标签: "smoke"=冒烟, "core"=核心, "full"=全量
 REGRESSION_SCRIPTS = [
-    ("P0-7 Smoke 冒烟测试",           "scripts/smoke_p0_7_local.py",            True,  False, None),
-    ("API Contract 契约检查",          "scripts/check_api_contract.py",          True,  False, None),
-    ("P1-7A Import Pipeline",          "scripts/test_p1_7a_import_pipeline.py",  True,  False, None),
-    ("P1-7D Real Mode Safety",         "scripts/test_p1_7d_real_mode_safety.py", True,  False, None),
-    ("P1-7E Report Persistence",       "scripts/test_p1_7e_report_persistence.py", True,  False, None),
-    ("Phase 18 执行稳定性",            "scripts/test_phase18.py",                False, False, "external_api"),
-    ("P2-3 Web UI Case Model",          "scripts/test_p2_3_web_ui_case_model.py", True,  False, None),
-    ("P2-4 Playwright Engine MVP",     "scripts/test_p2_4_playwright_engine_mvp.py", True, False, "browser"),
-    ("P2-5 Visual Regression MVP",     "scripts/test_p2_5_visual_regression_mvp.py", True, False, "browser"),
-    ("P2-6 Playwright Enhanced",       "scripts/test_p2_6_playwright_enhanced.py",  True, False, "browser"),
-    ("P2-6B API Performance MVP",      "scripts/test_p2_6b_api_performance_mvp.py", True, False, None),
-    ("P2-7 Web UI Batch/Trace",        "scripts/test_p2_7_web_ui_batch_trace.py",   True, False, "browser"),
-    ("P2-8 AI UI Failure Analysis",   "scripts/test_p2_8_ai_ui_failure_analysis.py", True, False, "browser"),
-    ("P2-9B Web UI Stability",        "scripts/test_p2_9b_web_ui_stability.py",  True, False, "browser"),
-    ("P2-10 Test Suite Management",    "scripts/test_p2_10_test_suite_management.py", True, False, None),
-    ("P3-1 CI Quality Gate",           "scripts/test_p3_1_ci_quality_gate.py",  True, False, None),
-    ("P3-2 Test Data Management",      "scripts/test_p3_2_test_data_management.py", True, False, None),
-    ("P3-3A Test Data Enhancement",    "scripts/test_p3_3a_test_data_enhancement.py", True, False, None),
-    ("P3-3B Defect Management",        "scripts/test_p3_3b_defect_management.py", True, False, None),
-    ("P3-4A Quality Dashboard",        "scripts/test_p3_4a_quality_dashboard.py", True, False, None),
-    ("P3-4B Quality Trends Risk",      "scripts/test_p3_4b_quality_trends_risk.py", True, False, None),
-    ("P3-5 Test Selection",            "scripts/test_p3_5_test_selection_recommendation.py", True, False, None),
-    ("P1-8A AI Heal Guard",            "scripts/test_p1_8a_ai_heal_guard.py",   False, True,  None),
-    ("P1-8 AI Case Review",            "scripts/test_p1_8_ai_case_review.py",   False, True,  None),
+    ("P0-7 Smoke 冒烟测试",           "scripts/smoke_p0_7_local.py",            True,  False, None,           {"smoke","core","full"}),
+    ("API Contract 契约检查",          "scripts/check_api_contract.py",          True,  False, None,           {"smoke","core","full"}),
+    ("P1-7A Import Pipeline",          "scripts/test_p1_7a_import_pipeline.py",  True,  False, None,           {"core","full"}),
+    ("P1-7D Real Mode Safety",         "scripts/test_p1_7d_real_mode_safety.py", True,  False, None,           {"core","full"}),
+    ("P1-7E Report Persistence",       "scripts/test_p1_7e_report_persistence.py", True,  False, None,         {"core","full"}),
+    ("Phase 18 执行稳定性",            "scripts/test_phase18.py",                False, False, "external_api", {"full"}),
+    ("P2-3 Web UI Case Model",          "scripts/test_p2_3_web_ui_case_model.py", True,  False, None,          {"core","full"}),
+    ("P2-4 Playwright Engine MVP",     "scripts/test_p2_4_playwright_engine_mvp.py", True, False, "browser",   {"core","full"}),
+    ("P2-5 Visual Regression MVP",     "scripts/test_p2_5_visual_regression_mvp.py", True, False, "browser",   {"core","full"}),
+    ("P2-6 Playwright Enhanced",       "scripts/test_p2_6_playwright_enhanced.py",  True, False, "browser",    {"core","full"}),
+    ("P2-6B API Performance MVP",      "scripts/test_p2_6b_api_performance_mvp.py", True, False, None,         {"core","full"}),
+    ("P2-7 Web UI Batch/Trace",        "scripts/test_p2_7_web_ui_batch_trace.py",   True, False, "browser",   {"core","full"}),
+    ("P2-8 AI UI Failure Analysis",   "scripts/test_p2_8_ai_ui_failure_analysis.py", True, False, "browser",   {"core","full"}),
+    ("P2-9B Web UI Stability",        "scripts/test_p2_9b_web_ui_stability.py",  True, False, "browser",     {"core","full"}),
+    ("P2-10 Test Suite Management",    "scripts/test_p2_10_test_suite_management.py", True, False, None,       {"core","full"}),
+    ("P3-1 CI Quality Gate",           "scripts/test_p3_1_ci_quality_gate.py",  True, False, None,            {"core","full"}),
+    ("P3-2 Test Data Management",      "scripts/test_p3_2_test_data_management.py", True, False, None,        {"core","full"}),
+    ("P3-3A Test Data Enhancement",    "scripts/test_p3_3a_test_data_enhancement.py", True, False, None,      {"core","full"}),
+    ("P3-3B Defect Management",        "scripts/test_p3_3b_defect_management.py", True, False, None,          {"core","full"}),
+    ("P3-4A Quality Dashboard",        "scripts/test_p3_4a_quality_dashboard.py", True, False, None,          {"core","full"}),
+    ("P3-4B Quality Trends Risk",      "scripts/test_p3_4b_quality_trends_risk.py", True, False, None,        {"core","full"}),
+    ("P3-5 Test Selection",            "scripts/test_p3_5_test_selection_recommendation.py", True, False, None,{"core","full"}),
+    ("P1-8A AI Heal Guard",            "scripts/test_p1_8a_ai_heal_guard.py",   False, True,  None,           {"full"}),
+    ("P1-8 AI Case Review",            "scripts/test_p1_8_ai_case_review.py",   False, True,  None,           {"full"}),
 ]
 
 
@@ -202,8 +204,16 @@ def run_script(name: str, path: str) -> dict:
 
 # ── 主流程 ──────────────────────────────────────────
 def main():
+    parser = argparse.ArgumentParser(description="AI Test Platform 统一回归测试")
+    parser.add_argument(
+        "--profile", choices=["smoke", "core", "full"], default="full",
+        help="回归分层: smoke(冒烟2项), core(主链路不含external_api/AI), full(全量24项, 默认)"
+    )
+    args = parser.parse_args()
+    profile = args.profile
+
     print("=" * 70)
-    print("  AI Test Platform — 统一回归测试")
+    print(f"  AI Test Platform — 统一回归测试  [profile={profile}]")
     print("=" * 70)
 
     # 1. 启动/等待后端（带 TESTING=true + TESTING_KEY）
@@ -227,7 +237,10 @@ def main():
     # 3. 运行回归脚本
     ai_provider = os.getenv("AI_PROVIDER", "none")
     results = []
-    for entry in REGRESSION_SCRIPTS:
+    scripts_in_profile = [(e, i) for i, e in enumerate(REGRESSION_SCRIPTS)
+                          if profile in (e[5] if len(e) > 5 else {"full"})]
+    print(f"\n📋 Profile '{profile}': {len(scripts_in_profile)}/{len(REGRESSION_SCRIPTS)} 个脚本")
+    for entry, _idx in scripts_in_profile:
         name, path, _critical, needs_ai = entry[:4]
         ext_dep = entry[4] if len(entry) > 4 else None
 
@@ -300,10 +313,9 @@ def main():
 
     # 5. 关键失败判定
     critical_failures = []
-    for i, entry in enumerate(REGRESSION_SCRIPTS):
-        name, path, critical = entry[0], entry[1], entry[2]
-        if critical and results[i]["status"] == "FAIL":
-            critical_failures.append(name)
+    for (entry, _idx), r in zip(scripts_in_profile, results):
+        if entry[2] and r["status"] == "FAIL":
+            critical_failures.append(r["name"])
 
     if MANAGE_BACKEND:
         print("\n🛑 关闭回归管理的后端进程...")

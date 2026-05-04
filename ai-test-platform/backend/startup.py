@@ -189,6 +189,64 @@ def _run_migrations():
         logger.warning(f"P3-3B 迁移失败: {e}")
 
 
+    # P3-5.1 性能索引 — 聚合查询加速
+    try:
+        from database import get_db_session
+        from sqlalchemy import text as _text
+        with get_db_session() as db:
+            _INDEXES = [
+                # test_runs
+                ("ix_test_runs_created_at",   "test_runs",        "created_at"),
+                ("ix_test_runs_project_id",   "test_runs",        "project_id"),
+                ("ix_test_runs_status",       "test_runs",        "status"),
+                ("ix_test_runs_trigger_type", "test_runs",        "trigger_type"),
+                # run_cases
+                ("ix_run_cases_run_id",       "run_cases",        "run_id"),
+                ("ix_run_cases_case_id",      "run_cases",        "test_case_id"),
+                ("ix_run_cases_status",       "run_cases",        "status"),
+                # test_cases
+                ("ix_test_cases_case_type",   "test_cases",       "case_type"),
+                ("ix_test_cases_module",      "test_cases",       "module"),
+                ("ix_test_cases_priority",    "test_cases",       "priority"),
+                ("ix_test_cases_status",      "test_cases",       "status"),
+                # defects
+                ("ix_defects_project_id",     "defects",          "project_id"),
+                ("ix_defects_status",         "defects",          "status"),
+                ("ix_defects_severity",       "defects",          "severity"),
+                ("ix_defects_case_id",        "defects",          "case_id"),
+                ("ix_defects_duplicate_key",  "defects",          "duplicate_key"),
+                # test_suite_cases
+                ("ix_tsc_suite_id",           "test_suite_cases", "suite_id"),
+                ("ix_tsc_case_id",            "test_suite_cases", "case_id"),
+                # test_data_bindings
+                ("ix_tdb_case_id",            "test_data_bindings", "case_id"),
+                ("ix_tdb_dataset_id",         "test_data_bindings", "dataset_id"),
+                # defect_events
+                ("ix_de_defect_id",           "defect_events",    "defect_id"),
+                ("ix_de_event_type",          "defect_events",    "event_type"),
+            ]
+            created = []
+            from sqlalchemy import inspect as _insp
+            tables = _insp(db.bind).get_table_names()
+            for idx_name, tbl, col in _INDEXES:
+                if tbl not in tables:
+                    continue
+                try:
+                    db.execute(_text(
+                        f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({col})"
+                    ))
+                    created.append(idx_name)
+                except Exception:
+                    pass  # index may already exist in older SQLite
+            db.commit()
+            if created:
+                logger.info(f"P3-5.1 索引迁移: 已创建/确认 {len(created)} 个索引")
+            else:
+                logger.info("P3-5.1 索引已全部存在")
+    except Exception as e:
+        logger.warning(f"P3-5.1 索引迁移失败: {e}")
+
+
 def _init_optional_modules():
     """初始化可选模块，失败不阻塞"""
     # Pilot Backend
