@@ -21,6 +21,7 @@ import BatchRunCenter from './pages/BatchRunCenter'
 import Dashboard from './pages/Dashboard'
 import RealProjectOnboarding from './pages/RealProjectOnboarding'
 import TestSuites from './pages/TestSuites'
+import QualityGate from './pages/QualityGate'
 
 // 健康检查轮询间隔（毫秒）
 const HEALTH_CHECK_INTERVAL = 30000
@@ -282,6 +283,7 @@ function App() {
                 { to: '/test-runs-v2', icon: '■', label: '执行记录' },
                 { to: '/executor-v2', icon: '■', label: 'API测试执行' },
                 { to: '/batch-run', icon: '■', label: '批量执行中心' },
+                { to: '/quality-gate', icon: '■', label: '质量门禁' },
                 { to: '/reports', icon: '■', label: '测试报告' },
               ].map(item => (
                 <NavLink 
@@ -448,6 +450,7 @@ function App() {
               <Route path="/executor-v2" element={<ExecutorV2 />} />
               <Route path="/batch-run" element={<BatchRunCenter />} />
               <Route path="/test-suites" element={<TestSuites />} />
+              <Route path="/quality-gate" element={<QualityGate />} />
               <Route path="/real-project-onboarding" element={<RealProjectOnboarding />} />
               
               {/* 旧版页面 - 重定向到V2或占位页 */}
