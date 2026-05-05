@@ -477,3 +477,108 @@ class RunStatusHistory(Base):
     __table_args__ = (
         {'comment': '执行状态历史记录表,用于追踪run/run_case/run_step的状态变更'}
     ,)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  Phase C1: 需求-代码对比 DB 持久化模型
+# ══════════════════════════════════════════════════════════════════
+
+class CodeSnapshot(Base):
+    """代码快照元数据"""
+    __tablename__ = 'code_snapshots'
+
+    id = Column(String(100), primary_key=True)
+    project_id = Column(Integer, default=None)
+    name = Column(String(300), nullable=False)
+    source_type = Column(String(50), default='zip_upload')  # zip_upload/git_clone
+    source_path = Column(String(500), default='')
+    file_count = Column(Integer, default=0)
+    language_stats_json = Column(JSON, default=dict)
+    ignored_dirs_json = Column(JSON, default=list)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class RequirementPoint(Base):
+    """需求点"""
+    __tablename__ = 'requirement_points'
+
+    id = Column(String(100), primary_key=True)
+    project_id = Column(Integer, default=None)
+    source_type = Column(String(50), default='manual')  # manual/document/axure
+    source_id = Column(String(100), default=None)
+    point_type = Column(String(50), default='feature')  # feature/rule/field/axure_note
+    title = Column(String(500), nullable=False)
+    description = Column(Text, default='')
+    keywords_json = Column(JSON, default=list)
+    priority = Column(String(50), default='medium')
+    module_name = Column(String(200), default='')
+    created_at = Column(DateTime, default=datetime.now)
+
+
+class CodeCompareReport(Base):
+    """需求-代码对比报告"""
+    __tablename__ = 'code_compare_reports'
+
+    id = Column(String(100), primary_key=True)
+    project_id = Column(Integer, default=None)
+    requirement_source_id = Column(String(100), default=None)
+    code_snapshot_id = Column(String(100), default=None)
+    analysis_mode = Column(String(50), default='rule_based')  # rule_based/ai_deep/fallback
+    total_requirement_points = Column(Integer, default=0)
+    implemented_count = Column(Integer, default=0)
+    missing_count = Column(Integer, default=0)
+    extra_count = Column(Integer, default=0)
+    uncertain_count = Column(Integer, default=0)
+    risk_count = Column(Integer, default=0)
+    summary = Column(Text, default='')
+    code_summary = Column(Text, default='')
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    findings = relationship("CodeCompareFinding", back_populates="report", cascade="all, delete-orphan")
+
+
+class CodeCompareFinding(Base):
+    """需求-代码对比 Finding"""
+    __tablename__ = 'code_compare_findings'
+
+    id = Column(String(100), primary_key=True)
+    report_id = Column(String(100), ForeignKey('code_compare_reports.id'), nullable=False)
+    finding_type = Column(String(50), default='implemented')  # implemented/missing/extra/uncertain/risk
+    requirement_point_id = Column(String(100), default=None)
+    requirement_point_json = Column(JSON, default=dict)
+    matched_symbols_json = Column(JSON, default=list)
+    confidence = Column(Float, default=0.0)
+    risk_level = Column(String(50), default='medium')
+    evidence_json = Column(JSON, default=dict)
+    analysis = Column(Text, default='')
+    suggested_test_cases_json = Column(JSON, default=list)
+    manual_status = Column(String(50), default=None)
+    target_type = Column(String(50), default=None)
+    target_id = Column(String(200), default=None)
+    reviewer = Column(String(100), default=None)
+    review_comment = Column(Text, default=None)
+    converted_at = Column(DateTime, default=None)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    report = relationship("CodeCompareReport", back_populates="findings")
+
+
+class RequirementConfirmQuestion(Base):
+    """需求确认问题"""
+    __tablename__ = 'requirement_confirm_questions'
+
+    id = Column(String(100), primary_key=True)
+    project_id = Column(Integer, default=None)
+    finding_id = Column(String(100), default=None)
+    title = Column(String(500), nullable=False)
+    question = Column(Text, nullable=False)
+    context = Column(Text, default='')
+    evidence_json = Column(JSON, default=dict)
+    status = Column(String(50), default='open')  # open/answered/closed
+    owner = Column(String(100), default='product')
+    answer = Column(Text, default=None)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)

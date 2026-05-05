@@ -20,7 +20,12 @@ from .models import (
     SystemSettings,
     RunStatusHistory,
     TestSuite,
-    TestSuiteCase
+    TestSuiteCase,
+    CodeSnapshot,
+    RequirementPoint,
+    CodeCompareReport,
+    CodeCompareFinding,
+    RequirementConfirmQuestion,
 )
 from .repository import (
     BaseRepository,
@@ -63,6 +68,11 @@ __all__ = [
     'RunStatusHistory',
     'TestSuite',
     'TestSuiteCase',
+    'CodeSnapshot',
+    'RequirementPoint',
+    'CodeCompareReport',
+    'CodeCompareFinding',
+    'RequirementConfirmQuestion',
     # Repositories
     'BaseRepository',
     'ProjectRepository',

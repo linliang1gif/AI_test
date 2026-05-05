@@ -32,6 +32,7 @@ echo.
 echo 按 Ctrl+C 停止服务
 echo.
 
-venv\Scripts\python.exe backend_api_server.py
+REM [Phase A] 推荐使用 create_app 工厂入口，与回归脚本和 CI 一致
+venv\Scripts\python.exe -m uvicorn backend.app:create_app --factory --host 0.0.0.0 --port 8000
 
 pause

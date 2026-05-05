@@ -3,8 +3,35 @@
 
 """
 AI Test Platform - Backend API Server
-P2-2 重构: app 创建由 backend.app.create_app() 完成，
-本文件保留内联业务路由（后续逐步拆分到 routes/）。
+
+╔══════════════════════════════════════════════════════════════╗
+║  ⚠️  LEGACY FILE — 仅做兼容保留，不得新增功能               ║
+║                                                              ║
+║  主入口:  backend/app.py → create_app()                      ║
+║  路由注册: backend/router_registry.py                        ║
+║  新路由:  routes/*.py                                        ║
+║                                                              ║
+║  本文件中的 V1 内联路由 (/api/*) 将在后续 Phase 逐步迁移     ║
+║  到 routes/ 模块。迁移完成前保留向后兼容。                    ║
+║                                                              ║
+║  启动方式(推荐):                                              ║
+║    uvicorn backend.app:create_app --factory --port 8000      ║
+║                                                              ║
+║  本文件启动 (legacy, 不推荐):                                ║
+║    python backend_api_server.py                               ║
+╚══════════════════════════════════════════════════════════════╝
+
+Phase A 收口标记 (2026-05):
+- 本文件中的 test_cases_db 内存列表为 V1 遗留，V2 统一使用 database/models.py TestCase 表。
+- /api/dashboard/stats 已由 V2 /api/v2/dashboard/summary 替代。
+- 前端主线页面已迁移到 V2 接口。
+
+Phase B1 迁移 (2026-05):
+- POST /api/testcases/{id}/generate-script → /api/v2/test-cases/{id}/generate-script
+- POST /api/testcases/{id}/manual-execute  → /api/v2/test-cases/{id}/manual-execute
+- GET  /api/test-cases/export              → /api/v2/test-cases/export
+- POST /api/test-cases/{id}/bind-dataset   → /api/v2/test-cases/{id}/bind-dataset
+以上 4 个 V2 实现位于 routes/test_case_extra_routes.py，使用 DB TestCase 表。
 """
 
 import sys
@@ -502,9 +529,11 @@ async def get_datasets_stats():
 
 # ==================== Test Cases + Dataset Integration ====================
 
-@app.post("/api/test-cases/{test_case_id}/bind-dataset")
+# [Phase B1] 已迁移至 POST /api/v2/test-cases/{id}/bind-dataset (routes/test_case_extra_routes.py)
+# 新代码不得继续调用该 legacy 接口，保留仅用于历史兼容
+@app.post("/api/test-cases/{test_case_id}/bind-dataset", deprecated=True)
 async def bind_dataset_to_testcase(test_case_id: int, request: Dict[str, Any]):
-    """绑定数据集到测试用例"""
+    """[已迁移] 绑定数据集 → /api/v2/test-cases/{id}/bind-dataset"""
     try:
         dataset_id = request.get("dataset_id")
         if not dataset_id:
@@ -1871,9 +1900,11 @@ async def get_test_run_status(run_id: int):
         "testRun": run
     }
 
-@app.get("/api/test-cases/export")
+# [Phase B1] 已迁移至 GET /api/v2/test-cases/export (routes/test_case_extra_routes.py)
+# 新代码不得继续调用该 legacy 接口，保留仅用于历史兼容
+@app.get("/api/test-cases/export", deprecated=True)
 async def export_test_cases():
-    """导出测试用例为 Excel"""
+    """[已迁移] 导出测试用例 → /api/v2/test-cases/export"""
     try:
         from openpyxl import Workbook
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -2493,9 +2524,11 @@ async def execute_script(script_id: int):
             "message": "脚本执行失败"
         }
 
-@app.post("/api/testcases/{testcase_id}/generate-script")
+# [Phase B1] 已迁移至 POST /api/v2/test-cases/{id}/generate-script (routes/test_case_extra_routes.py)
+# 新代码不得继续调用该 legacy 接口，保留仅用于历史兼容
+@app.post("/api/testcases/{testcase_id}/generate-script", deprecated=True)
 async def generate_test_script(testcase_id: str):
-    """为测试用例生成自动化脚本"""
+    """[已迁移] 为测试用例生成自动化脚本 → /api/v2/test-cases/{id}/generate-script"""
     try:
         # 查找测试用例（兼容旧内存数据和V2数据库）
         testcase = next((tc for tc in test_cases_db if str(tc.get('id')) == str(testcase_id)), None)
@@ -2538,9 +2571,11 @@ async def generate_test_script(testcase_id: str):
             "message": "脚本生成失败"
         }
 
+# [Phase B1] 已迁移至 POST /api/v2/test-cases/{id}/manual-execute (routes/test_case_extra_routes.py)
+# 新代码不得继续调用该 legacy 接口，保留仅用于历史兼容
 @app.post("/api/testcases/{testcase_id}/manual-execute", deprecated=True)
 async def manual_execute_test_case(testcase_id: str, data: Dict[str, Any]):
-    """[已废弃] 手动执行 — 请迁移到 V2"""
+    """[已迁移] 手动执行 → /api/v2/test-cases/{id}/manual-execute"""
     print(f"⚠️ [DEPRECATED] /api/testcases/{testcase_id}/manual-execute 已废弃")
     try:
         status = data.get('status', 'passed')

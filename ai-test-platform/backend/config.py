@@ -75,6 +75,20 @@ class Settings:
     def LOG_LEVEL(self) -> str:
         return os.getenv("LOG_LEVEL", "INFO")
 
+    # ── CORS ──
+    @property
+    def CORS_ALLOW_ORIGINS(self) -> list:
+        """从环境变量 CORS_ALLOW_ORIGINS 读取，逗号分隔；为空时使用本地开发白名单"""
+        raw = os.getenv("CORS_ALLOW_ORIGINS", "")
+        if raw.strip():
+            return [o.strip() for o in raw.split(",") if o.strip()]
+        return [
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:5174",
+        ]
+
     # ── 安全 ──
     @property
     def TARGET_API_TOKEN(self) -> str:

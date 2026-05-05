@@ -69,6 +69,12 @@ try:
 except ImportError:
     DB_AVAILABLE = False
 
+try:
+    from services.code_compare_storage_service import CodeCompareStorageService
+    STORAGE_SVC_AVAILABLE = True
+except ImportError:
+    STORAGE_SVC_AVAILABLE = False
+
 router = APIRouter()
 
 # ── 持久化目录 ──
@@ -158,6 +164,21 @@ _load_persisted_requirements()
 _load_persisted_snapshots()
 
 
+def _get_storage_svc():
+    """获取 DB 存储服务实例（每次新建 session 避免跨请求污染）"""
+    if STORAGE_SVC_AVAILABLE and DB_AVAILABLE:
+        try:
+            sess = get_db_session()
+            return CodeCompareStorageService(sess.__enter__())
+        except Exception as e:
+            logger.warning(f"Storage service init failed: {e}")
+    return None
+
+
+import logging as _logging
+logger = _logging.getLogger(__name__)
+
+
 def _save_report(report: dict):
     """持久化报告到磁盘"""
     path = REPORTS_DIR / f"{report['report_id']}.json"
@@ -192,6 +213,75 @@ SENSITIVE_CONTENT_PATTERNS = re.compile(
     r'(?i)(token|password|secret|authorization|cookie|api_key|access_key|private_key)'
     r'\s*[:=]\s*[\'"]?[^\s\'"]{8,}',
 )
+
+# ── Phase C2: SSRF 防护 ──
+import ipaddress
+import socket
+from urllib.parse import urlparse
+
+_SSRF_ALLOW_LOCAL_HTTP = os.getenv("ALLOW_LOCAL_GIT_HTTP", "false").lower() == "true"
+
+
+def _sanitize_git_url_for_log(url: str) -> str:
+    """脱敏 Git URL 中的 token，用于安全日志"""
+    return re.sub(r'(https?://)([^@]+)@', r'\1***@', url)
+
+
+def _validate_repo_url(repo_url: str) -> tuple:
+    """
+    Phase C2 SSRF 防护: 校验 Git 仓库 URL 是否安全。
+    返回 (ok: bool, error_message: str)
+    """
+    parsed = urlparse(repo_url)
+    scheme = parsed.scheme.lower()
+
+    # 只允许 https / http / git (ssh)
+    if scheme not in ("https", "http", "git", "ssh") and not repo_url.startswith("git@"):
+        return False, f"不允许的协议: {scheme}. 仅支持 https/http/git@"
+
+    # 禁止 file / ftp / ssh:// 等
+    if scheme in ("file", "ftp", "ftps", "ssh"):
+        return False, f"不允许的协议: {scheme}"
+
+    # 对 git@host:path 格式提取 host
+    if repo_url.startswith("git@"):
+        host_part = repo_url.split("git@", 1)[1].split(":", 1)[0]
+    else:
+        host_part = parsed.hostname or ""
+
+    if not host_part:
+        return False, "无法解析仓库地址中的 host"
+
+    host_lower = host_part.lower()
+
+    # 禁止 localhost 名称
+    if host_lower in ("localhost", "localhost.localdomain"):
+        return False, "不允许访问 localhost"
+
+    # DNS 解析并检查 IP
+    try:
+        addrs = socket.getaddrinfo(host_part, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for _, _, _, _, sockaddr in addrs:
+            ip_str = sockaddr[0]
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_loopback:
+                return False, f"不允许访问 loopback 地址: {ip_str}"
+            if ip.is_private:
+                return False, f"不允许访问内网地址: {ip_str}"
+            if ip.is_link_local:
+                return False, f"不允许访问 link-local 地址: {ip_str}"
+            if ip.is_multicast:
+                return False, f"不允许访问 multicast 地址: {ip_str}"
+            if ip.is_reserved:
+                return False, f"不允许访问 reserved 地址: {ip_str}"
+            # 特别检查 AWS metadata
+            if ip_str == "169.254.169.254":
+                return False, "不允许访问 metadata 服务地址 169.254.169.254"
+    except socket.gaierror:
+        # DNS 无法解析，允许继续（git clone 自己会报错）
+        pass
+
+    return True, ""
 
 
 def _is_sensitive_file(name: str) -> bool:
@@ -392,6 +482,19 @@ async def upload_code_snapshot(file: UploadFile = File(...)):
     _code_snapshots[snapshot_id] = snap_info
     _save_snapshot_meta(snapshot_id, snap_info)
 
+    # Phase C1: 写 DB
+    svc = _get_storage_svc()
+    if svc:
+        try:
+            svc.save_snapshot(
+                snapshot_id=snapshot_id, name=meta["name"],
+                source_type='zip_upload', source_path=str(extract_dir),
+                file_count=total_files, language_stats=lang_dist,
+                ignored_dirs=sorted(IGNORED_DIRS),
+            )
+        except Exception as e:
+            logger.warning(f"Save snapshot to DB failed: {e}")
+
     return {"success": True, "snapshot": meta}
 
 
@@ -406,9 +509,23 @@ async def clone_repo(request: CloneRepoRequest):
     if not repo_url:
         raise HTTPException(status_code=400, detail="请提供 Git 仓库地址")
 
-    # 安全校验：仅允许 http(s) 和 git@ 协议
+    # 安全校验：协议 + SSRF 防护 (Phase C2)
     if not (repo_url.startswith("http://") or repo_url.startswith("https://") or repo_url.startswith("git@")):
         raise HTTPException(status_code=400, detail="仅支持 http(s) 或 git@ 协议的仓库地址")
+
+    # Phase C2: SSRF 防护 — 阻止内网/localhost/metadata 地址
+    url_ok, url_err = _validate_repo_url(repo_url)
+    if not url_ok:
+        logger.warning(f"Clone SSRF blocked: {_sanitize_git_url_for_log(repo_url)} | {url_err}")
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "code": "REPO_URL_NOT_ALLOWED",
+                "message": "仓库地址不允许访问内网、localhost 或不安全协议",
+                "detail": url_err,
+            },
+        )
 
     snapshot_id = f"snap_{uuid.uuid4().hex[:12]}"
     clone_dir = SNAPSHOT_DIR / snapshot_id
@@ -505,6 +622,18 @@ async def clone_repo(request: CloneRepoRequest):
     _code_snapshots[snapshot_id] = snap_info
     _save_snapshot_meta(snapshot_id, snap_info)
 
+    # Phase C1: 写 DB
+    svc = _get_storage_svc()
+    if svc:
+        try:
+            svc.save_snapshot(
+                snapshot_id=snapshot_id, name=meta["name"],
+                source_type='git_clone', source_path=str(scan_dir),
+                file_count=total_files, language_stats=lang_dist,
+            )
+        except Exception as e:
+            logger.warning(f"Save snapshot to DB failed: {e}")
+
     return {"success": True, "snapshot": meta}
 
 
@@ -590,6 +719,14 @@ async def analyze_requirement_code(request: AnalyzeRequest):
     _reports[report_id] = report
     _save_report(report)
 
+    # Phase C1: 写 DB
+    svc = _get_storage_svc()
+    if svc:
+        try:
+            svc.save_report(report, findings)
+        except Exception as e:
+            logger.warning(f"Save report to DB failed: {e}")
+
     return {"success": True, "report": report}
 
 
@@ -599,6 +736,16 @@ async def analyze_requirement_code(request: AnalyzeRequest):
 
 @router.get("/api/v2/code-compare/reports")
 async def get_reports():
+    # Phase C1: 优先从 DB 查询
+    svc = _get_storage_svc()
+    if svc:
+        try:
+            items = svc.list_reports()
+            return {"success": True, "reports": items}
+        except Exception as e:
+            logger.warning(f"DB list_reports failed, fallback to memory: {e}")
+
+    # fallback: 内存
     items = []
     for r in _reports.values():
         items.append({
@@ -608,6 +755,7 @@ async def get_reports():
             "summary": r["summary"],
             "ai_mode": r.get("ai_mode", "unknown"),
             "created_at": r["created_at"],
+            "source": "memory",
         })
     items.sort(key=lambda x: x["created_at"], reverse=True)
     return {"success": True, "reports": items}
@@ -619,6 +767,17 @@ async def get_reports():
 
 @router.get("/api/v2/code-compare/reports/{report_id}")
 async def get_report_detail(report_id: str):
+    # Phase C1: 优先查 DB
+    svc = _get_storage_svc()
+    if svc:
+        try:
+            detail = svc.get_report_detail(report_id)
+            if detail:
+                return {"success": True, "report": detail}
+        except Exception as e:
+            logger.warning(f"DB get_report_detail failed: {e}")
+
+    # fallback: 内存
     report = _reports.get(report_id)
     if not report:
         raise HTTPException(status_code=404, detail=f"报告不存在: {report_id}")
@@ -647,6 +806,15 @@ async def confirm_finding(report_id: str, request: ConfirmRequest):
             f["manual_status"] = request.manual_status
             f["confirmed_at"] = datetime.now().isoformat()
             _save_report(report)
+
+            # Phase C1: 同步更新 DB
+            svc = _get_storage_svc()
+            if svc:
+                try:
+                    svc.update_finding_status(request.finding_id, request.manual_status)
+                except Exception as e:
+                    logger.warning(f"DB update finding status failed: {e}")
+
             return {"success": True, "finding": f}
 
     raise HTTPException(status_code=404, detail=f"finding 不存在: {request.finding_id}")
@@ -731,6 +899,19 @@ async def convert_finding_to_defect(finding_id: str, request: ConvertToDefectReq
     finding["review_comment"] = request.review_comment
     _save_report(report)
 
+    # Phase C1: 同步 DB finding
+    svc = _get_storage_svc()
+    if svc:
+        try:
+            svc.update_finding_status(
+                finding_id, "converted_to_bug",
+                review_comment=request.review_comment,
+                target_type="defect", target_id=str(defect_id),
+                converted_at=datetime.now(),
+            )
+        except Exception as e:
+            logger.warning(f"DB update finding (defect) failed: {e}")
+
     return {"success": True, "data": {"defect_id": defect_id, "finding_id": finding_id}}
 
 
@@ -791,6 +972,19 @@ async def convert_finding_to_test_case(finding_id: str, request: ConvertToTestCa
     finding["converted_at"] = datetime.now().isoformat()
     _save_report(report)
 
+    # Phase C1: 同步 DB finding
+    svc = _get_storage_svc()
+    if svc:
+        try:
+            tid = ",".join(case_ids) if len(case_ids) > 1 else case_ids[0]
+            svc.update_finding_status(
+                finding_id, "converted_to_case",
+                target_type="test_case", target_id=tid,
+                converted_at=datetime.now(),
+            )
+        except Exception as e:
+            logger.warning(f"DB update finding (test_case) failed: {e}")
+
     return {"success": True, "data": {"case_ids": case_ids, "finding_id": finding_id}}
 
 
@@ -827,6 +1021,20 @@ async def convert_finding_to_question(finding_id: str, request: ConvertToQuestio
     finding["review_comment"] = request.review_comment
     _save_report(report)
 
+    # Phase C1: 同步 DB
+    svc = _get_storage_svc()
+    if svc:
+        try:
+            svc.save_question(question)
+            svc.update_finding_status(
+                finding_id, "need_product_confirm",
+                review_comment=request.review_comment,
+                target_type="question", target_id=q_id,
+                converted_at=datetime.now(),
+            )
+        except Exception as e:
+            logger.warning(f"DB update finding (question) failed: {e}")
+
     return {"success": True, "data": {"question_id": q_id, "finding_id": finding_id}}
 
 
@@ -844,6 +1052,17 @@ async def mark_finding_false_positive(finding_id: str, request: MarkFalsePositiv
     finding["review_comment"] = request.reason
     finding["confirmed_at"] = datetime.now().isoformat()
     _save_report(report)
+
+    # Phase C1: 同步 DB
+    svc = _get_storage_svc()
+    if svc:
+        try:
+            svc.update_finding_status(
+                finding_id, "false_positive",
+                review_comment=request.reason,
+            )
+        except Exception as e:
+            logger.warning(f"DB update finding (false_positive) failed: {e}")
 
     return {"success": True, "data": {"finding_id": finding_id, "manual_status": "false_positive"}}
 

@@ -189,6 +189,36 @@ def _run_migrations():
         logger.warning(f"P3-3B 迁移失败: {e}")
 
 
+    # Phase C1: code_compare 5 张新表
+    try:
+        from database import get_db_session
+        from sqlalchemy import inspect as sa_inspect
+        with get_db_session() as db:
+            inspector = sa_inspect(db.bind)
+            tables = inspector.get_table_names()
+            created = []
+            _C1_MODELS = [
+                ("code_snapshots", "CodeSnapshot"),
+                ("requirement_points", "RequirementPoint"),
+                ("code_compare_reports", "CodeCompareReport"),
+                ("code_compare_findings", "CodeCompareFinding"),
+                ("requirement_confirm_questions", "RequirementConfirmQuestion"),
+            ]
+            for tbl_name, cls_name in _C1_MODELS:
+                if tbl_name not in tables:
+                    import importlib
+                    mod = importlib.import_module("database.models")
+                    cls = getattr(mod, cls_name)
+                    cls.__table__.create(db.bind)
+                    created.append(tbl_name)
+            if created:
+                logger.info(f"Phase C1 迁移: 已创建 {created}")
+            else:
+                logger.info("Phase C1 code_compare 表已全部存在")
+    except Exception as e:
+        logger.warning(f"Phase C1 迁移失败: {e}")
+
+
     # P3-5.1 性能索引 — 聚合查询加速
     try:
         from database import get_db_session

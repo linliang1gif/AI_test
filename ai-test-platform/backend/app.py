@@ -38,10 +38,10 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # 3. CORS
+    # 3. CORS — Phase C2: 收紧 allow_origins，不再使用 ["*"]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=settings.CORS_ALLOW_ORIGINS,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

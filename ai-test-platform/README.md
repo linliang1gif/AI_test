@@ -5,6 +5,70 @@
 [![React](https://img.shields.io/badge/React-18.2+-61dafb.svg)](https://reactjs.org/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+## 🚀 推荐启动方式（Phase A+ V2 主线）
+
+> **重要**: V2 主线启动入口为 `backend/app.py`。`backend_api_server.py` 已标记为 **legacy**，仅保留兼容，**不推荐**作为主入口。
+
+### 后端启动（推荐）
+
+```bash
+uvicorn backend.app:create_app --factory --host 0.0.0.0 --port 8000
+```
+
+- V2 路由由 `backend/router_registry.py` 集中注册（39+ 模块）
+- 启动时自动执行 DB 迁移（含 Phase C1 code_compare 5 张新表）
+- CORS 默认仅允许本地开发白名单（`localhost:5173/5174`、`127.0.0.1:5173/5174`）
+
+### 前端启动
+
+```bash
+cd frontend
+npm install
+npm run dev   # 默认 http://localhost:5173
+```
+
+### CORS 配置（生产环境）
+
+通过环境变量 `CORS_ALLOW_ORIGINS` 配置允许的前端来源（逗号分隔）：
+
+```bash
+# .env 示例
+CORS_ALLOW_ORIGINS=https://test-platform.example.com,https://admin.example.com
+```
+
+留空时使用本地开发白名单：
+
+```
+http://localhost:5173
+http://localhost:5174
+http://127.0.0.1:5173
+http://127.0.0.1:5174
+```
+
+**Phase C2 安全收口**：
+- ❌ 不再使用 `allow_origins=["*"]`
+- ✅ Git clone 阻断 localhost / 127.0.0.1 / 内网 IP / 169.254.169.254 / `file://` / `ftp://`
+- ✅ Git URL token 日志脱敏
+
+### 本地开发 .env 示例
+
+```bash
+APP_MODE=mock
+USE_MOCK_DATA=true
+AI_PROVIDER=none
+AI_ANALYSIS_MODE=rule
+BACKEND_HOST=0.0.0.0
+BACKEND_PORT=8000
+
+# CORS（留空使用本地白名单）
+CORS_ALLOW_ORIGINS=
+
+# Git clone（仅本地调试需要时打开）
+ALLOW_LOCAL_GIT_HTTP=false
+```
+
+---
+
 ## 🎯 项目概述
 
 AI Test Platform 是一个**企业级**的完整测试生命周期管理平台，实现从需求分析到自动化测试执行的全流程自动化。

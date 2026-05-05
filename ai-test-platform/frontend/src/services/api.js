@@ -64,8 +64,12 @@ export const api = {
   },
 
   // ==================== Dashboard ====================
+  // [Phase A] DEPRECATED: 使用 api.v2.dashboard.getSummary 替代
   dashboard: {
-    getStats: () => request(`${API_BASE_URL}/dashboard/stats`),
+    getStats: () => {
+      console.warn('[DEPRECATED] api.dashboard.getStats -> use api.v2.dashboard.getSummary')
+      return api.v2.dashboard.getSummary()
+    },
   },
 
   // ==================== 项目管理 ====================
@@ -176,10 +180,11 @@ export const api = {
   // ==================== 测试用例 ====================
   testCases: {
     getAll: (projectId) => request(`${PILOT_API_BASE_URL}/test-cases${projectId ? `?project_id=${projectId}` : ''}`),
-    create: (data) => request(`${API_BASE_URL}/test-cases`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+    // [Phase A] 转发到 V2
+    create: (data) => {
+      console.warn('[DEPRECATED] api.testCases.create -> use api.v2.testCases.create')
+      return request(`${PILOT_API_BASE_URL}/test-cases`, { method: 'POST', body: JSON.stringify(data) })
+    },
     batchDelete: (ids) => request(`${API_BASE_URL}/v2/test-cases/batch-delete`, {
       method: 'POST',
       body: JSON.stringify({ ids }),
@@ -235,16 +240,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-    generateScript: (testCaseId) => request(`${API_BASE_URL}/testcases/${testCaseId}/generate-script`, {
+    generateScript: (testCaseId) => request(`${PILOT_API_BASE_URL}/test-cases/${testCaseId}/generate-script`, {
       method: 'POST',
     }),
-    execute: (testCaseId) => { console.warn('[DEPRECATED] api.testCases.execute -> use api.v2.testCases.execute'); return request(`${API_BASE_URL}/testcases/${testCaseId}/execute`, { method: 'POST' }) },
-    manualExecute: (testCaseId, data) => { console.warn('[DEPRECATED] api.testCases.manualExecute'); return request(`${API_BASE_URL}/testcases/${testCaseId}/manual-execute`, { method: 'POST', body: JSON.stringify(data) }) },
-    bindDataset: (testCaseId, datasetId) => request(`${API_BASE_URL}/test-cases/${testCaseId}/bind-dataset`, {
+    execute: (testCaseId) => request(`${PILOT_API_BASE_URL}/test-cases/${testCaseId}/execute`, { method: 'POST' }),
+    manualExecute: (testCaseId, data) => request(`${PILOT_API_BASE_URL}/test-cases/${testCaseId}/manual-execute`, { method: 'POST', body: JSON.stringify(data) }),
+    bindDataset: (testCaseId, datasetId) => request(`${PILOT_API_BASE_URL}/test-cases/${testCaseId}/bind-dataset`, {
       method: 'POST',
       body: JSON.stringify({ dataset_id: datasetId }),
     }),
-    exportExcel: () => fetch(`${API_BASE_URL}/test-cases/export`).then(res => {
+    exportExcel: () => fetch(`${PILOT_API_BASE_URL}/test-cases/export`).then(res => {
       if (!res.ok) throw new Error('导出失败')
       return res.blob()
     }),
@@ -347,7 +352,8 @@ export const api = {
 
   // ==================== AI 功能 ====================
   ai: {
-    getCurrent: () => request(`${API_BASE_URL}/ai/current`),
+    // [Phase A] REMOVED: 后端无 /api/ai/current 路由，无前端页面调用
+    getCurrent: () => Promise.reject(new Error('[DEPRECATED] /api/ai/current does not exist')),
     generate: (data) => request(`${API_BASE_URL}/ai/generate`, {
       method: 'POST',
       body: JSON.stringify(data),
