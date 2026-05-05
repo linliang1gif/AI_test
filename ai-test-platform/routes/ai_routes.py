@@ -4,28 +4,132 @@
 AI 路由模块 - 提供 AI 生成测试用例和脚本的接口
 """
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query, Depends
 from pydantic import BaseModel
 from typing import List, Optional
 import json
 import sys
+import tempfile
+import os
+import uuid
 from pathlib import Path
+from datetime import datetime
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from sqlalchemy.orm import Session
+from database import get_db
+from database.models import TestCase as TestCaseDB
+
 from ai.ai_client import get_ai_client
+
+# 导入文档解析工具
+try:
+    from utils.document_parser import parse_document, parse_document_structured, parse_axure_folder, parse_axure_folder_structured
+    DOC_PARSER_AVAILABLE = True
+except ImportError as e:
+    print(f"  文档解析工具导入失败: {e}")
+    DOC_PARSER_AVAILABLE = False
+
+# 导入知识库检索
+try:
+    from knowledge.manual_retriever import retrieve_manual_context, retrieve_for_modules
+    KB_AVAILABLE = True
+except ImportError as e:
+    print(f"  知识库检索导入失败: {e}")
+    KB_AVAILABLE = False
 
 # 导入 SVN 工具
 try:
     from utils.svn_utils import svn_downloader
-    from utils.document_parser import parse_document
     SVN_AVAILABLE = True
 except ImportError as e:
-    print(f"⚠️  SVN 工具导入失败: {e}")
+    print(f"  SVN 工具导入失败: {e}")
     SVN_AVAILABLE = False
 
 router = APIRouter()
+
+
+def _parse_ai_testcase_response(response: str) -> list:
+    """健壮地解析 AI 返回的测试用例 JSON，支持多种格式"""
+    # 1. 去掉 markdown 代码块
+    if '```json' in response:
+        response = response.split('```json')[1].split('```')[0].strip()
+    elif '```' in response:
+        parts = response.split('```')
+        if len(parts) >= 3:
+            response = parts[1].strip()
+
+    # 2. 尝试找数组
+    start = response.find('[')
+    end = response.rfind(']') + 1
+    if start != -1 and end > start:
+        try:
+            arr = json.loads(response[start:end])
+            if isinstance(arr, list) and len(arr) > 0:
+                return arr
+        except json.JSONDecodeError:
+            pass
+
+    # 3. 尝试解析整体
+    try:
+        obj = json.loads(response)
+    except json.JSONDecodeError:
+        # 4. 尝试修复截断的 JSON（末尾缺 ] 或 }）
+        for suffix in [']', ']}', ']\n}']:
+            try:
+                obj = json.loads(response + suffix)
+                break
+            except json.JSONDecodeError:
+                continue
+        else:
+            raise json.JSONDecodeError("无法解析 AI 响应", response[:200], 0)
+
+    # 5. 如果是 dict，尝试提取其中的数组字段
+    if isinstance(obj, dict):
+        for key in ('testcases', 'test_cases', 'data', 'cases', 'results'):
+            if key in obj and isinstance(obj[key], list):
+                return obj[key]
+        # 如果 dict 本身看起来像单条用例
+        if 'title' in obj:
+            return [obj]
+        raise json.JSONDecodeError("AI 返回了对象但未找到用例数组", str(list(obj.keys())), 0)
+
+    if isinstance(obj, list):
+        return obj
+
+    return [obj]
+
+
+def _save_testcases_to_db(db: Session, testcases: list, source: str = "ai_generated") -> list:
+    """将 AI 生成的测试用例列表写入数据库，返回保存的 id 列表"""
+    saved_ids = []
+    for tc in testcases:
+        tc_id = f"TC_AI_{uuid.uuid4().hex[:8]}"
+        row = TestCaseDB(
+            id=tc_id,
+            title=tc.get("title", "AI生成用例"),
+            module=tc.get("module", ""),
+            priority=tc.get("priority", "medium"),
+            status="pending",
+            steps=tc.get("steps", []),
+            expected=tc.get("expected", ""),
+            data_type=tc.get("type", "functional"),
+            expected_behavior="success",
+            execution_config={},
+            assertions=[],
+            created_at=datetime.now(),
+            updated_at=datetime.now(),
+            created_by="ai",
+            source=source,
+            case_type="functional",
+            tags=[f"test_point:{tc.get('test_point', '')}"] if tc.get("test_point") else [],
+        )
+        db.add(row)
+        saved_ids.append(tc_id)
+    db.commit()
+    return saved_ids
 
 
 class TestCaseGenerate(BaseModel):
@@ -76,12 +180,22 @@ async def generate_testcases(request: TestCaseGenerate):
         
         client = get_ai_client(use_ollama=use_ollama, use_mock=use_mock)
         
+        # 检索知识库上下文
+        kb_ref = ""
+        if KB_AVAILABLE:
+            try:
+                ctx = retrieve_manual_context(request.requirement[:500], n_results=3)
+                if ctx:
+                    kb_ref = f"\n\n【操作手册参考】:\n{ctx[:3000]}\n"
+            except Exception:
+                pass
+
         # 构建提示词
         prompt = f"""请为以下需求生成{request.count}个测试用例，返回JSON数组格式：
 
 需求：
 {request.requirement}
-
+{kb_ref}
 模块：{request.module}
 
 返回格式（必须是有效的JSON数组）：
@@ -219,12 +333,22 @@ async def generate_testcases_from_svn(request: SVNTestCaseGenerate):
             content_preview = content[:3000]
             max_tokens = 6000
         
+        # 检索知识库上下文
+        kb_ref = ""
+        if KB_AVAILABLE:
+            try:
+                ctx = retrieve_manual_context(content[:500], n_results=3)
+                if ctx:
+                    kb_ref = f"\n\n【操作手册参考】:\n{ctx[:3000]}\n"
+            except Exception:
+                pass
+
         # 构建提示词
         prompt = f"""请为以下需求文档生成{target_count}个测试用例，返回JSON数组格式：
 
 需求文档：
 {content_preview}
-
+{kb_ref}
 模块：{request.module}
 
 测试用例必须覆盖以下维度:
@@ -540,3 +664,460 @@ async def update_ai_config(request: dict):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"更新配置失败: {str(e)}")
+
+
+# ==================== 文件上传生成测试用例 ====================
+
+ALLOWED_EXTENSIONS = {'.html', '.htm', '.txt', '.md', '.docx', '.doc', '.pdf'}
+
+
+def _save_upload_file(upload: UploadFile) -> str:
+    """保存上传文件到临时目录，返回路径"""
+    suffix = Path(upload.filename).suffix.lower()
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的文件格式: {suffix}，支持: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+        )
+    fd, tmp_path = tempfile.mkstemp(suffix=suffix)
+    try:
+        content = upload.file.read()
+        with os.fdopen(fd, 'wb') as f:
+            f.write(content)
+    except Exception:
+        os.close(fd)
+        raise
+    return tmp_path
+
+
+@router.post("/ai/upload-preview")
+async def upload_and_preview(file: UploadFile = File(...)):
+    """
+    上传需求文档并返回结构化预览（模块/功能点/规则/字段）
+
+    支持格式: .html, .htm, .txt, .md, .docx, .pdf
+    前端用此结果展示预览，用户确认后再调 /ai/generate-testcases-from-file 生成用例
+    """
+    if not DOC_PARSER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="文档解析模块不可用")
+
+    tmp_path = _save_upload_file(file)
+    try:
+        structured = parse_document_structured(tmp_path)
+        return {
+            "success": True,
+            "filename": file.filename,
+            "structured": {
+                "modules": structured["modules"],
+                "features": structured["features"],
+                "rules": structured["rules"],
+                "fields": structured["fields"],
+                "axure_notes": structured["axure_notes"],
+                "stats": structured["stats"],
+            },
+            "raw_text_length": len(structured["raw_text"]),
+            "raw_text_preview": structured["raw_text"][:3000],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"文档解析失败: {str(e)}")
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+class FolderPreviewRequest(BaseModel):
+    folder_path: str
+
+
+@router.post("/ai/folder-preview")
+async def folder_preview(request: FolderPreviewRequest):
+    """
+    解析本地 Axure 文件夹并返回结构化预览（模块/功能点/规则/字段/注释）
+    """
+    if not DOC_PARSER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="文档解析模块不可用")
+
+    folder = Path(request.folder_path)
+    if not folder.is_dir():
+        raise HTTPException(status_code=400, detail=f"文件夹不存在: {request.folder_path}")
+
+    try:
+        structured = parse_axure_folder_structured(str(folder))
+        return {
+            "success": True,
+            "filename": folder.name,
+            "structured": {
+                "modules": structured["modules"],
+                "features": structured["features"],
+                "rules": structured["rules"],
+                "fields": structured["fields"],
+                "axure_notes": structured["axure_notes"],
+                "stats": structured["stats"],
+            },
+            "raw_text_length": len(structured["raw_text"]),
+            "raw_text_preview": structured["raw_text"][:3000],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"文件夹解析失败: {str(e)}")
+
+
+@router.post("/ai/generate-testcases-from-file")
+async def generate_testcases_from_file(
+    file: UploadFile = File(...),
+    module: str = Form("默认模块"),
+    count: int = Form(100),
+    provider: Optional[str] = Form(None),
+    model: Optional[str] = Form(None),
+    extra_requirements: Optional[str] = Form(None),
+    db: Session = Depends(get_db),
+):
+    """
+    上传需求文档（HTML/TXT/MD/DOCX/PDF），AI 提取测试点并生成功能测试用例
+
+    流程: 上传文件 → 解析文本 → AI 提取测试点 → AI 生成测试用例
+    """
+    if not DOC_PARSER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="文档解析模块不可用")
+
+    tmp_path = _save_upload_file(file)
+    try:
+        # 1. 解析文档
+        structured = parse_document_structured(tmp_path)
+        raw_text = structured["raw_text"]
+        stats = structured["stats"]
+        print(f"📄 文档解析完成: {file.filename}, {stats}")
+
+        if not raw_text or len(raw_text.strip()) < 10:
+            raise HTTPException(status_code=400, detail="文档内容为空或过短，无法生成测试用例")
+
+        # 2. 根据内容长度调整参数
+        content_length = len(raw_text)
+        if content_length > 8000:
+            content_preview = raw_text[:10000]
+            max_tokens = 16000
+        elif content_length > 3000:
+            content_preview = raw_text[:6000]
+            max_tokens = 12000
+        else:
+            content_preview = raw_text
+            max_tokens = 8000
+
+        # 3. 构建增强 prompt（含结构化信息）
+        structure_hint = ""
+        if structured["modules"]:
+            module_names = [m["name"] for m in structured["modules"]]
+            structure_hint += f"\n已识别模块: {', '.join(module_names)}"
+        if structured["rules"]:
+            rules_text = '\n'.join(f"  - {r}" for r in structured["rules"][:20])
+            structure_hint += f"\n\n业务规则:\n{rules_text}"
+        if structured["fields"]:
+            fields_text = ', '.join(f["name"] for f in structured["fields"][:30])
+            structure_hint += f"\n\n表单字段: {fields_text}"
+        if structured["axure_notes"]:
+            notes_text = '\n'.join(f"  - {n}" for n in structured["axure_notes"][:20])
+            structure_hint += f"\n\nAxure 需求注释:\n{notes_text}"
+
+        extra_hint = ""
+        if extra_requirements:
+            extra_hint = f"\n\n额外测试要求:\n{extra_requirements}"
+
+        # 3.5 从知识库检索操作手册上下文
+        kb_hint = ""
+        if KB_AVAILABLE:
+            try:
+                # 用模块名 + 原始文本前500字作为检索 query
+                query_parts = []
+                if structured["modules"]:
+                    query_parts.extend([m["name"] for m in structured["modules"][:5]])
+                query_parts.append(raw_text[:500])
+                kb_query = " ".join(query_parts)
+
+                kb_context = retrieve_manual_context(kb_query, n_results=5)
+                if kb_context:
+                    kb_hint = f"\n\n【操作手册参考（来自知识库）】:\n{kb_context[:4000]}"
+                    print(f"📚 知识库命中: {len(kb_context)} 字符")
+            except Exception as e:
+                print(f"⚠️ 知识库检索异常: {e}")
+
+        prompt = f"""请为以下需求文档生成{count}个功能测试用例，返回JSON数组格式。
+
+需求文档内容:
+{content_preview}
+{structure_hint}{extra_hint}{kb_hint}
+
+模块: {module}
+
+测试用例必须覆盖以下维度:
+1. 功能测试 - 正常流程、核心功能、业务规则
+2. 边界测试 - 最小值/最大值、临界值、空值、超长数据
+3. 异常测试 - 非法输入、错误参数、异常状态
+4. 安全测试 - SQL注入、XSS攻击、权限控制
+5. 兼容性测试 - 不同浏览器、设备
+
+返回格式（必须是有效的JSON数组）:
+[
+  {{
+    "title": "测试用例标题",
+    "module": "所属模块",
+    "priority": "high/medium/low",
+    "test_point": "对应测试点",
+    "precondition": "前置条件",
+    "steps": ["步骤1", "步骤2", "步骤3", "步骤4", "步骤5"],
+    "expected": "预期结果",
+    "type": "功能测试/边界测试/异常测试/安全测试/兼容性测试"
+  }}
+]
+
+注意:
+1. 只返回JSON数组，不要有其他文字
+2. 每个测试用例必须有完整字段
+3. 测试步骤至少5步，要具体可执行
+4. 测试数据要具体（如: test@example.com），不要用"有效数据"这种泛指
+5. 确保覆盖文档中所有功能点和业务规则，不要遗漏
+"""
+
+        system_prompt = """你是一个专业的测试工程师，擅长从需求文档中提取测试点并生成高质量的功能测试用例。
+你必须:
+- 覆盖文档中提到的所有功能点
+- 为每个功能点生成正常、异常、边界测试用例
+- 特别关注业务规则和校验逻辑
+- 测试步骤具体可执行，测试数据使用真实示例"""
+
+        # 4. 调用 AI
+        use_ollama = provider == "ollama" if provider else None
+        use_mock = provider == "mock" if provider else None
+        client = get_ai_client(use_ollama=use_ollama, use_mock=use_mock, provider=provider)
+
+        use_model = model or getattr(client, 'ai_config', {}).get("model", None) or "deepseek-chat"
+        print(f"🤖 AI 生成中，提供商={provider or 'auto'}, 模型={use_model}, 目标: {count} 个测试用例...")
+        response = client.generate_text(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            temperature=0.3,
+            max_tokens=max_tokens,
+            model=use_model
+        )
+
+        # 5. 解析 AI 响应
+        try:
+            testcases = _parse_ai_testcase_response(response)
+            print(f"✅ AI 生成成功: {len(testcases)} 个测试用例")
+
+            # 6. 保存到数据库
+            saved_ids = _save_testcases_to_db(db, testcases, source="ai_generated")
+            print(f"💾 已保存 {len(saved_ids)} 条用例到数据库")
+
+            return {
+                "success": True,
+                "testcases": testcases,
+                "count": len(testcases),
+                "saved_ids": saved_ids,
+                "source": "file_upload",
+                "filename": file.filename,
+                "document_stats": stats,
+                "coverage": {
+                    "total_modules_in_doc": len(structured["modules"]),
+                    "total_features_in_doc": len(structured["features"]),
+                    "total_rules_in_doc": len(structured["rules"]),
+                    "testcases_generated": len(testcases),
+                }
+            }
+
+        except json.JSONDecodeError as e:
+            print(f"JSON 解析失败: {e}")
+            print(f"原始响应: {response[:500]}")
+            return {
+                "success": False,
+                "error": "AI 响应格式不正确",
+                "detail": str(e),
+                "raw_response_preview": response[:500]
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生成测试用例失败: {str(e)}")
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
+class FolderRequest(BaseModel):
+    folder_path: str
+    module: str = "默认模块"
+    count: int = 100
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    extra_requirements: Optional[str] = None
+
+
+@router.post("/ai/generate-testcases-from-folder")
+async def generate_testcases_from_folder(request: FolderRequest, db: Session = Depends(get_db)):
+    """
+    从本地 Axure 文件夹（_files 目录）解析需求并生成功能测试用例
+
+    流程: 读取文件夹 → 解析 data.js + HTML → AI 生成测试用例
+    """
+    if not DOC_PARSER_AVAILABLE:
+        raise HTTPException(status_code=503, detail="文档解析模块不可用")
+
+    folder = Path(request.folder_path)
+    if not folder.is_dir():
+        raise HTTPException(status_code=400, detail=f"文件夹不存在: {request.folder_path}")
+
+    try:
+        # 1. 解析 Axure 文件夹
+        structured = parse_axure_folder_structured(str(folder))
+        raw_text = structured["raw_text"]
+        stats = structured["stats"]
+        print(f"📂 Axure 文件夹解析完成: {folder.name}, {stats}")
+
+        if not raw_text or len(raw_text.strip()) < 10:
+            raise HTTPException(status_code=400, detail="文件夹内容为空或过短，无法生成测试用例")
+
+        # 2. 内容长度调整
+        content_length = len(raw_text)
+        if content_length > 8000:
+            content_preview = raw_text[:10000]
+            max_tokens = 16000
+        elif content_length > 3000:
+            content_preview = raw_text[:6000]
+            max_tokens = 12000
+        else:
+            content_preview = raw_text
+            max_tokens = 8000
+
+        # 3. 构建增强 prompt
+        structure_hint = ""
+        if structured["modules"]:
+            module_names = [m["name"] for m in structured["modules"]]
+            structure_hint += f"\n已识别模块: {', '.join(module_names)}"
+        if structured["rules"]:
+            rules_text = '\n'.join(f"  - {r}" for r in structured["rules"][:20])
+            structure_hint += f"\n\n业务规则:\n{rules_text}"
+        if structured["fields"]:
+            fields_text = ', '.join(f["name"] for f in structured["fields"][:30])
+            structure_hint += f"\n\n表单字段: {fields_text}"
+        if structured["axure_notes"]:
+            notes_text = '\n'.join(f"  - {n}" for n in structured["axure_notes"][:30])
+            structure_hint += f"\n\nAxure 需求注释:\n{notes_text}"
+
+        extra_hint = ""
+        if request.extra_requirements:
+            extra_hint = f"\n\n额外测试要求:\n{request.extra_requirements}"
+
+        # 3.5 知识库检索
+        kb_hint = ""
+        if KB_AVAILABLE:
+            try:
+                query_parts = [m["name"] for m in structured["modules"][:5]]
+                query_parts.append(raw_text[:500])
+                kb_context = retrieve_manual_context(" ".join(query_parts), n_results=5)
+                if kb_context:
+                    kb_hint = f"\n\n【操作手册参考（来自知识库）】:\n{kb_context[:4000]}"
+                    print(f"📚 知识库命中: {len(kb_context)} 字符")
+            except Exception as e:
+                print(f"⚠️ 知识库检索异常: {e}")
+
+        prompt = f"""请为以下需求文档生成{request.count}个功能测试用例，返回JSON数组格式。
+
+需求文档内容:
+{content_preview}
+{structure_hint}{extra_hint}{kb_hint}
+
+模块: {request.module}
+
+测试用例必须覆盖以下维度:
+1. 功能测试 - 正常流程、核心功能、业务规则
+2. 边界测试 - 最小值/最大值、临界值、空值、超长数据
+3. 异常测试 - 非法输入、错误参数、异常状态
+4. 安全测试 - SQL注入、XSS攻击、权限控制
+5. 兼容性测试 - 不同浏览器、设备
+
+返回格式（必须是有效的JSON数组）:
+[
+  {{
+    "title": "测试用例标题",
+    "module": "所属模块",
+    "priority": "high/medium/low",
+    "test_point": "对应测试点",
+    "precondition": "前置条件",
+    "steps": ["步骤1", "步骤2", "步骤3", "步骤4", "步骤5"],
+    "expected": "预期结果",
+    "type": "功能测试/边界测试/异常测试/安全测试/兼容性测试"
+  }}
+]
+
+注意:
+1. 只返回JSON数组，不要有其他文字
+2. 每个测试用例必须有完整字段
+3. 测试步骤至少5步，要具体可执行
+4. 测试数据要具体（如: test@example.com），不要用"有效数据"这种泛指
+5. 确保覆盖文档中所有功能点和业务规则，不要遗漏
+"""
+
+        system_prompt = """你是一个专业的测试工程师，擅长从需求文档中提取测试点并生成高质量的功能测试用例。
+你必须:
+- 覆盖文档中提到的所有功能点
+- 为每个功能点生成正常、异常、边界测试用例
+- 特别关注业务规则和校验逻辑
+- 测试步骤具体可执行，测试数据使用真实示例"""
+
+        # 4. 调用 AI
+        use_ollama = request.provider == "ollama" if request.provider else None
+        use_mock = request.provider == "mock" if request.provider else None
+        client = get_ai_client(use_ollama=use_ollama, use_mock=use_mock, provider=request.provider)
+
+        use_model = request.model or getattr(client, 'ai_config', {}).get("model", None) or "deepseek-chat"
+        print(f"🤖 AI 生成中，提供商={request.provider or 'auto'}, 模型={use_model}, 目标: {request.count} 个测试用例...")
+        response = client.generate_text(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            temperature=0.3,
+            max_tokens=max_tokens,
+            model=use_model
+        )
+
+        # 5. 解析 AI 响应
+        try:
+            testcases = _parse_ai_testcase_response(response)
+            print(f"✅ AI 生成成功: {len(testcases)} 个测试用例")
+
+            # 6. 保存到数据库
+            saved_ids = _save_testcases_to_db(db, testcases, source="ai_generated")
+            print(f"💾 已保存 {len(saved_ids)} 条用例到数据库")
+
+            return {
+                "success": True,
+                "testcases": testcases,
+                "count": len(testcases),
+                "saved_ids": saved_ids,
+                "source": "axure_folder",
+                "folder_name": folder.name,
+                "document_stats": stats,
+                "coverage": {
+                    "total_modules_in_doc": len(structured["modules"]),
+                    "total_features_in_doc": len(structured["features"]),
+                    "total_rules_in_doc": len(structured["rules"]),
+                    "testcases_generated": len(testcases),
+                }
+            }
+
+        except json.JSONDecodeError as e:
+            print(f"JSON 解析失败: {e}")
+            print(f"原始响应: {response[:500]}")
+            return {
+                "success": False,
+                "error": "AI 响应格式不正确",
+                "detail": str(e),
+                "raw_response_preview": response[:500]
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"生成测试用例失败: {str(e)}")

@@ -26,6 +26,8 @@ import TestDataManagement from './pages/TestDataManagement'
 import DefectManagement from './pages/DefectManagement'
 import QualityDashboard from './pages/QualityDashboard'
 import TestSelection from './pages/TestSelection'
+import RequirementUpload from './pages/RequirementUpload'
+import CodeCompare from './pages/CodeCompare'
 
 // 健康检查轮询间隔（毫秒）
 const HEALTH_CHECK_INTERVAL = 30000
@@ -225,6 +227,8 @@ function App() {
                 { to: '/dashboard', icon: '■', label: '仪表盘' },
                 { to: '/projects-v2', icon: '■', label: '项目列表' },
                 { to: '/test-cases', icon: '■', label: '测试用例' },
+                { to: '/requirement-upload', icon: '■', label: '需求生成用例' },
+                { to: '/code-compare', icon: '■', label: '需求-代码对比' },
                 { to: '/test-suites', icon: '■', label: '测试集管理' },
                 { to: '/test-data', icon: '■', label: '测试数据' },
                 { to: '/defects', icon: '■', label: '缺陷管理' },
@@ -444,6 +448,8 @@ function App() {
               <Route path="/projects-v2" element={<ProjectsV2 />} />
               <Route path="/projects-v2/:projectId" element={<ProjectDetailV2 />} />
               <Route path="/test-cases" element={<TestCases />} />
+              <Route path="/requirement-upload" element={<RequirementUpload />} />
+              <Route path="/code-compare" element={<CodeCompare />} />
               <Route path="/api-specs" element={<ApiSpecList />} />
               <Route path="/api-specs/:id" element={<ApiSpecDetail />} />
               <Route path="/swagger-workbench" element={<SwaggerWorkbench />} />

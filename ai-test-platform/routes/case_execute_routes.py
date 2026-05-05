@@ -311,9 +311,19 @@ def batch_execute_test_cases(
     results = []
     counters = {"passed": 0, "failed": 0, "no_assertion": 0, "error": 0}
 
+    # 从环境关联的项目获取 project_id，如果没有则用第一个项目
+    _proj_id = None
+    if env_id:
+        _env_obj = db.query(Environment).filter(Environment.id == env_id).first()
+        _proj_id = getattr(_env_obj, 'project_id', None) if _env_obj else None
+    if not _proj_id:
+        from database.models import Project
+        _first_proj = db.query(Project).first()
+        _proj_id = _first_proj.id if _first_proj else None
+
     test_run = TestRun(
         id=run_id,
-        project_id=1,
+        project_id=_proj_id,
         environment_id=env_id,
         trigger_type='manual_batch',
         status='running',
@@ -325,7 +335,8 @@ def batch_execute_test_cases(
         skipped_cases=len(skipped_write_cases) + len(skipped_destructive_cases),
     )
     db.add(test_run)
-    db.flush()
+    db.commit()
+    db.refresh(test_run)
 
     for skipped_case_id in skipped_write_cases:
         db.add(RunCase(

@@ -57,6 +57,7 @@ export default function TestCases() {
   // P2-4.1: AI provider availability
   const [aiAvailable, setAiAvailable] = useState(false)
   const [uploadFile, setUploadFile] = useState(null)
+  const [folderPath, setFolderPath] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
   const [testCases, setTestCases] = useState([])
   const [loading, setLoading] = useState(true)
@@ -366,27 +367,31 @@ export default function TestCases() {
   }
 
   const handleImportRequirement = async () => {
-    if (!uploadFile) { setImportError('请选择需求文档'); return }
+    const useFolder = !uploadFile && folderPath?.trim()
+    if (!uploadFile && !useFolder) { setImportError('请选择需求文档或输入 Axure 文件夹路径'); return }
     setImportLoading(true); setImportError(null); setIsGenerating(true)
-    setGenerationProgress(0); setGenerationStep('准备上传文档...')
+    setGenerationProgress(0); setGenerationStep(useFolder ? '准备解析 Axure 文件夹...' : '准备上传文档...')
     try {
       const progressInterval = setInterval(() => {
         setGenerationProgress(prev => prev >= 90 ? prev : prev + 2)
       }, 1000)
       setTimeout(() => setGenerationStep('📚 加载项目知识库...'), 500)
-      setTimeout(() => setGenerationStep(' 解析需求文档...'), 2000)
+      setTimeout(() => setGenerationStep(useFolder ? '📂 解析 Axure 原型注释...' : '📄 解析需求文档...'), 2000)
       setTimeout(() => setGenerationStep('🔍 拆分功能模块...'), 5000)
       setTimeout(() => setGenerationStep('🎯 生成测试场景...'), 12000)
       setTimeout(() => setGenerationStep('✨ 生成测试用例...'), 22000)
 
-      const result = await api.testCases.generate(uploadFile)
+      const result = useFolder
+        ? await api.testCases.generateFromFolder(folderPath.trim())
+        : await api.testCases.generate(uploadFile)
       clearInterval(progressInterval)
       setGenerationProgress(100); setGenerationStep('✅ 生成完成!')
       if (result.success) {
         setImportSuccess({ type: 'requirement', count: result.count })
         loadTestCases()
       } else {
-        setImportError('AI 生成失败: ' + (result.error || '未知错误'))
+        const detail = result.detail ? ` (${result.detail})` : ''
+        setImportError('AI 生成失败: ' + (result.error || '未知错误') + detail)
       }
     } catch (e) {
       setImportError('需求文档导入失败: ' + e.message)
@@ -1487,6 +1492,7 @@ export default function TestCases() {
         generationStep={generationStep}
         generationProgress={generationProgress}
         uploadFile={uploadFile}
+        folderPath={folderPath}
         swaggerFile={swaggerFile}
         swaggerUrl={swaggerUrl}
         swaggerAuthType={swaggerAuthType}
@@ -1616,6 +1622,7 @@ export default function TestCases() {
         onClose={closeImportDialog}
         onNavigate={navigate}
         onSetUploadFile={setUploadFile}
+        onSetFolderPath={setFolderPath}
         onSetSwaggerFile={setSwaggerFile}
         onSetSwaggerUrl={setSwaggerUrl}
         onSetSwaggerAuthType={setSwaggerAuthType}

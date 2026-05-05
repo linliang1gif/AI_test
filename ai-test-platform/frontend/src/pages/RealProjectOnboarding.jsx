@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Card, Form, Input, Button, Steps, message, Space, Alert, Descriptions, Tag, Checkbox, Radio, Spin } from 'antd';
 import { CheckCircleOutlined, InfoCircleOutlined, ApiOutlined, LinkOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-const { Step } = Steps;
 
 // 通用POST请求
 const postJSON = async (url, data) => {
@@ -545,11 +544,7 @@ export default function RealProjectOnboarding() {
   return (
     <div style={{ padding: '24px' }}>
       <Card title="真实项目接入向导">
-        <Steps current={current} style={{ marginBottom: 24 }}>
-          {steps.map(item => (
-            <Step key={item.title} title={item.title} />
-          ))}
-        </Steps>
+        <Steps current={current} style={{ marginBottom: 24 }} items={steps.map(item => ({ key: item.title, title: item.title }))} />
         
         <div style={{ marginTop: 24 }}>
           {steps[current].content}

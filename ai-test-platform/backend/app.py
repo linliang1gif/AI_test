@@ -4,6 +4,7 @@ P2-2 create_app() 工厂函数
 """
 import sys
 from pathlib import Path
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -21,11 +22,20 @@ def create_app() -> FastAPI:
     from backend.logging_config import setup_logging
     setup_logging(settings.LOG_LEVEL)
 
-    # 2. FastAPI 实例
+    # 2. lifespan
+    from backend.startup import on_startup
+
+    @asynccontextmanager
+    async def lifespan(application):
+        await on_startup()
+        yield
+
+    # 3. FastAPI 实例
     app = FastAPI(
         title="AI Test Platform Backend API",
         description="AI测试平台完整后端API",
         version="1.2.0",
+        lifespan=lifespan,
     )
 
     # 3. CORS
@@ -41,11 +51,7 @@ def create_app() -> FastAPI:
     from backend.exception_handlers import register_exception_handlers
     register_exception_handlers(app)
 
-    # 5. 启动事件
-    from backend.startup import on_startup
-    app.add_event_handler("startup", on_startup)
-
-    # 6. 路由注册（集中）
+    # 5. 路由注册（集中）
     from backend.router_registry import register_routers
     register_routers(app)
 

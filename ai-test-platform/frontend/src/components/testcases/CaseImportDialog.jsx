@@ -22,12 +22,14 @@ export default function CaseImportDialog({
   yapiProjectId,
   yapiEmail,
   yapiPassword,
+  folderPath,
   selectedProjectId,
   projects,
   // manual form props
   manualFormProps,
   // callbacks
   onTabChange,
+  onSetFolderPath,
   onClearError,
   onClearSuccess,
   onClose,
@@ -91,10 +93,14 @@ export default function CaseImportDialog({
         {/* 成功提示 */}
         {importSuccess && (
           <div className="mx-6 mt-4 p-4 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">
-            <p className="font-medium mb-2">✅ 导入成功！</p>
-            <p>已生成 <strong>{importSuccess.count}</strong> 条测试用例
-              {importSuccess.apiCount ? `，共 ${importSuccess.apiCount} 个接口` : ''}
-            </p>
+            <p className="font-medium mb-2">✅ {importSuccess.message ? '操作成功！' : '导入成功！'}</p>
+            {importSuccess.message ? (
+              <p>{importSuccess.message}</p>
+            ) : (
+              <p>已生成 <strong>{importSuccess.count}</strong> 条测试用例
+                {importSuccess.apiCount ? `，共 ${importSuccess.apiCount} 个接口` : ''}
+              </p>
+            )}
             {importSuccess.apiSpecId && (
               <p className="mt-1 text-xs text-green-600">API 规范已写入 (ID: {importSuccess.apiSpecId})</p>
             )}
@@ -118,17 +124,31 @@ export default function CaseImportDialog({
           {/* ── 需求文档 Tab ── */}
           {importTab === 'requirement' && !importSuccess && (
             <div>
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">选择需求文档</label>
-                <input type="file" accept=".docx,.xlsx,.pdf,.doc,.xls,.txt"
+              <div className="mb-3">
+                <label className="block text-sm font-medium text-gray-700 mb-2">方式一：上传需求文档</label>
+                <input type="file" accept=".html,.htm,.docx,.xlsx,.pdf,.doc,.xls,.txt,.md"
                   onChange={(e) => onSetUploadFile(e.target.files?.[0] || null)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500" />
                 {uploadFile && <p className="mt-1.5 text-sm text-green-600">✓ 已选择: {uploadFile.name}</p>}
               </div>
+              <div className="relative my-3 flex items-center">
+                <div className="flex-grow border-t border-gray-200"></div>
+                <span className="mx-3 text-xs text-gray-400">或</span>
+                <div className="flex-grow border-t border-gray-200"></div>
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">方式二：Axure 原型文件夹路径</label>
+                <input type="text"
+                  placeholder="如: G:\需求\付款单-企业小程序_v1.2.3_files"
+                  value={typeof folderPath === 'string' ? folderPath : ''}
+                  onChange={(e) => onSetFolderPath?.(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 placeholder-gray-400" />
+                <p className="mt-1 text-xs text-gray-400">支持 Axure 导出的 _files 文件夹，自动解析 data.js 中的需求注释</p>
+              </div>
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4 text-xs text-blue-800">
                 <p className="font-medium mb-1">AI 将自动 <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-xs ml-1">→ 功能用例</span>：</p>
                 <ul className="list-disc list-inside space-y-0.5">
-                  <li>解析需求文档，拆分功能模块</li>
+                  <li>解析需求文档 / Axure 原型注释，拆分功能模块</li>
                   <li>结合项目知识库生成测试场景</li>
                   <li>生成完整测试用例（含业务断言）</li>
                 </ul>
@@ -146,7 +166,7 @@ export default function CaseImportDialog({
                 </div>
               )}
               <div className="flex justify-end">
-                <button onClick={onImportRequirement} disabled={!uploadFile || importLoading}
+                <button onClick={onImportRequirement} disabled={(!uploadFile && !folderPath) || importLoading}
                   className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm flex items-center gap-2">
                   {importLoading ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> AI 生成中...</> : '开始生成'}
                 </button>
