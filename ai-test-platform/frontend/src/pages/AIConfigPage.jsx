@@ -9,6 +9,14 @@ const AIConfigPage = () => {
   const [loading, setLoading] = useState(true);
   const toast = useToast();
 
+  // TAPD 配置
+  const [tapdConfig, setTapdConfig] = useState({
+    workspace_id: '', api_user: '', api_password: '',
+    default_reporter: '', default_assignee: '', default_bug_type: 'codeerr',
+  });
+  const [tapdSaving, setTapdSaving] = useState(false);
+  const [tapdTesting, setTapdTesting] = useState(false);
+
   useEffect(() => {
     loadConfig();
   }, []);
@@ -37,11 +45,56 @@ const AIConfigPage = () => {
       });
       setModuleConfigs(initialModuleConfigs);
       
+      // 加载 TAPD 配置
+      try {
+        const tapdRes = await fetch('/api/v2/code-compare/tapd/config');
+        const tapdData = await tapdRes.json();
+        if (tapdData.success && tapdData.config) {
+          setTapdConfig(prev => ({ ...prev, ...tapdData.config }));
+        }
+      } catch {}
+
     } catch (error) {
       toast.error('加载配置失败: ' + error.message);
       console.error('加载配置错误:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSaveTapd = async () => {
+    if (!tapdConfig.workspace_id || !tapdConfig.api_user || !tapdConfig.api_password) {
+      toast.error('请填写 Workspace ID、API 账号和密码');
+      return;
+    }
+    setTapdSaving(true);
+    try {
+      const res = await fetch('/api/v2/code-compare/tapd/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tapdConfig),
+      });
+      const data = await res.json();
+      if (data.success) toast.success('TAPD 配置已保存');
+      else toast.error(data.detail || '保存失败');
+    } catch (e) {
+      toast.error('保存失败: ' + e.message);
+    } finally {
+      setTapdSaving(false);
+    }
+  };
+
+  const handleTestTapd = async () => {
+    setTapdTesting(true);
+    try {
+      const res = await fetch('/api/v2/code-compare/tapd/test', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) toast.success(data.message || '连接成功');
+      else toast.error(data.message || '连接失败');
+    } catch (e) {
+      toast.error('测试失败: ' + e.message);
+    } finally {
+      setTapdTesting(false);
     }
   };
 
@@ -244,7 +297,104 @@ const AIConfigPage = () => {
         </CardContent>
       </Card>
 
-      {/* 说明 */}
+      {/* TAPD 对接配置 */}
+      <Card>
+        <CardHeader>
+          <CardTitle>TAPD 缺陷推送配置</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-gray-500 mb-4">
+            配置 TAPD Open API 账号后，可在需求-代码对比的 Finding 中一键推送缺陷到 TAPD。
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Workspace ID *</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="在 TAPD 项目 URL 中获取，如 20000001"
+                value={tapdConfig.workspace_id}
+                onChange={e => setTapdConfig(prev => ({ ...prev, workspace_id: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">默认缺陷类型</label>
+              <select
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                value={tapdConfig.default_bug_type}
+                onChange={e => setTapdConfig(prev => ({ ...prev, default_bug_type: e.target.value }))}
+              >
+                <option value="codeerr">代码错误</option>
+                <option value="interface">接口问题</option>
+                <option value="function">功能缺陷</option>
+                <option value="performance">性能问题</option>
+                <option value="others">其他</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">API 账号 *</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="TAPD Open API 账号"
+                value={tapdConfig.api_user}
+                onChange={e => setTapdConfig(prev => ({ ...prev, api_user: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">API 密码 *</label>
+              <input
+                type="password"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="TAPD Open API 密码"
+                value={tapdConfig.api_password}
+                onChange={e => setTapdConfig(prev => ({ ...prev, api_password: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">默认报告人</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                placeholder="TAPD 用户名（可选）"
+                value={tapdConfig.default_reporter}
+                onChange={e => setTapdConfig(prev => ({ ...prev, default_reporter: e.target.value }))}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">默认处理人</label>
+              <input
+                type="text"
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                placeholder="TAPD 用户名（可选）"
+                value={tapdConfig.default_assignee}
+                onChange={e => setTapdConfig(prev => ({ ...prev, default_assignee: e.target.value }))}
+              />
+            </div>
+          </div>
+          <div className="flex gap-3 mt-4">
+            <button
+              onClick={handleSaveTapd}
+              disabled={tapdSaving}
+              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700 disabled:opacity-50"
+            >
+              {tapdSaving ? '保存中...' : '保存配置'}
+            </button>
+            <button
+              onClick={handleTestTapd}
+              disabled={tapdTesting}
+              className="px-4 py-2 bg-gray-100 text-gray-700 text-sm rounded-md border hover:bg-gray-200 disabled:opacity-50"
+            >
+              {tapdTesting ? '测试中...' : '测试连接'}
+            </button>
+          </div>
+          <p className="text-xs text-gray-400 mt-3">
+            获取方式: TAPD → 公司管理 → API 账号 → 创建应用。Workspace ID 在项目 URL 中 (如 tapd.cn/<b>20000001</b>/...)。
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* 配置说明 */}
       <Card>
         <CardHeader>
           <CardTitle>配置说明</CardTitle>

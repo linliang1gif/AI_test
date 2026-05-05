@@ -184,12 +184,16 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ ids }),
     }),
-    generate: (file) => {
+    generate: (file, options = {}) => {
       const formData = new FormData()
       formData.append('file', file)
+      if (options.module) formData.append('module', options.module)
+      if (options.count) formData.append('count', String(options.count))
+      if (options.provider) formData.append('provider', options.provider)
+      if (options.extra_requirements) formData.append('extra_requirements', options.extra_requirements)
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), 300000)
-      return fetch(`${API_BASE_URL}/testcases/generate`, {
+      return fetch(`${API_BASE_URL}/ai/generate-testcases-from-file`, {
         method: 'POST',
         body: formData,
         signal: controller.signal,
@@ -203,6 +207,27 @@ export const api = {
       }).catch(err => {
         clearTimeout(timeoutId)
         if (err.name === 'AbortError') throw new Error('AI生成超时(>5分钟)，请检查AI服务是否正常')
+        throw err
+      })
+    },
+    generateFromFolder: (folderPath, options = {}) => {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 300000)
+      return fetch(`${API_BASE_URL}/ai/generate-testcases-from-folder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder_path: folderPath, ...options }),
+        signal: controller.signal,
+      }).then(async res => {
+        clearTimeout(timeoutId)
+        if (!res.ok) {
+          const body = await res.text().catch(() => '')
+          try { const j = JSON.parse(body); throw new Error(j.error || j.detail || j.message || `HTTP ${res.status}`) } catch(e) { if (e instanceof SyntaxError) throw new Error(body || `生成失败 (HTTP ${res.status})`); throw e }
+        }
+        return res.json()
+      }).catch(err => {
+        clearTimeout(timeoutId)
+        if (err.name === 'AbortError') throw new Error('AI生成超时(>5分钟)')
         throw err
       })
     },
@@ -670,6 +695,58 @@ export const api = {
         body: JSON.stringify(data),
       }),
     },
+
+    // ── 需求-代码对比 ──
+    codeCompare: {
+      uploadCodeSnapshot: (formData) => fetch(`${API_BASE_URL}/v2/code-compare/upload`, {
+        method: 'POST',
+        body: formData,
+      }).then(r => r.json()),
+      cloneRepo: (data) => request(`${API_BASE_URL}/v2/code-compare/clone-repo`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      analyzeRequirementCodeCompare: (data) => request(`${API_BASE_URL}/v2/code-compare/analyze`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      cacheRequirement: (data) => request(`${API_BASE_URL}/v2/code-compare/cache-requirement`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      getCodeCompareReports: () => request(`${API_BASE_URL}/v2/code-compare/reports`),
+      getCodeCompareReportDetail: (reportId) => request(`${API_BASE_URL}/v2/code-compare/reports/${reportId}`),
+      confirmCodeCompareFinding: (reportId, data) => request(`${API_BASE_URL}/v2/code-compare/reports/${reportId}/confirm`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      convertFindingToDefect: (findingId, data) => request(`${API_BASE_URL}/v2/code-compare/findings/${findingId}/convert-to-defect`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      convertFindingToTestCase: (findingId, data) => request(`${API_BASE_URL}/v2/code-compare/findings/${findingId}/convert-to-test-case`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      convertFindingToQuestion: (findingId, data) => request(`${API_BASE_URL}/v2/code-compare/findings/${findingId}/convert-to-question`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      markFindingFalsePositive: (findingId, data) => request(`${API_BASE_URL}/v2/code-compare/findings/${findingId}/mark-false-positive`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      pushFindingToTapd: (findingId, data = {}) => request(`${API_BASE_URL}/v2/code-compare/findings/${findingId}/push-to-tapd`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      getTapdConfig: () => request(`${API_BASE_URL}/v2/code-compare/tapd/config`),
+      saveTapdConfig: (data) => request(`${API_BASE_URL}/v2/code-compare/tapd/config`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      testTapdConnection: () => request(`${API_BASE_URL}/v2/code-compare/tapd/test`, { method: 'POST' }),
+    },
   },
 }
 
@@ -695,3 +772,4 @@ export const pipelineAPI = api.pipeline
 export const knowledgeAPI = api.knowledge
 export const tasksAPI = api.tasks
 export const executorV2API = api.v2.executorV2
+export const codeCompareAPI = api.v2.codeCompare
