@@ -2,18 +2,38 @@
 # -*- coding: utf-8 -*-
 
 """
-需求-代码对比引擎
+需求-代码对比引擎 (v2)
 
-流程:
-1. 解析需求文档 → 功能点清单 A
-2. 解析代码仓库 → 实现清单 B
-3. AI 交叉对比 → 差异报告 (A∩B, A-B, B-A)
-4. 输出 Bug 清单 + 测试用例建议
+改进点:
+- 扩展代码清单：functions / conditions / api_calls / fields / template_conditions
+- 关键词召回：每条需求只把相关代码片段送进 AI，不再共享一份被截断的全局摘要
+- 强化 prompt：四态判断（implemented / inconsistent / partial / missing），强制代码定位
+- 新增 inconsistent finding 类型
+- 携带代码证据片段（从源码读取 ±N 行，脱敏）
+- 低置信度 finding 第二轮复核
 """
 
 import json
-from typing import Dict, Any, Optional, List
+import re
+from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
+
+
+# ── 配置项 ───────────────────────────────────────────
+TOPK_PER_REQ = 12
+SNIPPET_CTX = 8
+REVIEW_CONFIDENCE = 0.55
+REVIEW_TYPES = {"inconsistent", "partial", "uncertain"}
+
+_SENSITIVE_RE = re.compile(
+    r'(?i)(token|password|secret|authorization|cookie|api_key|access_key|private_key)\s*[:=]\s*[\"\']?[^\s\"\']{6,}'
+)
+
+
+def _redact(text: str) -> str:
+    if not text:
+        return text
+    return _SENSITIVE_RE.sub('***REDACTED***', text)
 
 
 def run_req_code_diff(
@@ -21,6 +41,7 @@ def run_req_code_diff(
     code_analysis: Dict[str, Any],
     ai_client=None,
     max_prompt_chars: int = 12000,
+    code_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     执行需求-代码对比分析
@@ -44,17 +65,21 @@ def run_req_code_diff(
     # 1. 提取需求功能点
     req_points = _extract_requirement_points(requirement_data)
 
-    # 2. 提取代码实现清单
+    # 2. 提取代码实现清单（扩展信号）
     code_items = _extract_code_items(code_analysis)
 
-    # 3. 对比
+    # 3. 构建倒排索引以便按需求做召回
+    code_index = _build_code_index(code_items)
+
+    # 4. 对比
     if ai_client:
-        result = _ai_diff(req_points, code_items, code_analysis, ai_client, max_prompt_chars)
-        return result
-    else:
-        result = _rule_based_diff(req_points, code_items)
-        result["_ai_fallback"] = False
-        return result
+        return _ai_diff(
+            req_points, code_items, code_index, code_analysis,
+            ai_client, max_prompt_chars, code_dir,
+        )
+    result = _rule_based_diff(req_points, code_items, code_index)
+    result["_ai_fallback"] = False
+    return result
 
 
 def _extract_requirement_points(req_data: Dict) -> List[Dict]:
@@ -104,86 +129,239 @@ def _extract_requirement_points(req_data: Dict) -> List[Dict]:
 
 
 def _extract_code_items(code_data: Dict) -> List[Dict]:
-    """从代码分析结果中提取实现清单"""
-    items = []
+    """从代码分析结果中提取实现清单（扩展信号）。"""
+    items: List[Dict] = []
 
-    # 组件
+    def _add(name, type_, file, line, detail, weight, source_obj=None):
+        items.append({
+            "id": f"CODE_{len(items)+1:04d}",
+            "name": str(name or "")[:200],
+            "type": type_,
+            "file": file or "",
+            "line": int(line or 0),
+            "detail": str(detail or "")[:600],
+            "weight": weight,
+            "source_obj": source_obj,
+        })
+
     for comp in code_data.get("components", []):
         methods = comp.get("methods", [])
         fields = comp.get("data_fields", [])
-        items.append({
-            "id": f"CODE_{len(items)+1:03d}",
-            "name": comp["name"],
-            "type": comp.get("type", "component"),
-            "file": comp.get("file", ""),
-            "detail": f"组件 {comp['name']}，方法: {', '.join(methods[:10])}，字段: {', '.join(fields[:10])}",
-            "methods": methods,
-            "fields": fields,
-            "conditions": comp.get("template_conditions", []),
-        })
+        conds = comp.get("template_conditions", [])
+        detail = f"组件 {comp.get('name','')}: 方法[{', '.join(methods[:15])}]; 字段[{', '.join(fields[:15])}]"
+        if conds:
+            detail += f"; 条件[{', '.join(c[:60] for c in conds[:8])}]"
+        _add(comp.get("name", ""), comp.get("type", "component"),
+             comp.get("file", ""), comp.get("line", 0), detail,
+             weight=2.0, source_obj=comp)
+        for fname in fields[:30]:
+            _add(f"字段 {fname}", "field",
+                 comp.get("file", ""), comp.get("line", 0),
+                 f"{comp.get('name','')} 数据字段 {fname}", weight=1.2)
+        for cond in conds[:20]:
+            _add(f"v-if {cond[:60]}", "template_condition",
+                 comp.get("file", ""), comp.get("line", 0),
+                 f"{comp.get('name','')} 模板条件: {cond}", weight=1.4)
 
-    # 路由
     for route in code_data.get("routes", []):
-        items.append({
-            "id": f"CODE_{len(items)+1:03d}",
-            "name": f"{route['method']} {route['path']}",
-            "type": "api_route",
-            "file": route.get("file", ""),
-            "detail": f"API 路由 {route['method']} {route['path']} → {route.get('handler', '')}",
-        })
+        name = f"{route.get('method','GET')} {route.get('path','')}"
+        _add(name, "api_route",
+             route.get("file", ""), 0,
+             f"API 路由 {name} → {route.get('handler','')}",
+             weight=2.4, source_obj=route)
+
+    for fn in code_data.get("functions", []):
+        params = fn.get("params", [])
+        decorators = fn.get("decorators", []) or fn.get("annotations", []) or []
+        detail = f"函数 {fn.get('name','')}({', '.join(params[:8])})"
+        if decorators:
+            detail += f" 装饰器/注解: {', '.join(decorators[:4])}"
+        _add(fn.get("name", ""), "function",
+             fn.get("file", ""), fn.get("line", 0),
+             detail, weight=1.6, source_obj=fn)
+
+    for api in code_data.get("api_calls", []):
+        url = api.get("url", "")
+        method = api.get("method", "")
+        _add(f"调用 {method} {url}", "api_call",
+             api.get("file", ""), api.get("line", 0),
+             f"代码内调用 {method} {url}", weight=1.3, source_obj=api)
+
+    for cond in code_data.get("conditions", []):
+        expr = (cond.get("expression") or "")[:120]
+        if not expr:
+            continue
+        _add(f"if {expr[:60]}", "condition",
+             cond.get("file", ""), cond.get("line", 0),
+             f"条件: if {expr}", weight=0.9, source_obj=cond)
 
     return items
 
 
-def _rule_based_diff(req_points: List[Dict], code_items: List[Dict]) -> Dict:
-    """基于规则的简单对比（不用 AI）"""
-    matched = []
-    unimplemented = []
-    extra_code = []
+# ───────────── 关键词分词 / 倒排索引 ─────────────
 
-    code_names = {item["name"].lower() for item in code_items}
-    code_details = " ".join(item.get("detail", "") for item in code_items).lower()
-    req_matched_codes = set()
+_CN_RE = re.compile(r'[\u4e00-\u9fff]+')
+_EN_RE = re.compile(r'[A-Za-z][A-Za-z0-9_]{2,}')
+_PATH_RE = re.compile(r'/[A-Za-z][A-Za-z0-9_\-/]{2,}')
+
+_STOPWORDS = {
+    "the", "and", "for", "this", "that", "with", "from", "into",
+    "返回", "需要", "实现", "支持", "提供", "进行", "如果", "并且",
+    "或者", "可以", "应该", "必须", "页面", "接口", "功能", "用户", "数据",
+}
+
+
+def _tokenize(text: str) -> set:
+    if not text:
+        return set()
+    s = text.lower()
+    tokens: set = set()
+    for w in _EN_RE.findall(s):
+        if w not in _STOPWORDS:
+            tokens.add(w)
+    for path in _PATH_RE.findall(s):
+        for seg in path.split('/'):
+            seg = seg.strip()
+            if len(seg) >= 3 and seg not in _STOPWORDS:
+                tokens.add(seg)
+    for chunk in _CN_RE.findall(s):
+        if len(chunk) <= 1:
+            continue
+        if 2 <= len(chunk) <= 4:
+            tokens.add(chunk)
+        for i in range(len(chunk) - 1):
+            bg = chunk[i:i + 2]
+            if bg not in _STOPWORDS:
+                tokens.add(bg)
+        for i in range(len(chunk) - 2):
+            tg = chunk[i:i + 3]
+            if tg not in _STOPWORDS:
+                tokens.add(tg)
+    return tokens
+
+
+def _build_code_index(code_items: List[Dict]) -> Dict[str, List[int]]:
+    index: Dict[str, List[int]] = {}
+    for idx, item in enumerate(code_items):
+        bag = _tokenize(
+            f"{item.get('name','')} {item.get('detail','')} {item.get('file','')}"
+        )
+        for tok in bag:
+            index.setdefault(tok, []).append(idx)
+        item["_tokens"] = bag
+    return index
+
+
+def _score_code_items(req_tokens: set, code_items: List[Dict],
+                      index: Dict[str, List[int]],
+                      top_k: int = TOPK_PER_REQ) -> List[Dict]:
+    if not req_tokens or not code_items:
+        return []
+    score: Dict[int, float] = {}
+    for tok in req_tokens:
+        for idx in index.get(tok, ()):
+            score[idx] = score.get(idx, 0.0) + 1.0
+    if not score:
+        return []
+    ranked: List[Tuple[float, int]] = []
+    for idx, base in score.items():
+        w = code_items[idx].get("weight", 1.0)
+        ranked.append((base * w, idx))
+    ranked.sort(reverse=True)
+    return [code_items[i] for _, i in ranked[:top_k]]
+
+
+# ───────────── 代码证据片段 ─────────────
+
+def _safe_join(code_dir: str, rel_path: str) -> Optional[Path]:
+    if not code_dir or not rel_path:
+        return None
+    try:
+        base = Path(code_dir).resolve()
+        target = (base / rel_path).resolve()
+        if str(target).startswith(str(base)):
+            return target
+    except Exception:
+        return None
+    return None
+
+
+def _load_snippet(code_dir: Optional[str], rel_path: str, line: int,
+                  ctx: int = SNIPPET_CTX) -> Optional[Dict[str, Any]]:
+    if not code_dir or not rel_path:
+        return None
+    p = _safe_join(code_dir, rel_path)
+    if not p or not p.exists() or not p.is_file():
+        return None
+    try:
+        if p.stat().st_size > 1024 * 1024:
+            return None
+        text = p.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return None
+    lines = text.splitlines()
+    line = max(1, int(line or 1))
+    start = max(1, line - ctx)
+    end = min(len(lines), line + ctx)
+    snippet_lines = []
+    for ln in range(start, end + 1):
+        snippet_lines.append(f"{ln:>5} | {_redact(lines[ln-1])}")
+    return {
+        "file": rel_path,
+        "line": line,
+        "start": start,
+        "end": end,
+        "snippet": "\n".join(snippet_lines)[:4000],
+    }
+
+
+def _rule_based_diff(req_points: List[Dict], code_items: List[Dict],
+                     code_index: Optional[Dict[str, List[int]]] = None) -> Dict:
+    """基于召回的规则对比（不用 AI）。"""
+    matched: List[Dict] = []
+    unimplemented: List[Dict] = []
+    extra_code: List[Dict] = []
+
+    if code_index is None:
+        code_index = _build_code_index(code_items)
+    matched_code_ids: set = set()
 
     for req in req_points:
-        req_name = req["name"].lower()
-        req_keywords = set(re.findall(r'[\u4e00-\u9fff]+|\w{3,}', req_name))
-
-        found = False
-        for ci in code_items:
-            ci_text = (ci["name"] + " " + ci.get("detail", "")).lower()
-            # 关键词匹配
-            overlap = sum(1 for kw in req_keywords if kw in ci_text)
-            if overlap >= max(1, len(req_keywords) // 3):
-                matched.append({
-                    "requirement": req["name"],
-                    "req_id": req["id"],
-                    "code_item": ci["name"],
-                    "code_id": ci["id"],
-                    "file": ci.get("file", ""),
-                    "status": "可能已实现",
-                    "confidence": min(overlap / max(len(req_keywords), 1), 1.0),
-                    "notes": f"关键词匹配 {overlap}/{len(req_keywords)}",
-                })
-                req_matched_codes.add(ci["id"])
-                found = True
-                break
-
-        if not found:
+        req_text = f"{req.get('name','')} {req.get('detail','')}"
+        req_tokens = _tokenize(req_text)
+        topk = _score_code_items(req_tokens, code_items, code_index, top_k=3)
+        if topk:
+            best = topk[0]
+            overlap = len(req_tokens & best.get("_tokens", set()))
+            denom = max(1, len(req_tokens))
+            conf = min(overlap / denom + 0.2, 1.0) if denom else 0.4
+            matched.append({
+                "requirement": req["name"],
+                "req_id": req["id"],
+                "code_item": best["name"],
+                "code_id": best["id"],
+                "file": best.get("file", ""),
+                "line": best.get("line", 0),
+                "status": "可能已实现",
+                "confidence": round(conf, 2),
+                "notes": f"关键词召回 top1，命中 {overlap}/{denom}",
+            })
+            matched_code_ids.add(best["id"])
+        else:
             unimplemented.append({
                 "requirement": req["name"],
                 "req_id": req["id"],
                 "severity": "medium",
-                "suggestion": f"需求 '{req['name']}' 在代码中未找到对应实现",
+                "suggestion": f"需求 '{req['name']}' 在代码中未找到关键词匹配",
             })
 
     for ci in code_items:
-        if ci["id"] not in req_matched_codes:
+        if ci["id"] not in matched_code_ids and ci["type"] in {"api_route", "function", "component"}:
             extra_code.append({
                 "code_item": ci["name"],
                 "code_id": ci["id"],
                 "file": ci.get("file", ""),
-                "notes": "代码中存在但需求文档中未提及",
+                "notes": "代码中存在但需求文档中未提及（规则匹配）",
             })
 
     return {
@@ -196,13 +374,10 @@ def _rule_based_diff(req_points: List[Dict], code_items: List[Dict]) -> Dict:
         },
         "matched": matched,
         "unimplemented": unimplemented,
-        "extra_code": extra_code,
+        "extra_code": extra_code[:200],
         "bugs": [],
         "test_suggestions": [],
     }
-
-
-import re
 
 
 def _ai_call_with_timeout(ai_client, prompt, system_prompt, timeout=180, max_tokens=8000):
@@ -252,146 +427,369 @@ def _parse_ai_json(response: str) -> dict:
     return json.loads(response)
 
 
+_STATUS_MAP = {
+    "已实现": "implemented",
+    "implemented": "implemented",
+    "已完成": "implemented",
+    "部分实现": "partial",
+    "partial": "partial",
+    "实现不一致": "inconsistent",
+    "实现有误": "inconsistent",
+    "inconsistent": "inconsistent",
+    "未实现": "missing",
+    "missing": "missing",
+    "未找到": "missing",
+    "无法确认": "uncertain",
+    "uncertain": "uncertain",
+}
+
+
+def _normalize_status(s: Any) -> str:
+    if not s:
+        return "uncertain"
+    return _STATUS_MAP.get(str(s).strip(), "uncertain")
+
+
+def _format_candidate_block(req_id: str, req: Dict, candidates: List[Dict]) -> str:
+    """把单条需求的候选代码格式化成 prompt 内的小节。"""
+    head = f"### {req_id} {req.get('source','')} 需求\n- 需求原文: {req.get('detail') or req.get('name','')}"
+    if not candidates:
+        return head + "\n- 候选代码: （未召回到相关代码）"
+    lines = [head, f"- 候选代码（已按相关度排序，共 {len(candidates)} 条，仅供你定位，最终判断需基于这些线索）:"]
+    for c in candidates:
+        loc = f"{c.get('file','')}:{c.get('line',0)}" if c.get("line") else c.get("file", "")
+        lines.append(f"  * [{c.get('type','')}] {c.get('name','')[:80]}  @ {loc}")
+        detail = (c.get("detail") or "")[:160]
+        if detail:
+            lines.append(f"      detail: {detail}")
+    return "\n".join(lines)
+
+
 def _ai_diff(
     req_points: List[Dict],
     code_items: List[Dict],
+    code_index: Dict[str, List[int]],
     code_analysis: Dict,
     ai_client,
     max_chars: int,
+    code_dir: Optional[str] = None,
 ) -> Dict:
-    """使用 AI 做深度对比分析 —— 分批逐组对比，确保每条需求都被仔细检查"""
-    from utils.code_analyzer import summarize_code_analysis
+    """AI 深度对比 —— 按需求召回相关代码 + 四态判断 + 证据片段 + 低置信复核。"""
 
-    # ── 1. 构建完整的代码摘要 ──
-    code_text = summarize_code_analysis(code_analysis)
-    # 提高上限到 20000 字符，尽量保留更多代码信息
-    code_char_limit = 20000
-    if len(code_text) > code_char_limit:
-        code_text = code_text[:code_char_limit] + "\n... (代码摘要已截断，共 {} 字符)".format(len(code_text))
+    system_prompt = """你是一位资深 QA 测试工程师，对需求文档与代码实现做逐条比对。
 
-    system_prompt = """你是一位资深 QA 测试工程师，正在做需求文档 vs 代码实现的逐条对比。
+强制规则：
+1. 逐条覆盖：每条需求必须给出 status，且只能取其中之一：implemented / partial / inconsistent / missing
+   - implemented：代码完整覆盖该需求
+   - partial：核心功能存在，但缺少校验/边界/分支/文案等细节
+   - inconsistent：代码与需求字面或行为不一致（例如校验范围不同、文案不同、状态流转不同）
+   - missing：在候选代码中找不到对应实现
+2. 强制定位：每条结论必须给出 file 与（如能给出）line；引用候选代码以外的"凭印象"判断不允许
+3. 不一致细节：partial / inconsistent 必须在 inconsistencies 字段说明"需求要求 vs 代码实际"对比项
+4. 不要发明：候选代码没出现的文件/函数不要捏造
+5. 输出严格 JSON，不要解释文字"""
 
-你必须严格遵循以下原则：
-1. **逐条检查**：每一条需求都必须给出明确结论（已实现/部分实现/未实现/实现有误）
-2. **不要遗漏**：即使看起来已实现，也要检查边界条件、异常处理、文案是否一致
-3. **关注细节**：表单校验规则、字段类型、必填/选填、提示文案、状态流转、条件显示/隐藏
-4. **具体引用**：引用具体的代码文件名、函数名、行为来佐证你的结论
-5. **Bug 格式**：发现问题必须给出操作步骤、预期结果、实际结果
-6. 只返回 JSON，不要其他文字"""
-
-    # ── 2. 分批：每批最多 8 条需求，确保 AI 有足够 token 仔细分析 ──
-    BATCH_SIZE = 8
-    all_matched = []
-    all_unimplemented = []
-    all_extra = []
-    all_bugs = []
-    all_test_suggestions = []
+    BATCH_SIZE = 6
+    all_matched: List[Dict] = []
+    all_unimplemented: List[Dict] = []
+    all_inconsistent: List[Dict] = []
+    all_extra: List[Dict] = []
+    all_bugs: List[Dict] = []
+    all_test_suggestions: List[Dict] = []
+    matched_code_ids: set = set()
 
     total_batches = (len(req_points) + BATCH_SIZE - 1) // BATCH_SIZE
-    print(f"📋 需求共 {len(req_points)} 条，分 {total_batches} 批对比...")
+    print(f"📋 需求共 {len(req_points)} 条，分 {total_batches} 批对比（按需召回 v2）...")
 
     for batch_idx in range(0, len(req_points), BATCH_SIZE):
         batch = req_points[batch_idx:batch_idx + BATCH_SIZE]
         batch_num = batch_idx // BATCH_SIZE + 1
-        print(f"  🔍 对比第 {batch_num}/{total_batches} 批 ({len(batch)} 条需求)...")
 
-        # 构建需求详情（发送完整 detail，不仅仅是名称）
-        req_text_parts = []
+        # 为本批的每条需求做关键词召回
+        candidate_blocks = []
+        candidates_by_req: Dict[str, List[Dict]] = {}
         for p in batch:
-            detail = p.get('detail', '') or p.get('name', '')
-            source = p.get('source', '')
-            req_text_parts.append(f"  {p['id']} [{source}]: {detail}")
-        req_text = "\n".join(req_text_parts)
+            req_text = f"{p.get('name','')} {p.get('detail','')}"
+            req_tokens = _tokenize(req_text)
+            cand = _score_code_items(req_tokens, code_items, code_index, top_k=TOPK_PER_REQ)
+            candidates_by_req[p["id"]] = cand
+            for c in cand:
+                matched_code_ids.add(c["id"])
+            candidate_blocks.append(_format_candidate_block(p["id"], p, cand))
 
-        prompt = f"""请严格逐条对比以下 {len(batch)} 条需求与代码实现。
+        prompt_body = "\n\n".join(candidate_blocks)
 
-## 本批需求功能点（第 {batch_num} 批，共 {total_batches} 批）
-{req_text}
+        prompt = f"""请对以下 {len(batch)} 条需求逐条做需求-代码比对（第 {batch_num}/{total_batches} 批）。
 
-## 代码实现摘要
-{code_text}
+{prompt_body}
 
-请以 JSON 格式返回本批对比结果:
+请严格返回如下 JSON：
 {{
-  "matched": [
-    {{ "req_id": "REQ_xxx", "requirement": "需求原文", "code_item": "对应的组件/函数/文件", "file": "文件路径",
-       "status": "已实现|部分实现|实现有误", "notes": "具体说明实现情况，引用代码证据", "confidence": 0.9 }}
-  ],
-  "unimplemented": [
-    {{ "req_id": "REQ_xxx", "requirement": "需求原文", "severity": "high|medium|low",
-       "suggestion": "具体说明为什么判断未实现，以及建议" }}
-  ],
-  "bugs": [
-    {{ "title": "[模块] 问题简述", "severity": "high|medium|low", "req_id": "REQ_xxx",
-       "steps": "1. xxx\\n2. xxx", "expected": "预期结果", "actual": "实际代码行为",
-       "code_evidence": "文件名:行号 或 函数名" }}
-  ],
-  "test_suggestions": [
-    {{ "title": "测试建议标题", "priority": "high|medium|low", "req_id": "REQ_xxx",
-       "test_points": ["测试点1", "测试点2"] }}
+  "results": [
+    {{
+      "req_id": "REQ_xxx",
+      "status": "implemented|partial|inconsistent|missing",
+      "confidence": 0.0-1.0,
+      "code_item": "命中的组件/函数/路由名（必须来自候选代码）",
+      "file": "文件相对路径（必须来自候选代码）",
+      "line": 整数行号或 0,
+      "notes": "结论依据，引用候选代码片段",
+      "inconsistencies": [
+        {{ "aspect": "校验/文案/状态流转/字段/边界", "expected": "需求要求", "actual": "代码实际" }}
+      ],
+      "test_points": ["针对该需求的关键测试点"]
+    }}
   ]
 }}
 
-关键要求：
-- 每条需求必须出现在 matched 或 unimplemented 中，不允许遗漏
-- "部分实现"和"实现有误"的必须在 bugs 里给出具体 Bug
-- 仔细检查：文案是否一致、校验规则是否完整、边界条件是否处理
+要求：
+- 候选代码为空 → 直接 status=missing
+- partial 或 inconsistent 必须填 inconsistencies 至少一条
 - 只返回 JSON"""
 
         try:
             response = _ai_call_with_timeout(ai_client, prompt, system_prompt, timeout=180, max_tokens=8000)
-            batch_result = _parse_ai_json(response)
-
-            all_matched.extend(batch_result.get("matched", []))
-            all_unimplemented.extend(batch_result.get("unimplemented", []))
-            all_bugs.extend(batch_result.get("bugs", []))
-            all_test_suggestions.extend(batch_result.get("test_suggestions", []))
-
+            parsed = _parse_ai_json(response)
+            results = parsed.get("results") or parsed.get("items") or []
         except Exception as e:
-            print(f"  ⚠️ 第 {batch_num} 批 AI 分析失败: {e}，对该批使用规则匹配")
-            # 该批降级为规则匹配
-            batch_code_items = code_items
-            batch_rule = _rule_based_diff(batch, batch_code_items)
-            all_matched.extend(batch_rule.get("matched", []))
-            all_unimplemented.extend(batch_rule.get("unimplemented", []))
+            print(f"  ⚠️ 第 {batch_num} 批 AI 分析失败: {e}，回退规则匹配")
+            rule = _rule_based_diff(batch, code_items, code_index)
+            all_matched.extend(rule.get("matched", []))
+            all_unimplemented.extend(rule.get("unimplemented", []))
+            continue
 
-    # ── 3. 额外代码检查（单独一次调用） ──
-    try:
-        extra_prompt = f"""以下是代码中存在的组件/路由/函数，请找出需求文档中没有提及但代码中存在的额外功能。
+        # 把 AI 结果分类到 matched / unimplemented / inconsistent / bugs
+        for r in results:
+            req_id = r.get("req_id") or ""
+            req = next((p for p in batch if p["id"] == req_id), None) or (batch[0] if batch else None)
+            if not req:
+                continue
+            status = _normalize_status(r.get("status"))
+            confidence = r.get("confidence")
+            try:
+                confidence = float(confidence)
+            except Exception:
+                confidence = 0.6
+            confidence = max(0.0, min(1.0, confidence))
 
-## 代码实现清单
-{chr(10).join(f"  {ci['id']}: {ci['name']} ({ci.get('type','')}) - {ci.get('file','')}" for ci in code_items[:40])}
+            file_ = r.get("file") or ""
+            line_ = r.get("line") or 0
+            try:
+                line_ = int(line_)
+            except Exception:
+                line_ = 0
+            evidence_snippet = _load_snippet(code_dir, file_, line_) if file_ else None
+            notes = r.get("notes", "")
+            incs = r.get("inconsistencies") or []
+            test_points = r.get("test_points") or []
 
-## 需求功能点清单
-{chr(10).join(f"  {p['id']}: {p['name']}" for p in req_points[:60])}
+            common = {
+                "req_id": req_id,
+                "requirement": req.get("name", ""),
+                "code_item": r.get("code_item", ""),
+                "file": file_,
+                "line": line_,
+                "confidence": round(confidence, 2),
+                "notes": notes,
+                "status_raw": r.get("status"),
+                "status_norm": status,
+                "inconsistencies": incs,
+                "test_points": test_points,
+                "evidence_snippet": evidence_snippet,
+            }
 
-返回 JSON:
-{{ "extra_code": [ {{ "code_item": "名称", "file": "文件路径", "notes": "说明" }} ] }}
-只返回 JSON"""
-        extra_resp = _ai_call_with_timeout(ai_client, extra_prompt, system_prompt, timeout=60, max_tokens=4000)
-        extra_result = _parse_ai_json(extra_resp)
-        all_extra.extend(extra_result.get("extra_code", []))
-    except Exception as e:
-        print(f"  ⚠️ 额外代码检查失败: {e}")
+            if status == "implemented":
+                all_matched.append({**common, "status": "已实现"})
+            elif status == "partial":
+                all_matched.append({**common, "status": "部分实现"})
+            elif status == "inconsistent":
+                all_inconsistent.append(common)
+                # 同步生成一个 bug 提示
+                bug_steps = []
+                for it in incs[:3]:
+                    bug_steps.append(
+                        f"{it.get('aspect','')}: 需求={it.get('expected','')}, 代码={it.get('actual','')}"
+                    )
+                all_bugs.append({
+                    "title": f"[实现不一致] {req.get('name','')[:60]}",
+                    "severity": "medium",
+                    "req_id": req_id,
+                    "steps": "\n".join(bug_steps) or notes,
+                    "expected": "; ".join(it.get("expected", "") for it in incs[:3]),
+                    "actual": "; ".join(it.get("actual", "") for it in incs[:3]),
+                    "code_evidence": f"{file_}:{line_}" if file_ else "",
+                })
+            else:  # missing / uncertain → unimplemented
+                severity = "high" if status == "missing" else "medium"
+                all_unimplemented.append({
+                    "req_id": req_id,
+                    "requirement": req.get("name", ""),
+                    "severity": severity,
+                    "suggestion": notes or f"需求 '{req.get('name','')}' 在代码中未找到对应实现",
+                    "status_norm": status,
+                    "confidence": round(confidence, 2),
+                })
 
-    # ── 4. 汇总结果 ──
-    result = {
-        "summary": {
-            "total_req_points": len(req_points),
-            "total_code_items": len(code_items),
-            "matched": len(all_matched),
-            "unimplemented": len(all_unimplemented),
-            "extra_code": len(all_extra),
-            "bugs_found": len(all_bugs),
-        },
+            if test_points:
+                all_test_suggestions.append({
+                    "title": f"验证 {req.get('name','')[:40]}",
+                    "priority": "high" if status in ("missing", "inconsistent") else "medium",
+                    "req_id": req_id,
+                    "test_points": test_points,
+                })
+
+    # ── 低置信度 / 不一致 二次复核（B3） ──
+    review_targets = []
+    for item in list(all_matched):
+        if item.get("status") == "部分实现" or item.get("confidence", 1.0) < REVIEW_CONFIDENCE:
+            review_targets.append(("matched", item))
+    for item in list(all_inconsistent):
+        if item.get("confidence", 1.0) < REVIEW_CONFIDENCE + 0.15:
+            review_targets.append(("inconsistent", item))
+
+    if review_targets:
+        print(f"🔁 低置信度复核 {len(review_targets)} 条 ...")
+        # 单批最多 4 条
+        for i in range(0, len(review_targets), 4):
+            chunk = review_targets[i:i + 4]
+            blocks = []
+            for kind, it in chunk:
+                req_id = it.get("req_id") or ""
+                req = next((p for p in req_points if p["id"] == req_id), None)
+                if not req:
+                    continue
+                cand = _score_code_items(_tokenize(f"{req.get('name','')} {req.get('detail','')}"),
+                                          code_items, code_index, top_k=8)
+                snippets = []
+                for c in cand[:5]:
+                    snip = _load_snippet(code_dir, c.get("file", ""), c.get("line", 0))
+                    if snip:
+                        snippets.append(f"-- {c.get('file','')} ({c.get('type','')}) --\n{snip['snippet']}")
+                blocks.append(
+                    f"### {req_id} 当前判断: {it.get('status') or it.get('status_norm')} "
+                    f"confidence={it.get('confidence')}\n"
+                    f"需求: {req.get('detail') or req.get('name','')}\n"
+                    f"前次结论: {it.get('notes','')}\n"
+                    f"参考代码片段:\n" + ("\n\n".join(snippets) if snippets else "(无代码片段)")
+                )
+            review_prompt = (
+                "请对以下需求复核，判断之前的结论是否准确。\n\n"
+                + "\n\n".join(blocks)
+                + "\n\n返回 JSON：\n"
+                "{ \"reviews\": ["
+                "{ \"req_id\": \"REQ_xxx\", \"final_status\": \"implemented|partial|inconsistent|missing\","
+                " \"confidence\": 0.0-1.0, \"notes\": \"复核结论\","
+                " \"inconsistencies\": [ {\"aspect\":\"\", \"expected\":\"\", \"actual\":\"\"} ] }"
+                "] }\n只返回 JSON"
+            )
+            try:
+                rresp = _ai_call_with_timeout(ai_client, review_prompt, system_prompt, timeout=120, max_tokens=4000)
+                rparsed = _parse_ai_json(rresp)
+                for rev in (rparsed.get("reviews") or []):
+                    rid = rev.get("req_id")
+                    if not rid:
+                        continue
+                    final = _normalize_status(rev.get("final_status"))
+                    new_conf = rev.get("confidence")
+                    try:
+                        new_conf = float(new_conf)
+                    except Exception:
+                        new_conf = None
+                    notes = rev.get("notes", "")
+                    incs = rev.get("inconsistencies") or []
+
+                    # 在三个池子中找到该 req 并更新（最多更新一处）
+                    found = False
+                    for pool, ftype in ((all_matched, "matched"), (all_inconsistent, "inconsistent"),
+                                          (all_unimplemented, "unimplemented")):
+                        for it in pool:
+                            if it.get("req_id") == rid and not found:
+                                if new_conf is not None:
+                                    it["confidence"] = round(max(0.0, min(1.0, new_conf)), 2)
+                                it["notes"] = (it.get("notes", "") + "\n[复核] " + notes).strip()
+                                if incs:
+                                    it["inconsistencies"] = incs
+                                it["reviewed"] = True
+                                found = True
+                                break
+                        if found:
+                            break
+
+                    # 如果 final 与原分类不一致，做迁移
+                    if final == "missing":
+                        for pool in (all_matched, all_inconsistent):
+                            tgt = next((x for x in pool if x.get("req_id") == rid), None)
+                            if tgt:
+                                pool.remove(tgt)
+                                all_unimplemented.append({
+                                    "req_id": rid,
+                                    "requirement": tgt.get("requirement", ""),
+                                    "severity": "high",
+                                    "suggestion": notes or "复核后判断为未实现",
+                                    "status_norm": "missing",
+                                    "confidence": tgt.get("confidence", 0.6),
+                                })
+                                break
+                    elif final == "inconsistent":
+                        for pool in (all_matched, all_unimplemented):
+                            tgt = next((x for x in pool if x.get("req_id") == rid), None)
+                            if tgt:
+                                pool.remove(tgt)
+                                tgt["status_norm"] = "inconsistent"
+                                tgt["inconsistencies"] = incs or tgt.get("inconsistencies", [])
+                                all_inconsistent.append(tgt)
+                                break
+                    elif final == "implemented":
+                        for pool in (all_inconsistent, all_unimplemented):
+                            tgt = next((x for x in pool if x.get("req_id") == rid), None)
+                            if tgt:
+                                pool.remove(tgt)
+                                tgt["status"] = "已实现"
+                                tgt["status_norm"] = "implemented"
+                                all_matched.append(tgt)
+                                break
+            except Exception as e:
+                print(f"  ⚠️ 复核失败: {e}")
+
+    # ── 额外代码（在召回中没被任何需求命中的） ──
+    extra_candidates = [
+        ci for ci in code_items
+        if ci["id"] not in matched_code_ids
+        and ci["type"] in {"api_route", "function", "component"}
+        and ci.get("name")
+    ]
+    for ci in extra_candidates[:80]:
+        all_extra.append({
+            "code_item": ci["name"],
+            "code_id": ci["id"],
+            "file": ci.get("file", ""),
+            "line": ci.get("line", 0),
+            "notes": "代码中存在但未被任何需求点命中（可能为额外实现/技术代码/需求遗漏）",
+        })
+
+    summary = {
+        "total_req_points": len(req_points),
+        "total_code_items": len(code_items),
+        "matched": len(all_matched),
+        "unimplemented": len(all_unimplemented),
+        "inconsistent": len(all_inconsistent),
+        "extra_code": len(all_extra),
+        "bugs_found": len(all_bugs),
+    }
+    print(
+        f"✅ 对比完成: implemented/partial={len(all_matched)}, "
+        f"missing={len(all_unimplemented)}, inconsistent={len(all_inconsistent)}, "
+        f"extra={len(all_extra)}, bugs={len(all_bugs)}"
+    )
+    return {
+        "summary": summary,
         "matched": all_matched,
         "unimplemented": all_unimplemented,
+        "inconsistent": all_inconsistent,
         "extra_code": all_extra,
         "bugs": all_bugs,
         "test_suggestions": all_test_suggestions,
         "_ai_fallback": False,
         "_batch_count": total_batches,
+        "_engine_version": "v2",
     }
-
-    print(f"✅ 对比完成: {len(all_matched)} 已实现, {len(all_unimplemented)} 未实现, {len(all_bugs)} 个Bug")
-    return result

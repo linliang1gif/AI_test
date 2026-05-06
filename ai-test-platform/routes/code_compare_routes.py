@@ -32,7 +32,7 @@ import uuid
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -222,6 +222,49 @@ from urllib.parse import urlparse
 _SSRF_ALLOW_LOCAL_HTTP = os.getenv("ALLOW_LOCAL_GIT_HTTP", "false").lower() == "true"
 
 
+def _parse_allowed_git_hosts() -> set:
+    """解析 ALLOWED_GIT_HOSTS 环境变量为小写 host 集合"""
+    raw = os.getenv("ALLOWED_GIT_HOSTS", "")
+    return {h.strip().lower() for h in raw.split(",") if h.strip()}
+
+
+def _parse_allowed_git_cidrs() -> list:
+    """解析 ALLOWED_GIT_CIDRS 环境变量为 ip_network 列表"""
+    raw = os.getenv("ALLOWED_GIT_CIDRS", "")
+    nets = []
+    for c in raw.split(","):
+        c = c.strip()
+        if not c:
+            continue
+        try:
+            nets.append(ipaddress.ip_network(c, strict=False))
+        except ValueError:
+            # 静默忽略非法 CIDR（也不暴露原始值到日志）
+            pass
+    return nets
+
+
+_ALLOWED_GIT_HOSTS = _parse_allowed_git_hosts()
+_ALLOWED_GIT_CIDRS = _parse_allowed_git_cidrs()
+
+
+def _is_host_in_private_whitelist(host_lower: str, ip_str: str) -> bool:
+    """判断 host / ip 是否命中内网白名单（仅放开 private 检查）"""
+    if host_lower in _ALLOWED_GIT_HOSTS:
+        return True
+    if ip_str in _ALLOWED_GIT_HOSTS:  # 用户也可能直接把 IP 放到 ALLOWED_GIT_HOSTS
+        return True
+    if _ALLOWED_GIT_CIDRS:
+        try:
+            ip_obj = ipaddress.ip_address(ip_str)
+            for net in _ALLOWED_GIT_CIDRS:
+                if ip_obj in net:
+                    return True
+        except ValueError:
+            pass
+    return False
+
+
 def _sanitize_git_url_for_log(url: str) -> str:
     """脱敏 Git URL 中的 token，用于安全日志"""
     return re.sub(r'(https?://)([^@]+)@', r'\1***@', url)
@@ -230,6 +273,12 @@ def _sanitize_git_url_for_log(url: str) -> str:
 def _validate_repo_url(repo_url: str) -> tuple:
     """
     Phase C2 SSRF 防护: 校验 Git 仓库 URL 是否安全。
+
+    支持内网白名单（环境变量）：
+      - ALLOWED_GIT_HOSTS=host1,host2,ip1   # host/IP 精确命中后放开 private 检查
+      - ALLOWED_GIT_CIDRS=10.0.0.0/8,...    # CIDR 命中后放开 private 检查
+    白名单 *不能* 绕过 loopback/link-local/multicast/reserved/metadata 检查。
+
     返回 (ok: bool, error_message: str)
     """
     parsed = urlparse(repo_url)
@@ -254,9 +303,11 @@ def _validate_repo_url(repo_url: str) -> tuple:
 
     host_lower = host_part.lower()
 
-    # 禁止 localhost 名称
+    # 禁止 localhost 名称（除非显式加入白名单）
     if host_lower in ("localhost", "localhost.localdomain"):
-        return False, "不允许访问 localhost"
+        if host_lower in _ALLOWED_GIT_HOSTS:
+            return True, ""
+        return False, "不允许访问 localhost。如确需放行，请在环境变量 ALLOWED_GIT_HOSTS 中添加该 host"
 
     # DNS 解析并检查 IP
     try:
@@ -264,19 +315,29 @@ def _validate_repo_url(repo_url: str) -> tuple:
         for _, _, _, _, sockaddr in addrs:
             ip_str = sockaddr[0]
             ip = ipaddress.ip_address(ip_str)
+
+            # 优先检查 metadata / loopback / link-local / multicast / reserved
+            # 这些不可被白名单绕过
+            if ip_str == "169.254.169.254":
+                return False, "不允许访问 metadata 服务地址 169.254.169.254"
             if ip.is_loopback:
                 return False, f"不允许访问 loopback 地址: {ip_str}"
-            if ip.is_private:
-                return False, f"不允许访问内网地址: {ip_str}"
             if ip.is_link_local:
                 return False, f"不允许访问 link-local 地址: {ip_str}"
             if ip.is_multicast:
                 return False, f"不允许访问 multicast 地址: {ip_str}"
             if ip.is_reserved:
                 return False, f"不允许访问 reserved 地址: {ip_str}"
-            # 特别检查 AWS metadata
-            if ip_str == "169.254.169.254":
-                return False, "不允许访问 metadata 服务地址 169.254.169.254"
+
+            # private 检查：可被白名单豁免
+            if ip.is_private:
+                if _is_host_in_private_whitelist(host_lower, ip_str):
+                    continue  # 此 IP 放行，继续检查下一条 sockaddr
+                return False, (
+                    f"不允许访问内网地址: {ip_str}. "
+                    f"如需访问内网 Git 服务器，请在后端环境变量配置 "
+                    f"ALLOWED_GIT_HOSTS=<host_or_ip> 或 ALLOWED_GIT_CIDRS=<CIDR>"
+                )
     except socket.gaierror:
         # DNS 无法解析，允许继续（git clone 自己会报错）
         pass
@@ -368,6 +429,12 @@ class PushToTapdRequest(BaseModel):
     expected: Optional[str] = None        # 预期结果
     actual: Optional[str] = None          # 实际结果
     code_location: Optional[str] = None   # 代码位置
+
+
+class BatchPushToTapdRequest(BaseModel):
+    finding_ids: List[str]
+    skip_already_pushed: bool = True   # 已推送 finding 是否跳过（默认是）
+    iteration: Optional[str] = None    # 可选：批量为所有 finding 指定同一迭代
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -683,7 +750,10 @@ async def analyze_requirement_code(request: AnalyzeRequest):
             ai_mode = "fallback"
 
     try:
-        diff_result = run_req_code_diff(requirement_data, code_analysis, ai_client=ai_client)
+        diff_result = run_req_code_diff(
+            requirement_data, code_analysis,
+            ai_client=ai_client, code_dir=code_path,
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"对比分析失败: {str(e)}")
 
@@ -712,6 +782,7 @@ async def analyze_requirement_code(request: AnalyzeRequest):
             "extra": len([f for f in findings if f["type"] == "extra"]),
             "uncertain": len([f for f in findings if f["type"] == "uncertain"]),
             "risk": len([f for f in findings if f["type"] == "risk"]),
+            "inconsistent": len([f for f in findings if f["type"] == "inconsistent"]),
         },
         "findings": findings,
         "code_summary": code_summary,
@@ -1101,16 +1172,20 @@ def _text_to_requirement_data(text: str) -> dict:
 
 def _new_finding(ftype: str, requirement: str, confidence: float,
                  analysis: str, code_evidence=None, test_suggestion=None,
-                 risk_level="medium") -> dict:
+                 risk_level="medium", inconsistencies=None,
+                 evidence_snippet=None, req_id: str = "") -> dict:
     """标准 Finding 构造"""
     return {
         "finding_id": f"f_{uuid.uuid4().hex[:8]}",
         "type": ftype,
         "requirement": requirement,
+        "req_id": req_id,
         "confidence": confidence,
         "analysis": _sanitize_content(analysis) if analysis else "",
         "risk_level": risk_level,
         "code_evidence": code_evidence,
+        "evidence_snippet": evidence_snippet,
+        "inconsistencies": inconsistencies or [],
         "test_suggestion": test_suggestion,
         "manual_status": None,
         "target_type": None,
@@ -1125,29 +1200,81 @@ def _new_finding(ftype: str, requirement: str, confidence: float,
 def _diff_to_findings(diff_result: dict) -> list:
     findings = []
 
+    # 收集 test_suggestions，按 req_id 索引方便回填
+    sugg_by_req = {}
+    for s in diff_result.get("test_suggestions", []) or []:
+        rid = s.get("req_id")
+        if rid:
+            sugg_by_req[rid] = s
+
+    def _build_test_suggestion(req_id, fallback_title):
+        s = sugg_by_req.get(req_id)
+        if not s:
+            return None
+        return {
+            "title": s.get("title") or fallback_title,
+            "priority": s.get("priority", "medium"),
+            "test_points": s.get("test_points", []),
+        }
+
     for item in diff_result.get("matched", []):
         conf = item.get("confidence", 0.8)
-        ftype = "uncertain" if conf <= 0.5 else "implemented"
+        status = item.get("status") or item.get("status_norm")
+        # 部分实现 → 单独 partial 类型映射到 inconsistent（前端会显示）
+        if status in ("部分实现", "partial"):
+            ftype = "inconsistent"
+        elif conf <= 0.5:
+            ftype = "uncertain"
+        else:
+            ftype = "implemented"
+        rid = item.get("req_id", "")
         findings.append(_new_finding(
             ftype=ftype,
             requirement=item.get("requirement", ""),
+            req_id=rid,
             confidence=conf,
             analysis=item.get("notes", ""),
+            inconsistencies=item.get("inconsistencies") or [],
+            evidence_snippet=item.get("evidence_snippet"),
             code_evidence={
                 "file": item.get("file", ""),
                 "line": item.get("line", 0),
                 "match_reason": item.get("notes", ""),
+                "code_item": item.get("code_item", ""),
             },
+            test_suggestion=_build_test_suggestion(rid, f"验证: {item.get('requirement','')[:40]}"),
+        ))
+
+    for item in diff_result.get("inconsistent", []):
+        rid = item.get("req_id", "")
+        findings.append(_new_finding(
+            ftype="inconsistent",
+            requirement=item.get("requirement", ""),
+            req_id=rid,
+            confidence=item.get("confidence", 0.75),
+            analysis=item.get("notes", ""),
+            risk_level="high",
+            inconsistencies=item.get("inconsistencies") or [],
+            evidence_snippet=item.get("evidence_snippet"),
+            code_evidence={
+                "file": item.get("file", ""),
+                "line": item.get("line", 0),
+                "match_reason": item.get("notes", ""),
+                "code_item": item.get("code_item", ""),
+            },
+            test_suggestion=_build_test_suggestion(rid, f"复核: {item.get('requirement','')[:40]}"),
         ))
 
     for item in diff_result.get("unimplemented", []):
+        rid = item.get("req_id", "")
         findings.append(_new_finding(
             ftype="missing",
             requirement=item.get("requirement", ""),
-            confidence=0.7,
+            req_id=rid,
+            confidence=item.get("confidence", 0.7),
             analysis=item.get("suggestion", ""),
             risk_level=item.get("severity", "medium"),
-            test_suggestion={
+            test_suggestion=_build_test_suggestion(rid, f"验证: {item.get('requirement','')[:40]}") or {
                 "title": f"验证: {item.get('requirement', '')[:40]}",
                 "precondition": "需求文档中定义了该功能",
                 "steps": ["检查代码中是否有对应实现", "尝试在系统中操作该功能", "确认是否存在该功能入口"],
@@ -1163,15 +1290,17 @@ def _diff_to_findings(diff_result: dict) -> list:
             analysis=item.get("notes", "代码中存在但需求文档中未提及"),
             code_evidence={
                 "file": item.get("file", ""),
-                "line": 0,
+                "line": item.get("line", 0),
                 "match_reason": "需求文档中未找到对应需求点",
             },
         ))
 
     for bug in diff_result.get("bugs", []):
+        rid = bug.get("req_id", "")
         findings.append(_new_finding(
             ftype="risk",
             requirement=bug.get("title", ""),
+            req_id=rid,
             confidence=0.85,
             analysis=f"严重度: {bug.get('severity', '')}",
             risk_level="high",
@@ -1301,7 +1430,6 @@ async def push_finding_to_tapd(finding_id: str, request: PushToTapdRequest):
         desc_lines.append(f"\n实际结果：\n{request.actual or ''}")
         if request.code_location:
             desc_lines.append(f"\n代码位置：{request.code_location}")
-        desc_lines.append("\n---\n来源: AI测试平台 - 需求代码对比")
         description = "\n".join(desc_lines)
     else:
         bug_fields = finding_to_tapd_bug(target_finding, report_context)
@@ -1342,3 +1470,311 @@ async def push_finding_to_tapd(finding_id: str, request: PushToTapdRequest):
                 break
 
     return result
+
+
+
+# ══════════════════════════════════════════════════════════════════
+#  11. Finding TAPD 状态回流（A1）
+# ══════════════════════════════════════════════════════════════════
+
+def _apply_tapd_status_to_finding(finding: dict, status_result: dict) -> None:
+    """将 TAPD 状态结果写回 finding（内存对象）"""
+    finding["tapd_status"] = status_result.get("tapd_status", "unknown")
+    finding["tapd_status_name"] = status_result.get("tapd_status_name", "未知")
+    finding["tapd_last_sync_at"] = datetime.now().isoformat()
+    if status_result.get("tapd_modified"):
+        finding["tapd_modified"] = status_result["tapd_modified"]
+
+
+# sync_finding_tapd_status_endpoint
+@router.post("/api/v2/code-compare/findings/{finding_id}/sync-tapd-status")
+async def sync_finding_tapd_status(finding_id: str):
+    """同步单个 Finding 关联 TAPD Bug 的最新状态"""
+    from services.tapd_service import load_tapd_config, fetch_tapd_bug_status
+
+    # 查找 finding
+    target_finding = None
+    target_report = None
+    for rpt in _reports.values():
+        for f in rpt.get("findings", []):
+            if f.get("finding_id") == finding_id:
+                target_finding = f
+                target_report = rpt
+                break
+        if target_finding:
+            break
+
+    if not target_finding:
+        raise HTTPException(status_code=404, detail=f"Finding 不存在: {finding_id}")
+
+    bug_id = target_finding.get("tapd_bug_id") or ""
+    if not bug_id:
+        # 不抛 HTTP 错误，返回结构化错误（业务正常分支）
+        return {
+            "success": False,
+            "code": "TAPD_BUG_NOT_LINKED",
+            "message": "当前 Finding 尚未关联 TAPD Bug",
+            "detail": {"finding_id": finding_id},
+        }
+
+    config = load_tapd_config()
+    if not config.get("workspace_id"):
+        return {
+            "success": False,
+            "code": "TAPD_NOT_CONFIGURED",
+            "message": "TAPD 未配置，请先在 TAPD 配置页面设置",
+            "detail": {},
+        }
+
+    result = fetch_tapd_bug_status(config, bug_id)
+
+    if not result.get("success"):
+        # TAPD 调用失败：不修改 finding 数据
+        logger.warning(f"sync_tapd_bug failed: finding={finding_id} bug={bug_id} code={result.get('code')}")
+        return {
+            "success": False,
+            "code": result.get("code", "TAPD_API_ERROR"),
+            "message": result.get("message", "TAPD 同步失败"),
+            "detail": {"finding_id": finding_id, "bug_id": bug_id},
+        }
+
+    # 写回 finding 内存对象
+    _apply_tapd_status_to_finding(target_finding, result)
+    _save_report(target_report)
+
+    # 同步 DB（best-effort，复用 target_type="tapd_bug"）
+    svc = _get_storage_svc()
+    if svc:
+        try:
+            svc.update_finding_status(
+                finding_id, target_finding.get("manual_status") or "linked_to_tapd",
+                target_type="tapd_bug",
+                target_id=str(bug_id),
+            )
+        except Exception as e:
+            logger.warning(f"DB update finding tapd link failed: {e}")
+
+    return {
+        "success": True,
+        "data": {
+            "finding_id": finding_id,
+            "tapd_bug_id": bug_id,
+            "tapd_status": target_finding["tapd_status"],
+            "tapd_status_name": target_finding["tapd_status_name"],
+            "tapd_last_sync_at": target_finding["tapd_last_sync_at"],
+        },
+    }
+
+
+@router.post("/api/v2/code-compare/reports/{report_id}/sync-tapd-status")
+async def sync_report_tapd_status(report_id: str):
+    """批量同步报告下所有已关联 TAPD Bug 的 Finding 状态"""
+    from services.tapd_service import load_tapd_config, fetch_tapd_bug_status
+
+    report = _reports.get(report_id)
+    if not report:
+        raise HTTPException(status_code=404, detail=f"报告不存在: {report_id}")
+
+    config = load_tapd_config()
+    if not config.get("workspace_id"):
+        return {
+            "success": False,
+            "code": "TAPD_NOT_CONFIGURED",
+            "message": "TAPD 未配置，请先在 TAPD 配置页面设置",
+            "detail": {"report_id": report_id},
+        }
+
+    findings = report.get("findings", [])
+    total = len(findings)
+    synced = 0
+    skipped = 0
+    failed = 0
+    failures: list = []
+
+    for f in findings:
+        bug_id = f.get("tapd_bug_id") or ""
+        if not bug_id:
+            skipped += 1
+            continue
+
+        result = fetch_tapd_bug_status(config, bug_id)
+        if result.get("success"):
+            _apply_tapd_status_to_finding(f, result)
+            synced += 1
+        else:
+            failed += 1
+            failures.append({
+                "finding_id": f.get("finding_id"),
+                "bug_id": bug_id,
+                "code": result.get("code", "TAPD_API_ERROR"),
+            })
+
+    # 整份报告只保存一次，减少 IO
+    if synced > 0:
+        _save_report(report)
+
+    return {
+        "success": True,
+        "data": {
+            "report_id": report_id,
+            "total": total,
+            "synced": synced,
+            "skipped": skipped,
+            "failed": failed,
+            "failures": failures[:10],  # 最多返回 10 条失败明细
+        },
+    }
+
+
+
+# ══════════════════════════════════════════════════════════════════
+#  12. Finding 批量推送 TAPD（A2）
+# ══════════════════════════════════════════════════════════════════
+
+@router.post("/api/v2/code-compare/findings/batch-push-to-tapd")
+async def batch_push_findings_to_tapd(request: BatchPushToTapdRequest):
+    """批量将多个 Finding 推送到 TAPD 创建缺陷
+
+    返回结构:
+        {
+          "success": true,
+          "data": {
+            "total": N, "pushed": M, "skipped": X, "failed": Y, "not_found": Z,
+            "results": [
+              {"finding_id":..., "status": "pushed|already_pushed|skipped_implemented|skipped_false_positive|not_found|failed",
+               "bug_id":..., "url":..., "error":...}
+            ]
+          }
+        }
+    """
+    from services.tapd_service import (
+        load_tapd_config, push_bug_to_tapd, finding_to_tapd_bug,
+    )
+
+    if not request.finding_ids:
+        raise HTTPException(status_code=400, detail="finding_ids 不能为空")
+
+    if len(request.finding_ids) > 100:
+        raise HTTPException(status_code=400, detail="单次批量推送不能超过 100 条")
+
+    config = load_tapd_config()
+    if not config.get("workspace_id"):
+        raise HTTPException(status_code=400, detail="请先配置 TAPD 信息（项目设置 → TAPD 配置）")
+
+    # 解析迭代 ID（仅一次，避免每条 finding 都查询 TAPD）
+    extra_fields_common: Dict[str, Any] = {}
+    if request.iteration:
+        iteration_id = _resolve_tapd_iteration(config, request.iteration)
+        if iteration_id:
+            extra_fields_common["iteration_id"] = iteration_id
+
+    # 构建 finding -> report 索引（按 report 分组，便于最后批量持久化）
+    finding_index: Dict[str, tuple] = {}
+    for rpt in _reports.values():
+        for f in rpt.get("findings", []):
+            fid = f.get("finding_id")
+            if fid:
+                finding_index[fid] = (rpt, f)
+
+    results = []
+    pushed = 0
+    skipped = 0
+    failed = 0
+    not_found = 0
+    dirty_reports = set()  # 需要持久化的 report_id 集合
+
+    for fid in request.finding_ids:
+        if fid not in finding_index:
+            results.append({"finding_id": fid, "status": "not_found"})
+            not_found += 1
+            continue
+
+        rpt, finding = finding_index[fid]
+
+        # 跳过 type=implemented（已实现的 finding 没必要推 bug）
+        if finding.get("type") == "implemented":
+            results.append({"finding_id": fid, "status": "skipped_implemented"})
+            skipped += 1
+            continue
+
+        # 跳过已标记为误报的
+        if finding.get("manual_status") == "false_positive":
+            results.append({"finding_id": fid, "status": "skipped_false_positive"})
+            skipped += 1
+            continue
+
+        # 跳过已推送过的（除非用户明确要求强推）
+        if finding.get("tapd_bug_id") and request.skip_already_pushed:
+            results.append({
+                "finding_id": fid,
+                "status": "already_pushed",
+                "bug_id": finding["tapd_bug_id"],
+                "url": finding.get("tapd_url", ""),
+            })
+            skipped += 1
+            continue
+
+        # 自动生成 bug 字段
+        report_context = {
+            "report_id": rpt.get("report_id"),
+            "code_snapshot_name": rpt.get("code_snapshot_name"),
+        }
+        bug_fields = finding_to_tapd_bug(finding, report_context)
+
+        try:
+            result = push_bug_to_tapd(
+                config=config,
+                title=bug_fields["title"],
+                description=bug_fields["description"],
+                severity=bug_fields.get("severity", "minor"),
+                priority=bug_fields.get("priority", "P2"),
+                module=bug_fields.get("module", ""),
+                reporter=config.get("default_reporter", ""),
+                extra_fields=dict(extra_fields_common) if extra_fields_common else None,
+            )
+        except Exception as e:
+            logger.warning(f"batch_push: finding={fid} push exception: {type(e).__name__}")
+            results.append({"finding_id": fid, "status": "failed", "error": f"{type(e).__name__}"})
+            failed += 1
+            continue
+
+        if result.get("success"):
+            finding["tapd_bug_id"] = result["bug_id"]
+            finding["tapd_url"] = result["url"]
+            finding["tapd_pushed_at"] = datetime.now().isoformat()
+            dirty_reports.add(rpt.get("report_id"))
+            results.append({
+                "finding_id": fid,
+                "status": "pushed",
+                "bug_id": result["bug_id"],
+                "url": result["url"],
+            })
+            pushed += 1
+        else:
+            err_msg = result.get("message", "unknown error")
+            # 截断防止过长
+            if len(err_msg) > 200:
+                err_msg = err_msg[:200]
+            results.append({"finding_id": fid, "status": "failed", "error": err_msg})
+            failed += 1
+
+    # 批量持久化所有有改动的 report
+    for rpt_id in dirty_reports:
+        rpt = _reports.get(rpt_id)
+        if rpt:
+            try:
+                _save_report(rpt)
+            except Exception as e:
+                logger.warning(f"batch_push: save report {rpt_id} failed: {e}")
+
+    return {
+        "success": True,
+        "data": {
+            "total": len(request.finding_ids),
+            "pushed": pushed,
+            "skipped": skipped,
+            "failed": failed,
+            "not_found": not_found,
+            "results": results,
+        },
+    }

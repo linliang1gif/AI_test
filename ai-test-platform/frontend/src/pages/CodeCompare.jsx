@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import {
-  Card, Steps, Button, Upload, Space, Tabs, Tag, message, Spin, Alert,
+  Card, Steps, Button, Upload, Space, Tabs, Tag, message, Spin, Alert, Checkbox,
   Descriptions, Progress, Input, Empty, Tooltip, Badge, Dropdown, Statistic, Row, Col,
   Modal, Select,
 } from 'antd';
@@ -18,11 +18,12 @@ const { Dragger } = Upload;
 
 // ── finding 类型配置 ──
 const FINDING_TYPES = {
-  implemented: { label: '已实现', color: '#52c41a', bg: '#f6ffed', border: '#b7eb8f', icon: <CheckCircleOutlined /> },
-  missing:     { label: '疑似未实现', color: '#ff4d4f', bg: '#fff2f0', border: '#ffccc7', icon: <CloseCircleOutlined /> },
-  extra:       { label: '超范围实现', color: '#722ed1', bg: '#f9f0ff', border: '#d3adf7', icon: <QuestionCircleOutlined /> },
-  uncertain:   { label: '不确定', color: '#fa8c16', bg: '#fff7e6', border: '#ffd591', icon: <QuestionCircleOutlined /> },
-  risk:        { label: '风险点', color: '#cf1322', bg: '#fff1f0', border: '#ffa39e', icon: <WarningOutlined /> },
+  implemented:  { label: '已实现', color: '#52c41a', bg: '#f6ffed', border: '#b7eb8f', icon: <CheckCircleOutlined /> },
+  inconsistent: { label: '实现不一致', color: '#eb2f96', bg: '#fff0f6', border: '#ffadd2', icon: <WarningOutlined /> },
+  missing:      { label: '疑似未实现', color: '#ff4d4f', bg: '#fff2f0', border: '#ffccc7', icon: <CloseCircleOutlined /> },
+  extra:        { label: '超范围实现', color: '#722ed1', bg: '#f9f0ff', border: '#d3adf7', icon: <QuestionCircleOutlined /> },
+  uncertain:    { label: '不确定', color: '#fa8c16', bg: '#fff7e6', border: '#ffd591', icon: <QuestionCircleOutlined /> },
+  risk:         { label: '风险点', color: '#cf1322', bg: '#fff1f0', border: '#ffa39e', icon: <WarningOutlined /> },
 };
 
 const CONFIRM_OPTIONS = [
@@ -34,11 +35,37 @@ const CONFIRM_OPTIONS = [
 
 // 按 finding 类型显示不同流转按钮
 const FLOW_BUTTONS_BY_TYPE = {
-  implemented: ['test_case', 'false_positive'],
-  missing:     ['defect', 'test_case', 'question', 'false_positive'],
-  risk:        ['defect', 'test_case', 'question', 'false_positive'],
-  extra:       ['question', 'test_case', 'false_positive'],
-  uncertain:   ['question', 'test_case', 'false_positive'],
+  implemented:  ['test_case', 'false_positive'],
+  inconsistent: ['defect', 'test_case', 'question', 'false_positive'],
+  missing:      ['defect', 'test_case', 'question', 'false_positive'],
+  risk:         ['defect', 'test_case', 'question', 'false_positive'],
+  extra:        ['question', 'test_case', 'false_positive'],
+  uncertain:    ['question', 'test_case', 'false_positive'],
+};
+
+// ── TAPD 状态徽章颜色映射 ──
+const TAPD_STATUS_COLORS = {
+  new: 'blue',
+  reopen: 'blue',
+  in_progress: 'orange',
+  postponed: 'gold',
+  resolved: 'green',
+  verified: 'green',
+  closed: 'default',
+  rejected: 'red',
+  unknown: 'default',
+};
+
+const TAPD_STATUS_NAMES = {
+  new: '新建',
+  reopen: '重新打开',
+  in_progress: '处理中',
+  postponed: '延期',
+  resolved: '已解决',
+  verified: '已验证',
+  closed: '已关闭',
+  rejected: '已拒绝',
+  unknown: '未知',
 };
 
 export default function CodeCompare() {
@@ -73,6 +100,11 @@ export default function CodeCompare() {
   const [report, setReport] = useState(null);
   const [activeTab, setActiveTab] = useState('all');
   const [confirmingId, setConfirmingId] = useState(null);
+  // ── A2: 批量选择 + 批量推送 ──
+  const [batchMode, setBatchMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [batchPushing, setBatchPushing] = useState(false);
+  const [batchResult, setBatchResult] = useState(null);  // {total,pushed,skipped,failed,not_found,results}
 
   // History
   const [showHistory, setShowHistory] = useState(false);
@@ -278,6 +310,116 @@ export default function CodeCompare() {
       ),
     }));
   }, []);
+
+  // ── 同步单个 Finding TAPD 状态（A1）──
+  const handleSyncFindingTapd = useCallback(async (findingId) => {
+    try {
+      const res = await codeCompareAPI.syncFindingTapdStatus(findingId);
+      if (res.success) {
+        _updateFinding(findingId, {
+          tapd_status: res.data.tapd_status,
+          tapd_status_name: res.data.tapd_status_name,
+          tapd_last_sync_at: res.data.tapd_last_sync_at,
+        });
+        message.success(`TAPD 状态已更新: ${res.data.tapd_status_name}`);
+      } else if (res.code === 'TAPD_BUG_NOT_LINKED') {
+        message.warning('该 Finding 尚未推送 TAPD');
+      } else {
+        message.error(res.message || 'TAPD 同步失败');
+      }
+    } catch (e) {
+      message.error('TAPD 同步异常: ' + (e.message || ''));
+    }
+  }, [_updateFinding]);
+
+  // ── 同步整个报告 TAPD 状态（A1）──
+  const handleSyncReportTapd = useCallback(async () => {
+    if (!report?.report_id) return;
+    const hide = message.loading('正在同步 TAPD 状态...', 0);
+    try {
+      const res = await codeCompareAPI.syncReportTapdStatus(report.report_id);
+      hide();
+      if (res.success) {
+        const d = res.data || {};
+        message.success(`同步完成: 共 ${d.total} 条，已同步 ${d.synced}，跳过 ${d.skipped}，失败 ${d.failed}`);
+        // 刷新报告以拉取最新 finding 状态
+        const detail = await codeCompareAPI.getReportDetail(report.report_id);
+        if (detail?.success && detail.report) setReport(detail.report);
+      } else {
+        message.error(res.message || 'TAPD 同步失败');
+      }
+    } catch (e) {
+      hide();
+      message.error('TAPD 同步异常: ' + (e.message || ''));
+    }
+  }, [report]);
+
+  // ── A2: 切换 finding 选中状态 ──
+  const _toggleFindingSelected = useCallback((findingId) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(findingId)) next.delete(findingId);
+      else next.add(findingId);
+      return next;
+    });
+  }, []);
+
+  // ── A2: 全选当前 Tab 下可推送的 Finding ──
+  const _selectAllInCurrentTab = useCallback(() => {
+    const ids = (report?.findings || [])
+      .filter(f => (activeTab === 'all' || f.type === activeTab))
+      .filter(f => f.type !== 'implemented' && f.manual_status !== 'false_positive')
+      .map(f => f.finding_id);
+    setSelectedIds(new Set(ids));
+  }, [report, activeTab]);
+
+  const _clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  // ── A2: 批量推送选中 Finding 到 TAPD ──
+  const handleBatchPushTapd = useCallback(async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) {
+      message.warning('请先选择要推送的 Finding');
+      return;
+    }
+    if (ids.length > 100) {
+      message.warning('单次最多推送 100 条');
+      return;
+    }
+    setBatchPushing(true);
+    setBatchResult(null);
+    try {
+      const res = await codeCompareAPI.batchPushFindingsToTapd({
+        finding_ids: ids,
+        skip_already_pushed: true,
+      });
+      if (res.success) {
+        setBatchResult(res.data);
+        // 刷新报告以拉到最新 tapd_bug_id
+        if (report?.report_id) {
+          try {
+            const detail = await codeCompareAPI.getReportDetail(report.report_id);
+            if (detail?.success && detail.report) setReport(detail.report);
+          } catch (_) { /* ignore */ }
+        }
+        const d = res.data || {};
+        if (d.failed > 0) {
+          message.warning(`批量推送完成: 成功 ${d.pushed} / 跳过 ${d.skipped} / 失败 ${d.failed}`);
+        } else {
+          message.success(`批量推送完成: 成功 ${d.pushed} / 跳过 ${d.skipped}`);
+        }
+      } else {
+        message.error(res.message || '批量推送失败');
+      }
+    } catch (e) {
+      message.error('批量推送异常: ' + (e.message || ''));
+    } finally {
+      setBatchPushing(false);
+    }
+  }, [selectedIds, report]);
+
 
   // ── 流转操作 ──
   const handleFlowAction = useCallback(async () => {
@@ -700,6 +842,7 @@ export default function CodeCompare() {
             {[
               { key: 'total_req_points', title: '需求点总数', color: '#1890ff' },
               { key: 'implemented', title: '已实现', color: '#52c41a' },
+              { key: 'inconsistent', title: '实现不一致', color: '#eb2f96' },
               { key: 'missing', title: '疑似未实现', color: '#ff4d4f' },
               { key: 'extra', title: '超范围实现', color: '#722ed1' },
               { key: 'uncertain', title: '不确定', color: '#fa8c16' },
@@ -716,6 +859,41 @@ export default function CodeCompare() {
               </Col>
             ))}
           </Row>
+
+          {/* A2: 批量操作工具栏 */}
+          <Card size="small" style={{ background: batchMode ? '#fffbe6' : '#fafafa' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              <Button
+                size="small"
+                type={batchMode ? 'primary' : 'default'}
+                onClick={() => {
+                  setBatchMode(prev => {
+                    if (prev) setSelectedIds(new Set());
+                    return !prev;
+                  });
+                }}
+              >
+                {batchMode ? '退出批量模式' : '进入批量模式'}
+              </Button>
+              {batchMode && (
+                <>
+                  <Button size="small" onClick={_selectAllInCurrentTab}>全选当前页</Button>
+                  <Button size="small" onClick={_clearSelection} disabled={selectedIds.size === 0}>清空选择</Button>
+                  <span style={{ color: '#666' }}>已选 <b style={{ color: '#1890ff' }}>{selectedIds.size}</b> 条</span>
+                  <Button
+                    size="small"
+                    type="primary"
+                    danger
+                    loading={batchPushing}
+                    disabled={selectedIds.size === 0}
+                    onClick={handleBatchPushTapd}
+                  >
+                    批量推送 TAPD ({selectedIds.size})
+                  </Button>
+                </>
+              )}
+            </div>
+          </Card>
 
           {/* Tabs */}
           <Card>
@@ -744,6 +922,10 @@ export default function CodeCompare() {
                     confirming={confirmingId === finding.finding_id}
                     reportId={report.report_id}
                     onFlow={openFlowModal}
+                    onSyncTapd={handleSyncFindingTapd}
+                    selectable={batchMode}
+                    selected={selectedIds.has(finding.finding_id)}
+                    onSelectChange={_toggleFindingSelected}
                   />
                 ))}
               </div>
@@ -755,8 +937,9 @@ export default function CodeCompare() {
             <Alert type="warning" showIcon message="AI 深度分析不可用，已使用规则匹配结果" style={{ marginTop: -4 }} />
           )}
 
-          <div style={{ textAlign: 'center' }}>
+          <div style={{ textAlign: 'center', display: 'flex', gap: 12, justifyContent: 'center' }}>
             <Button onClick={() => { setCurrentStep(0); setReport(null); }}>新建对比分析</Button>
+            <Button onClick={handleSyncReportTapd} title="批量拉取已推送 TAPD 的 Finding 当前状态">同步 TAPD 状态</Button>
           </div>
         </Space>
       )}
@@ -771,6 +954,13 @@ export default function CodeCompare() {
         loading={flowLoading}
         onOk={handleFlowAction}
         onCancel={() => { setFlowModal({ open: false, type: null, finding: null }); setFlowForm({}); }}
+      />
+
+      {/* ── A2: 批量推送结果 Modal ── */}
+      <BatchPushResultModal
+        open={!!batchResult}
+        result={batchResult}
+        onClose={() => setBatchResult(null)}
       />
     </div>
   );
@@ -798,7 +988,7 @@ const FLOW_LABELS = {
 
 // ── Finding 卡片组件 ──
 
-function FindingCard({ finding, onConfirm, confirming, reportId, onFlow }) {
+function FindingCard({ finding, onConfirm, confirming, reportId, onFlow, onSyncTapd, selectable, selected, onSelectChange }) {
   const typeCfg = FINDING_TYPES[finding.type] || FINDING_TYPES.uncertain;
   const flowButtons = FLOW_BUTTONS_BY_TYPE[finding.type] || ['false_positive'];
 
@@ -816,6 +1006,11 @@ function FindingCard({ finding, onConfirm, confirming, reportId, onFlow }) {
       padding: 16,
       background: typeCfg.bg,
     }}>
+        {selectable && (
+          <div style={{ position: 'absolute', top: 8, left: 8, zIndex: 2 }}>
+            <Checkbox checked={!!selected} onChange={() => onSelectChange && onSelectChange(finding.finding_id)} />
+          </div>
+        )}
       {/* 头部 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
         <div style={{ flex: 1 }}>
@@ -847,6 +1042,36 @@ function FindingCard({ finding, onConfirm, confirming, reportId, onFlow }) {
         <p style={{ color: '#555', fontSize: 13, margin: '8px 0' }}>{finding.analysis}</p>
       )}
 
+      {/* 实现与需求不一致 */}
+      {Array.isArray(finding.inconsistencies) && finding.inconsistencies.length > 0 && (
+        <div style={{
+          background: '#fff0f6', border: '1px solid #ffadd2', borderRadius: 4,
+          padding: '8px 12px', marginTop: 8, fontSize: 12,
+        }}>
+          <div style={{ fontWeight: 500, marginBottom: 4, color: '#c41d7f' }}>
+            <WarningOutlined style={{ marginRight: 4 }} /> 实现与需求不一致
+          </div>
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ color: '#999' }}>
+                <th style={{ textAlign: 'left', padding: '2px 4px', width: 90 }}>方面</th>
+                <th style={{ textAlign: 'left', padding: '2px 4px' }}>需求要求</th>
+                <th style={{ textAlign: 'left', padding: '2px 4px' }}>代码实际</th>
+              </tr>
+            </thead>
+            <tbody>
+              {finding.inconsistencies.map((it, i) => (
+                <tr key={i} style={{ borderTop: '1px dashed #ffd6e7' }}>
+                  <td style={{ padding: '2px 4px', color: '#c41d7f' }}>{it.aspect || '-'}</td>
+                  <td style={{ padding: '2px 4px' }}>{it.expected || '-'}</td>
+                  <td style={{ padding: '2px 4px' }}>{it.actual || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       {/* 代码证据 */}
       {finding.code_evidence && (
         <div style={{
@@ -862,9 +1087,30 @@ function FindingCard({ finding, onConfirm, confirming, reportId, onFlow }) {
           {finding.code_evidence.line > 0 && (
             <div><span style={{ color: '#999' }}>行号:</span> {finding.code_evidence.line}</div>
           )}
+          {finding.code_evidence.code_item && (
+            <div><span style={{ color: '#999' }}>命中元素:</span> {finding.code_evidence.code_item}</div>
+          )}
           {finding.code_evidence.match_reason && (
             <div><span style={{ color: '#999' }}>匹配原因:</span> {finding.code_evidence.match_reason}</div>
           )}
+        </div>
+      )}
+
+      {/* 代码片段（源码上下文） */}
+      {finding.evidence_snippet && finding.evidence_snippet.snippet && (
+        <div style={{
+          background: '#0d1117', color: '#c9d1d9', border: '1px solid #30363d',
+          borderRadius: 4, padding: '8px 12px', marginTop: 8, fontSize: 12,
+          fontFamily: 'Consolas, Menlo, monospace', overflow: 'auto', maxHeight: 260,
+        }}>
+          <div style={{ color: '#8b949e', marginBottom: 4 }}>
+            <CodeOutlined style={{ marginRight: 4 }} />
+            {finding.evidence_snippet.file}:{finding.evidence_snippet.line}
+            {' '}(行 {finding.evidence_snippet.start}-{finding.evidence_snippet.end})
+          </div>
+          <pre style={{ margin: 0, whiteSpace: 'pre', color: '#c9d1d9' }}>
+{finding.evidence_snippet.snippet}
+          </pre>
         </div>
       )}
 
@@ -911,10 +1157,24 @@ function FindingCard({ finding, onConfirm, confirming, reportId, onFlow }) {
         })}
         {finding.type !== 'implemented' && (
           finding.tapd_bug_id ? (
-            <Button size="small" type="link" href={finding.tapd_url} target="_blank"
-              style={{ color: '#1890ff' }}>
-              TAPD #{finding.tapd_bug_id}
-            </Button>
+            <Space size={4} wrap>
+              <Button size="small" type="link" href={finding.tapd_url} target="_blank"
+                style={{ color: '#1890ff', padding: '0 4px' }}>
+                TAPD #{finding.tapd_bug_id}
+              </Button>
+              {finding.tapd_status && (
+                <Tag color={TAPD_STATUS_COLORS[finding.tapd_status] || 'default'} style={{ marginRight: 0 }}>
+                  {finding.tapd_status_name || TAPD_STATUS_NAMES[finding.tapd_status] || finding.tapd_status}
+                </Tag>
+              )}
+              {onSyncTapd && (
+                <Button size="small" type="link" onClick={() => onSyncTapd(finding.finding_id)}
+                  style={{ padding: '0 4px', color: '#999' }}
+                  title={finding.tapd_last_sync_at ? `上次同步: ${finding.tapd_last_sync_at}` : '同步状态'}>
+                  同步
+                </Button>
+              )}
+            </Space>
           ) : (
             <Button size="small" style={{ borderColor: '#13c2c2', color: '#13c2c2' }}
               onClick={() => onFlow('tapd', finding)}>
@@ -1102,6 +1362,82 @@ function FlowModal({ open, type, finding, form, setForm, loading, onOk, onCancel
             />
           </div>
         </Space>
+      )}
+    </Modal>
+  );
+}
+
+
+
+// ── A2: 批量推送 TAPD 结果 Modal ──
+function BatchPushResultModal({ open, result, onClose }) {
+  if (!result) return null;
+  const { total = 0, pushed = 0, skipped = 0, failed = 0, not_found = 0, results = [] } = result;
+  const statusLabel = {
+    pushed: { text: '已推送', color: 'green' },
+    already_pushed: { text: '已存在', color: 'blue' },
+    skipped_implemented: { text: '已实现，跳过', color: 'default' },
+    skipped_false_positive: { text: '误报，跳过', color: 'default' },
+    not_found: { text: '未找到', color: 'orange' },
+    failed: { text: '失败', color: 'red' },
+  };
+
+  return (
+    <Modal
+      title="批量推送 TAPD 结果"
+      open={open}
+      onCancel={onClose}
+      onOk={onClose}
+      width={680}
+      okText="关闭"
+      cancelButtonProps={{ style: { display: 'none' } }}
+    >
+      <Row gutter={8} style={{ marginBottom: 16 }}>
+        <Col span={4}><Statistic title="总计" value={total} /></Col>
+        <Col span={5}><Statistic title="已推送" value={pushed} valueStyle={{ color: '#52c41a' }} /></Col>
+        <Col span={5}><Statistic title="已跳过" value={skipped} valueStyle={{ color: '#1890ff' }} /></Col>
+        <Col span={5}><Statistic title="失败" value={failed} valueStyle={{ color: '#ff4d4f' }} /></Col>
+        <Col span={5}><Statistic title="未找到" value={not_found} valueStyle={{ color: '#fa8c16' }} /></Col>
+      </Row>
+
+      {results.length > 0 && (
+        <div style={{ maxHeight: 360, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 4 }}>
+          <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+            <thead style={{ background: '#fafafa', position: 'sticky', top: 0 }}>
+              <tr>
+                <th style={{ padding: '6px 8px', textAlign: 'left' }}>Finding ID</th>
+                <th style={{ padding: '6px 8px', textAlign: 'left' }}>状态</th>
+                <th style={{ padding: '6px 8px', textAlign: 'left' }}>详情</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.map((r, idx) => {
+                const lbl = statusLabel[r.status] || { text: r.status, color: 'default' };
+                return (
+                  <tr key={idx} style={{ borderTop: '1px solid #f0f0f0' }}>
+                    <td style={{ padding: '6px 8px', fontFamily: 'monospace', color: '#666' }}>
+                      {r.finding_id}
+                    </td>
+                    <td style={{ padding: '6px 8px' }}>
+                      <Tag color={lbl.color}>{lbl.text}</Tag>
+                    </td>
+                    <td style={{ padding: '6px 8px' }}>
+                      {r.bug_id && r.url ? (
+                        <a href={r.url} target="_blank" rel="noreferrer">TAPD #{r.bug_id}</a>
+                      ) : r.bug_id ? (
+                        <span>TAPD #{r.bug_id}</span>
+                      ) : r.error ? (
+                        <span style={{ color: '#ff4d4f' }}>{r.error}</span>
+                      ) : (
+                        <span style={{ color: '#999' }}>-</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </Modal>
   );
