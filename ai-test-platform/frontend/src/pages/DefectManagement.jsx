@@ -64,6 +64,18 @@ export default function DefectManagement() {
     fetchDefects()
   }
 
+  const handlePushToTapd = async (defectId) => {
+    const r = await fetch(`${API}/${defectId}/push-to-tapd`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+    const d = await r.json()
+    if (!r.ok || !d.success) {
+      alert(d.detail || d.message || '推送 TAPD 失败')
+      return
+    }
+    alert(d.already_pushed ? '该缺陷已推送过 TAPD' : `推送 TAPD 成功：${d.bug_id}`)
+    openDetail(defectId)
+    fetchDefects()
+  }
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex justify-between items-center mb-6">
@@ -115,7 +127,26 @@ export default function DefectManagement() {
                 <td className="px-4 py-3 text-xs text-slate-500">{d.module}</td>
                 <td className="px-4 py-3 text-xs text-slate-400">{d.updated_at?.slice(0, 16).replace('T', ' ')}</td>
                 <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
-                  <div className="flex justify-center gap-1">
+                  <div className="flex justify-center gap-1 flex-wrap">
+                    {d.evidence_json?.tapd_bug_id ? (
+                      <a
+                        href={d.evidence_json.tapd_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={`已推送 TAPD #${d.evidence_json.tapd_bug_id}`}
+                        className="px-2 py-0.5 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100"
+                      >
+                        TAPD #{d.evidence_json.tapd_bug_id}
+                      </a>
+                    ) : (
+                      <button
+                        onClick={() => handlePushToTapd(d.id)}
+                        title="推送到 TAPD 创建缺陷"
+                        className="px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100"
+                      >
+                        推 TAPD
+                      </button>
+                    )}
                     {(TRANSITIONS[d.status] || []).map(t => (
                       <button key={t} onClick={() => { setShowTransition({ id: d.id, from: d.status, to: t }); setTransitionComment('') }} className="px-2 py-0.5 text-xs bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100">{t}</button>
                     ))}
@@ -215,7 +246,12 @@ export default function DefectManagement() {
             )}
 
             {/* Transitions */}
-            <div className="flex gap-2 mb-4">
+            <div className="flex gap-2 mb-4 flex-wrap">
+              {showDetail.evidence_json?.tapd_bug_id ? (
+                <a href={showDetail.evidence_json.tapd_url} target="_blank" rel="noreferrer" className="px-3 py-1.5 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100">TAPD #{showDetail.evidence_json.tapd_bug_id}</a>
+              ) : (
+                <button onClick={() => handlePushToTapd(showDetail.id)} className="px-3 py-1.5 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100">推送 TAPD</button>
+              )}
               {(TRANSITIONS[showDetail.status] || []).map(t => (
                 <button key={t} onClick={() => { setShowTransition({ id: showDetail.id, from: showDetail.status, to: t }); setTransitionComment('') }} className="px-3 py-1.5 text-xs bg-indigo-50 text-indigo-700 rounded hover:bg-indigo-100">→ {t}</button>
               ))}

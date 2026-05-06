@@ -6,6 +6,7 @@ P3-3B: 缺陷闭环 MVP 路由
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional, List
+from datetime import datetime
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -90,6 +91,15 @@ class FromFailureAnalysisRequest(BaseModel):
 class LinkRunRequest(BaseModel):
     run_id: str
     by: Optional[str] = "system"
+
+
+class PushToTapdRequest(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    module: Optional[str] = None
+    severity: Optional[str] = None
+    priority: Optional[str] = None
+    reporter: Optional[str] = None
 
 
 # ── 1. POST /api/v2/defects — 创建缺陷 ──
@@ -179,6 +189,76 @@ def api_link_run(defect_id: int, req: LinkRunRequest, db: Session = Depends(get_
     result = link_run(db, defect_id, req.run_id, req.by)
     if "error" in result:
         raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.post("/{defect_id}/push-to-tapd")
+def api_push_defect_to_tapd(defect_id: int, req: PushToTapdRequest, db: Session = Depends(get_db)):
+    from database.models import Defect, DefectEvent
+    from services.tapd_service import load_tapd_config, push_bug_to_tapd
+
+    config = load_tapd_config()
+    if not config.get("workspace_id"):
+        raise HTTPException(status_code=400, detail="请先配置 TAPD 信息")
+
+    defect = db.query(Defect).filter(Defect.id == defect_id).first()
+    if not defect:
+        raise HTTPException(status_code=404, detail=f"Defect {defect_id} not found")
+
+    evidence = defect.evidence_json or {}
+    if evidence.get("tapd_bug_id"):
+        return {
+            "success": True,
+            "already_pushed": True,
+            "bug_id": evidence.get("tapd_bug_id"),
+            "url": evidence.get("tapd_url", ""),
+            "message": "该缺陷已推送过 TAPD",
+        }
+
+    description_parts = []
+    if req.description or defect.description:
+        description_parts.append(req.description or defect.description or "")
+    if defect.failure_category:
+        description_parts.append(f"失败分类：{defect.failure_category}")
+    if defect.case_id:
+        description_parts.append(f"用例ID：{defect.case_id}")
+    if defect.run_id:
+        description_parts.append(f"执行ID：{defect.run_id}")
+    if defect.run_case_id:
+        description_parts.append(f"执行用例ID：{defect.run_case_id}")
+    if defect.trace_path:
+        description_parts.append(f"Trace：{defect.trace_path}")
+    if defect.screenshot_path:
+        description_parts.append(f"截图：{defect.screenshot_path}")
+
+    result = push_bug_to_tapd(
+        config=config,
+        title=req.title or defect.title,
+        description="\n".join(description_parts) or defect.title,
+        severity=req.severity or defect.severity or "major",
+        priority=req.priority or defect.priority or "P2",
+        module=req.module if req.module is not None else (defect.module or ""),
+        reporter=req.reporter or config.get("default_reporter", ""),
+    )
+
+    if result.get("success"):
+        evidence.update({
+            "tapd_bug_id": result.get("bug_id"),
+            "tapd_url": result.get("url"),
+            "tapd_pushed_at": datetime.now().isoformat(),
+        })
+        defect.evidence_json = evidence
+        event = DefectEvent(
+            defect_id=defect.id,
+            event_type="tapd_push",
+            comment=f"推送到 TAPD: {result.get('bug_id')}",
+            evidence_json={"tapd_bug_id": result.get("bug_id"), "tapd_url": result.get("url")},
+            created_by="system",
+        )
+        db.add(event)
+        db.commit()
+        db.refresh(defect)
+
     return result
 
 

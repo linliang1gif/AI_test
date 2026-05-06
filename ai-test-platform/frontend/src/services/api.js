@@ -746,6 +746,16 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+      batchPushFindingsToTapd: (data) => request(`${API_BASE_URL}/v2/code-compare/findings/batch-push-to-tapd`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      syncFindingTapdStatus: (findingId) => request(`${API_BASE_URL}/v2/code-compare/findings/${findingId}/sync-tapd-status`, {
+        method: 'POST',
+      }),
+      syncReportTapdStatus: (reportId) => request(`${API_BASE_URL}/v2/code-compare/reports/${reportId}/sync-tapd-status`, {
+        method: 'POST',
+      }),
       getTapdConfig: () => request(`${API_BASE_URL}/v2/code-compare/tapd/config`),
       saveTapdConfig: (data) => request(`${API_BASE_URL}/v2/code-compare/tapd/config`, {
         method: 'POST',

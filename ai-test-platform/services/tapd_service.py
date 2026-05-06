@@ -215,7 +215,6 @@ def finding_to_tapd_bug(finding: Dict, report_context: Dict = None) -> Dict[str,
 
     if report_context:
         lines.append("---")
-        lines.append(f"来源: AI测试平台 - 需求代码对比")
         lines.append(f"报告ID: {report_context.get('report_id', '-')}")
         lines.append(f"快照: {report_context.get('code_snapshot_name', '-')}")
 
@@ -240,3 +239,131 @@ def finding_to_tapd_bug(finding: Dict, report_context: Dict = None) -> Dict[str,
         "priority": "P2" if finding_type == "missing" else "P3",
         "module": finding.get("module", ""),
     }
+
+
+# ══════════════════════════════════════════════════════════════════
+# TAPD Bug 状态回流（A1）
+# ══════════════════════════════════════════════════════════════════
+
+# TAPD bug 原生状态码 → 标准化状态
+# 参考: https://www.tapd.cn/help/show#1120003271001000035
+TAPD_STATUS_MAP = {
+    "new": "new",                # 新建
+    "in_progress": "in_progress",  # 处理中
+    "resolved": "resolved",      # 已解决
+    "verified": "verified",      # 已验证
+    "closed": "closed",          # 已关闭
+    "rejected": "rejected",      # 已拒绝
+    "reopen": "reopen",          # 重新打开
+    "postponed": "postponed",    # 延期
+}
+
+TAPD_STATUS_NAME_ZH = {
+    "new": "新建",
+    "in_progress": "处理中",
+    "resolved": "已解决",
+    "verified": "已验证",
+    "closed": "已关闭",
+    "rejected": "已拒绝",
+    "reopen": "重新打开",
+    "postponed": "延期",
+    "unknown": "未知",
+}
+
+
+def fetch_tapd_bug_status(config: Dict[str, Any], bug_id: str) -> Dict[str, Any]:
+    """
+    从 TAPD 拉取单个 Bug 的当前状态
+
+    Args:
+        config: TAPD 配置 (workspace_id / api_user / api_password)
+        bug_id: TAPD Bug ID
+
+    Returns:
+        {"success": True, "bug_id": "...", "tapd_status": "in_progress",
+         "tapd_status_name": "处理中", "raw": {...}}
+        or {"success": False, "code": "...", "message": "..."}
+    """
+    workspace_id = config.get("workspace_id", "")
+    api_user = config.get("api_user", "")
+    api_password = config.get("api_password", "")
+
+    if not all([workspace_id, api_user, api_password]):
+        return {
+            "success": False,
+            "code": "TAPD_NOT_CONFIGURED",
+            "message": "TAPD 未配置",
+        }
+
+    if not bug_id:
+        return {
+            "success": False,
+            "code": "BUG_ID_EMPTY",
+            "message": "Bug ID 为空",
+        }
+
+    try:
+        resp = requests.get(
+            "https://api.tapd.cn/bugs",
+            params={"workspace_id": workspace_id, "id": str(bug_id), "fields": "id,status,name,modified"},
+            auth=(api_user, api_password),
+            timeout=15,
+        )
+        try:
+            result = resp.json()
+        except ValueError:
+            return {
+                "success": False,
+                "code": "TAPD_INVALID_RESPONSE",
+                "message": f"TAPD 响应解析失败 (HTTP {resp.status_code})",
+            }
+
+        if result.get("status") != 1:
+            # 不要把 api_password / token 暴露到日志或返回
+            info = str(result.get("info", ""))[:200]
+            return {
+                "success": False,
+                "code": "TAPD_API_ERROR",
+                "message": f"TAPD 查询失败: {info}",
+            }
+
+        data = result.get("data") or []
+        if not data:
+            return {
+                "success": False,
+                "code": "TAPD_BUG_NOT_FOUND",
+                "message": f"TAPD 未找到 Bug {bug_id}",
+            }
+
+        # data 是数组，取第一条
+        bug_info = data[0].get("Bug", {}) if isinstance(data, list) else data.get("Bug", {})
+        raw_status = (bug_info.get("status") or "").strip().lower()
+        normalized_status = TAPD_STATUS_MAP.get(raw_status, raw_status or "unknown")
+        status_name = TAPD_STATUS_NAME_ZH.get(normalized_status, normalized_status or "未知")
+
+        return {
+            "success": True,
+            "bug_id": str(bug_info.get("id") or bug_id),
+            "tapd_status": normalized_status,
+            "tapd_status_name": status_name,
+            "tapd_modified": bug_info.get("modified", ""),
+        }
+    except requests.exceptions.Timeout:
+        return {
+            "success": False,
+            "code": "TAPD_TIMEOUT",
+            "message": "TAPD 查询超时",
+        }
+    except requests.exceptions.RequestException as e:
+        # 仅返回异常类型，不要把 URL/header 之类细节透出去
+        return {
+            "success": False,
+            "code": "TAPD_REQUEST_ERROR",
+            "message": f"TAPD 请求异常: {type(e).__name__}",
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "code": "TAPD_UNKNOWN_ERROR",
+            "message": f"TAPD 未知错误: {type(e).__name__}",
+        }
