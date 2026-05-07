@@ -7,6 +7,7 @@ AI 路由模块 - 提供 AI 生成测试用例和脚本的接口
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query, Depends
 from pydantic import BaseModel
 from typing import List, Optional
+import asyncio
 import json
 import sys
 import tempfile
@@ -51,6 +52,44 @@ except ImportError as e:
 router = APIRouter()
 
 
+def _scan_complete_objects(text: str) -> list:
+    """在被截断的 JSON 数组文本里逐个扫描完整的 {...} 对象，返回已成功解析的对象列表。
+
+    用于 AI 输出被 max_tokens 截断的场景。
+    """
+    items = []
+    depth = 0
+    in_str = False
+    escape = False
+    obj_start = -1
+    for i, ch in enumerate(text):
+        if escape:
+            escape = False
+            continue
+        if ch == '\\' and in_str:
+            escape = True
+            continue
+        if ch == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if ch == '{':
+            if depth == 0:
+                obj_start = i
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0 and obj_start >= 0:
+                chunk = text[obj_start:i + 1]
+                try:
+                    items.append(json.loads(chunk))
+                except json.JSONDecodeError:
+                    pass
+                obj_start = -1
+    return items
+
+
 def _parse_ai_testcase_response(response: str) -> list:
     """健壮地解析 AI 返回的测试用例 JSON，支持多种格式"""
     # 1. 去掉 markdown 代码块
@@ -77,16 +116,23 @@ def _parse_ai_testcase_response(response: str) -> list:
         obj = json.loads(response)
     except json.JSONDecodeError:
         # 4. 尝试修复截断的 JSON（末尾缺 ] 或 }）
-        for suffix in [']', ']}', ']\n}']:
+        for suffix in [']', ']}', ']\n}', '"}]', '"}]}']:
             try:
                 obj = json.loads(response + suffix)
                 break
             except json.JSONDecodeError:
                 continue
         else:
+            # 5. 兜底：截断 fallback - 逐个扫回已生成的完整 {...} 对象
+            arr_start = response.find('[')
+            scan_text = response[arr_start + 1:] if arr_start >= 0 else response
+            partial = _scan_complete_objects(scan_text)
+            if partial:
+                print(f"⚠️ AI 响应被截断，已 fallback 解析出 {len(partial)} 条完整用例")
+                return partial
             raise json.JSONDecodeError("无法解析 AI 响应", response[:200], 0)
 
-    # 5. 如果是 dict，尝试提取其中的数组字段
+    # 6. 如果是 dict，尝试提取其中的数组字段
     if isinstance(obj, dict):
         for key in ('testcases', 'test_cases', 'data', 'cases', 'results'):
             if key in obj and isinstance(obj[key], list):
@@ -218,11 +264,12 @@ async def generate_testcases(request: TestCaseGenerate):
         system_prompt = "你是一个专业的测试工程师，擅长根据需求生成高质量的测试用例。"
         
         # 调用 AI
-        response = client.generate_text(
+        response = await asyncio.to_thread(
+            client.generate_text,
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=0.3,
-            max_tokens=2000
+            max_tokens=2000,
         )
         
         # 解析响应
@@ -390,11 +437,12 @@ async def generate_testcases_from_svn(request: SVNTestCaseGenerate):
         
         # 调用 AI
         print(f"🤖 开始 AI 生成，目标: {target_count} 个测试用例")
-        response = client.generate_text(
+        response = await asyncio.to_thread(
+            client.generate_text,
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=0.3,
-            max_tokens=max_tokens
+            max_tokens=max_tokens,
         )
         
         # 解析响应
@@ -498,11 +546,12 @@ async def generate_script(request: ScriptGenerate):
         system_prompt = f"你是一个专业的测试开发工程师，擅长编写{request.framework}自动化测试脚本。"
         
         # 调用 AI
-        response = client.generate_text(
+        response = await asyncio.to_thread(
+            client.generate_text,
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=0.2,
-            max_tokens=1500
+            max_tokens=1500,
         )
         
         # 提取代码部分
@@ -796,13 +845,16 @@ async def generate_testcases_from_file(
         content_length = len(raw_text)
         if content_length > 8000:
             content_preview = raw_text[:10000]
-            max_tokens = 16000
+            base_max_tokens = 16000
         elif content_length > 3000:
             content_preview = raw_text[:6000]
-            max_tokens = 12000
+            base_max_tokens = 12000
         else:
             content_preview = raw_text
-            max_tokens = 8000
+            base_max_tokens = 8000
+        # 根据 count 动态放大 max_tokens（避免 100 条时 JSON 被截断）
+        # 每条用例 ~220 tokens + 1500 prompt 开销，cap 32000
+        max_tokens = min(32000, max(base_max_tokens, count * 220 + 1500))
 
         # 3. 构建增强 prompt（含结构化信息）
         structure_hint = ""
@@ -892,12 +944,13 @@ async def generate_testcases_from_file(
 
         use_model = model or getattr(client, 'ai_config', {}).get("model", None) or "deepseek-chat"
         print(f"🤖 AI 生成中，提供商={provider or 'auto'}, 模型={use_model}, 目标: {count} 个测试用例...")
-        response = client.generate_text(
+        response = await asyncio.to_thread(
+            client.generate_text,
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=0.3,
             max_tokens=max_tokens,
-            model=use_model
+            model=use_model,
         )
 
         # 5. 解析 AI 响应
@@ -983,13 +1036,15 @@ async def generate_testcases_from_folder(request: FolderRequest, db: Session = D
         content_length = len(raw_text)
         if content_length > 8000:
             content_preview = raw_text[:10000]
-            max_tokens = 16000
+            base_max_tokens = 16000
         elif content_length > 3000:
             content_preview = raw_text[:6000]
-            max_tokens = 12000
+            base_max_tokens = 12000
         else:
             content_preview = raw_text
-            max_tokens = 8000
+            base_max_tokens = 8000
+        # 根据 count 动态放大 max_tokens（避免 100 条时 JSON 被截断）
+        max_tokens = min(32000, max(base_max_tokens, request.count * 220 + 1500))
 
         # 3. 构建增强 prompt
         structure_hint = ""
@@ -1074,12 +1129,13 @@ async def generate_testcases_from_folder(request: FolderRequest, db: Session = D
 
         use_model = request.model or getattr(client, 'ai_config', {}).get("model", None) or "deepseek-chat"
         print(f"🤖 AI 生成中，提供商={request.provider or 'auto'}, 模型={use_model}, 目标: {request.count} 个测试用例...")
-        response = client.generate_text(
+        response = await asyncio.to_thread(
+            client.generate_text,
             prompt=prompt,
             system_prompt=system_prompt,
             temperature=0.3,
             max_tokens=max_tokens,
-            model=use_model
+            model=use_model,
         )
 
         # 5. 解析 AI 响应

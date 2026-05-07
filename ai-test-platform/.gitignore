@@ -143,3 +143,7 @@ local_settings.py
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# 本地诊断脚本与输出（一次性）
+scripts/_*.py
+scripts/_e2e_*_out/
