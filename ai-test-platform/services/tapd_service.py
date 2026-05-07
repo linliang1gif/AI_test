@@ -11,11 +11,13 @@ TAPD 对接服务
 TAPD Open API 文档: https://www.tapd.cn/help/show#1120003271001000708
 """
 
+import hashlib
 import json
 import re as _re
 import time
+from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 
 import requests
 
@@ -717,3 +719,254 @@ def fetch_tapd_bug_status(config: Dict[str, Any], bug_id: str) -> Dict[str, Any]
             "code": "TAPD_UNKNOWN_ERROR",
             "message": f"TAPD 未知错误: {type(e).__name__}",
         }
+
+
+# ══════════════════════════════════════════════════════════════════
+#  D2-1: Finding 内容指纹与去重（纯函数，详见 docs/D2_1_FINGERPRINT_DESIGN.md）
+# ══════════════════════════════════════════════════════════════════
+
+FP_VERSION = 1
+FP_ALGORITHM = "sha256_32_v1"
+
+# project_scope 清洗：从 code_snapshot_name 中剥离不稳定信息
+_SCOPE_TIMESTAMP_RE = _re.compile(r"_\d{8,14}")
+_SCOPE_DATE_RE = _re.compile(r"\d{4}-\d{2}-\d{2}t?\d*")
+_SCOPE_HEXHASH_RE = _re.compile(r"_[0-9a-f]{6,}")
+_SCOPE_SUFFIX_RE = _re.compile(r"(_snapshot[s]?|_uploaded)$", _re.IGNORECASE)
+_SCOPE_ARCHIVE_RE = _re.compile(r"\.(zip|tar\.gz|tgz|tar|rar|7z)$", _re.IGNORECASE)
+
+
+def _clean_snapshot_name_for_scope(name: str) -> str:
+    """清洗 code_snapshot_name 用于 project_scope，去除路径/压缩后缀/时间戳/短 hash。"""
+    if not name:
+        return ""
+    s = str(name).strip()
+    # 1) 取最后一段路径
+    s = s.replace("\\", "/").rstrip("/").split("/")[-1]
+    # 2) 去压缩后缀
+    s = _SCOPE_ARCHIVE_RE.sub("", s)
+    # 3) 去 _snapshot / _uploaded 后缀
+    s = _SCOPE_SUFFIX_RE.sub("", s)
+    # 4) 去时间戳与日期
+    s = _SCOPE_TIMESTAMP_RE.sub("", s)
+    s = _SCOPE_DATE_RE.sub("", s)
+    # 5) 去短 hash 段
+    s = _SCOPE_HEXHASH_RE.sub("", s)
+    # 6) 多空格压一个 + lower + 截断
+    s = _re.sub(r"\s+", " ", s).strip().lower()
+    return s[:100]
+
+
+def compute_project_scope(report: Optional[Dict[str, Any]]) -> str:
+    """取项目作用域，按优先级链：project_id > project_name > repo_name > 清洗后的 code_snapshot_name > 'global_unknown'。"""
+    if not report:
+        return "global_unknown"
+
+    for key in ("project_id", "project_name", "repo_name"):
+        v = report.get(key)
+        if v is None:
+            continue
+        sv = str(v).strip()
+        if sv:
+            return sv.lower()[:100]
+
+    snap = report.get("code_snapshot_name") or ""
+    cleaned = _clean_snapshot_name_for_scope(snap)
+    if cleaned:
+        return cleaned
+
+    return "global_unknown"
+
+
+def _fp_normalize(s: Any) -> str:
+    """通用 normalize：None/非字符串 → ''，多空格压一个，strip。"""
+    if s is None:
+        return ""
+    if not isinstance(s, str):
+        s = str(s)
+    s = _re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _fp_extract_requirement_clean(finding: Dict[str, Any]) -> str:
+    """取需求清洗文本，与 finding_to_tapd_bug 中的逻辑一致（剥前缀）。"""
+    req_point = (
+        finding.get("requirement")
+        or finding.get("requirement_point")
+        or finding.get("req_point")
+        or ""
+    )
+    req_clean = _fp_normalize(req_point).lstrip()
+    for prefix in ("[实现不一致]", "[需求未实现]", "[实现存疑]", "[多余代码]", "[风险项]", "[白盒对比]"):
+        if req_clean.startswith(prefix):
+            req_clean = req_clean[len(prefix):].lstrip()
+            break
+    return req_clean
+
+
+def _fp_requirement_key(finding: Dict[str, Any]) -> str:
+    """requirement_key：req_id 优先，否则取 requirement_clean 前 80 字符。"""
+    req_id = _fp_normalize(finding.get("req_id"))
+    if req_id:
+        return req_id[:80]
+    return _fp_extract_requirement_clean(finding)[:80]
+
+
+def _fp_code_file(finding: Dict[str, Any]) -> str:
+    """code_file 归一化：路径分隔符统一、lower、仅取最后两段（足以稳定标识，不受工程根目录变化影响）。"""
+    ce = finding.get("code_evidence") or {}
+    if isinstance(ce, list):
+        ce = ce[0] if ce else {}
+    if not isinstance(ce, dict):
+        return ""
+    raw = _fp_normalize(ce.get("file"))
+    if not raw:
+        return ""
+    raw = raw.replace("\\", "/").lower().strip("/")
+    parts = [p for p in raw.split("/") if p]
+    if len(parts) <= 2:
+        return "/".join(parts)
+    return "/".join(parts[-2:])
+
+
+def _fp_code_item(finding: Dict[str, Any]) -> str:
+    """code_item 归一化：lower + strip。"""
+    ce = finding.get("code_evidence") or {}
+    if isinstance(ce, list):
+        ce = ce[0] if ce else {}
+    if not isinstance(ce, dict):
+        return ""
+    return _fp_normalize(ce.get("code_item")).lower()
+
+
+def compute_finding_fingerprint(
+    finding: Dict[str, Any],
+    report: Optional[Dict[str, Any]] = None,
+) -> Tuple[str, str]:
+    """算 (project_scope, content_fingerprint)。
+
+    Returns:
+        (project_scope, content_fingerprint_32hex)
+    """
+    project_scope = compute_project_scope(report)
+    finding_type = _fp_normalize(finding.get("type")).lower()
+
+    requirement_clean = _fp_extract_requirement_clean(finding)
+    requirement_key = _fp_requirement_key(finding)
+    field_name = _fp_normalize(_extract_field_from_requirement(requirement_clean))
+    code_file = _fp_code_file(finding)
+    code_item = _fp_code_item(finding)
+    req_digest = requirement_clean[:200]
+
+    # 显式带 v= / alg= 前缀，便于将来 v2 时独立命名空间
+    raw = "|".join([
+        f"v={FP_VERSION}",
+        f"alg={FP_ALGORITHM}",
+        f"scope={project_scope}",
+        f"type={finding_type}",
+        f"rk={requirement_key}",
+        f"fld={field_name}",
+        f"cf={code_file}",
+        f"ci={code_item}",
+        f"rd={req_digest}",
+    ])
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
+    return project_scope, digest
+
+
+def debug_fingerprint_input(
+    finding: Dict[str, Any],
+    report: Optional[Dict[str, Any]] = None,
+) -> str:
+    """返回 fingerprint 的原始输入串（用于测试 14 #14：assert 不含敏感字段）。"""
+    project_scope = compute_project_scope(report)
+    finding_type = _fp_normalize(finding.get("type")).lower()
+    requirement_clean = _fp_extract_requirement_clean(finding)
+    requirement_key = _fp_requirement_key(finding)
+    field_name = _fp_normalize(_extract_field_from_requirement(requirement_clean))
+    code_file = _fp_code_file(finding)
+    code_item = _fp_code_item(finding)
+    req_digest = requirement_clean[:200]
+    return "|".join([
+        f"v={FP_VERSION}",
+        f"alg={FP_ALGORITHM}",
+        f"scope={project_scope}",
+        f"type={finding_type}",
+        f"rk={requirement_key}",
+        f"fld={field_name}",
+        f"cf={code_file}",
+        f"ci={code_item}",
+        f"rd={req_digest}",
+    ])
+
+
+def is_dedup_source_eligible(finding: Dict[str, Any]) -> bool:
+    """判定 finding 是否可作为 dedup source。
+
+    必须满足：
+      - 已推送 TAPD（tapd_bug_id 非空）
+      - 非误报（manual_status != 'false_positive'）
+    """
+    if not finding:
+        return False
+    if not _fp_normalize(finding.get("tapd_bug_id")):
+        return False
+    if _fp_normalize(finding.get("manual_status")).lower() == "false_positive":
+        return False
+    return True
+
+
+def build_dedup_source_record(
+    finding: Dict[str, Any],
+    report: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """构造索引值（dedup source 的快照）。仅取必要字段，不放敏感配置。"""
+    return {
+        "finding_id": finding.get("finding_id"),
+        "report_id": (report or {}).get("report_id"),
+        "tapd_bug_id": finding.get("tapd_bug_id"),
+        "tapd_url": finding.get("tapd_url"),
+        "tapd_status": finding.get("tapd_status"),
+        "tapd_status_name": finding.get("tapd_status_name"),
+        "tapd_pushed_at": finding.get("tapd_pushed_at"),
+        "manual_status": finding.get("manual_status"),
+    }
+
+
+def apply_dedup_to_finding(
+    target_finding: Dict[str, Any],
+    source_record: Dict[str, Any],
+    project_scope: str,
+    content_fingerprint: str,
+) -> Dict[str, Any]:
+    """把 source 的 TAPD 字段复用到 target，并写入审计字段。
+
+    严格约束：
+      - tapd_pushed_at 复用 source 的（不伪造当前时间）
+      - dedup_by_fingerprint = True
+      - dedup_at = 当前时间
+      - dedup_source_finding_id / dedup_source_report_id 写入
+
+    Returns:
+        被修改后的 target_finding（同一对象，便于链式调用）
+    """
+    target_finding["content_fingerprint"] = content_fingerprint
+    target_finding["content_fingerprint_version"] = FP_VERSION
+    target_finding["content_fingerprint_algorithm"] = FP_ALGORITHM
+
+    target_finding["tapd_bug_id"] = source_record.get("tapd_bug_id")
+    target_finding["tapd_url"] = source_record.get("tapd_url") or ""
+
+    if source_record.get("tapd_status"):
+        target_finding["tapd_status"] = source_record["tapd_status"]
+    if source_record.get("tapd_status_name"):
+        target_finding["tapd_status_name"] = source_record["tapd_status_name"]
+    if source_record.get("tapd_pushed_at"):
+        target_finding["tapd_pushed_at"] = source_record["tapd_pushed_at"]
+
+    target_finding["dedup_by_fingerprint"] = True
+    target_finding["dedup_source_finding_id"] = source_record.get("finding_id")
+    target_finding["dedup_source_report_id"] = source_record.get("report_id")
+    target_finding["dedup_at"] = datetime.now().isoformat()
+
+    return target_finding

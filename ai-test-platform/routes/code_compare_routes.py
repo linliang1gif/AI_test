@@ -32,7 +32,7 @@ import uuid
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -183,6 +183,104 @@ def _save_report(report: dict):
     """持久化报告到磁盘"""
     path = REPORTS_DIR / f"{report['report_id']}.json"
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+# ══════════════════════════════════════════════════════════════════
+#  D2-1: Finding 内容指纹索引（详见 docs/D2_1_FINGERPRINT_DESIGN.md）
+# ══════════════════════════════════════════════════════════════════
+
+# 索引 key = (project_scope, content_fingerprint)，value = source 快照
+_fingerprint_index: Dict[Tuple[str, str], dict] = {}
+_fingerprint_index_built: bool = False
+
+
+def _get_or_compute_fingerprint(finding: dict, report: dict) -> Tuple[str, str]:
+    """取或懒计算 finding 的 (project_scope, content_fingerprint)。
+
+    若已有且版本一致，复用存值（仅重算 scope）；否则重新计算并写入内存（不立即落盘）。
+    """
+    from services.tapd_service import (
+        compute_finding_fingerprint, FP_VERSION, FP_ALGORITHM,
+    )
+    have_fp = finding.get("content_fingerprint")
+    have_v = finding.get("content_fingerprint_version")
+    have_alg = finding.get("content_fingerprint_algorithm")
+    if have_fp and have_v == FP_VERSION and have_alg == FP_ALGORITHM:
+        scope, _ = compute_finding_fingerprint(finding, report)
+        return scope, have_fp
+    scope, fp = compute_finding_fingerprint(finding, report)
+    finding["content_fingerprint"] = fp
+    finding["content_fingerprint_version"] = FP_VERSION
+    finding["content_fingerprint_algorithm"] = FP_ALGORITHM
+    return scope, fp
+
+
+def _build_fingerprint_index() -> int:
+    """全量扫描 _reports，重建 fingerprint 索引。幂等，返回 source 数。"""
+    from services.tapd_service import (
+        is_dedup_source_eligible, build_dedup_source_record,
+    )
+    global _fingerprint_index, _fingerprint_index_built
+    _fingerprint_index = {}
+    for rpt in _reports.values():
+        for f in rpt.get("findings", []):
+            if not is_dedup_source_eligible(f):
+                continue
+            scope, fp = _get_or_compute_fingerprint(f, rpt)
+            key = (scope, fp)
+            if key in _fingerprint_index:
+                continue  # 取最先入索引的有效 source
+            _fingerprint_index[key] = build_dedup_source_record(f, rpt)
+    _fingerprint_index_built = True
+    return len(_fingerprint_index)
+
+
+def _ensure_fingerprint_index() -> None:
+    """懒触发：第一次 push 时全量构建。"""
+    if not _fingerprint_index_built:
+        _build_fingerprint_index()
+
+
+def _register_fingerprint(finding: dict, report: dict) -> None:
+    """推送/复用成功后增量入索引。若 finding 不符合 source 条件则忽略。"""
+    from services.tapd_service import (
+        is_dedup_source_eligible, build_dedup_source_record,
+    )
+    if not _fingerprint_index_built:
+        _build_fingerprint_index()
+        return  # 全量扫描已包含当前 finding
+    if not is_dedup_source_eligible(finding):
+        return
+    scope, fp = _get_or_compute_fingerprint(finding, report)
+    key = (scope, fp)
+    if key not in _fingerprint_index:
+        _fingerprint_index[key] = build_dedup_source_record(finding, report)
+
+
+def _unregister_fingerprint(finding: dict, report: dict) -> None:
+    """finding 状态变更（如标记 false_positive）后从索引移除。"""
+    from services.tapd_service import compute_finding_fingerprint
+    fp_existing = finding.get("content_fingerprint")
+    if not fp_existing:
+        return
+    scope, _ = compute_finding_fingerprint(finding, report)
+    key = (scope, fp_existing)
+    src = _fingerprint_index.get(key)
+    # 仅当该 source 就是当前 finding 时才移除，避免误删别的 source
+    if src and src.get("finding_id") == finding.get("finding_id"):
+        _fingerprint_index.pop(key, None)
+
+
+def _lookup_dedup_source(
+    scope: str, fp: str, exclude_finding_id: Optional[str] = None,
+) -> Optional[dict]:
+    """查 (scope, fp) 命中。若命中的 source 与 exclude_finding_id 相同则返回 None。"""
+    src = _fingerprint_index.get((scope, fp))
+    if not src:
+        return None
+    if exclude_finding_id and src.get("finding_id") == exclude_finding_id:
+        return None
+    return src
 
 
 def _save_question(q: dict):
@@ -1147,6 +1245,8 @@ async def mark_finding_false_positive(finding_id: str, request: MarkFalsePositiv
     finding["manual_status"] = "false_positive"
     finding["review_comment"] = request.reason
     finding["confirmed_at"] = datetime.now().isoformat()
+    # D2-1: 从 fingerprint 索引中移除（若存在）
+    _unregister_fingerprint(finding, report)
     _save_report(report)
 
     # Phase C1: 同步 DB
@@ -1409,11 +1509,15 @@ async def push_finding_to_tapd(finding_id: str, request: PushToTapdRequest):
     """推送 finding 到 TAPD 创建缺陷"""
     from services.tapd_service import (
         load_tapd_config, push_bug_to_tapd, finding_to_tapd_bug,
+        apply_dedup_to_finding,
     )
 
     config = load_tapd_config()
     if not config.get("workspace_id"):
         raise HTTPException(status_code=400, detail="请先配置 TAPD 信息（项目设置 → TAPD 配置）")
+
+    # D2-1: 确保 fingerprint 索引已构建
+    _ensure_fingerprint_index()
 
     # 在所有报告中查找 finding
     target_finding = None
@@ -1441,6 +1545,24 @@ async def push_finding_to_tapd(finding_id: str, request: PushToTapdRequest):
             "bug_id": target_finding["tapd_bug_id"],
             "url": target_finding.get("tapd_url", ""),
             "message": "该 Finding 已推送过 TAPD",
+        }
+
+    # D2-1: fingerprint 去重命中检查
+    target_report = _reports.get(report_context.get("report_id")) or {}
+    fp_scope, fp_value = _get_or_compute_fingerprint(target_finding, target_report)
+    dedup_source = _lookup_dedup_source(fp_scope, fp_value, exclude_finding_id=finding_id)
+    if dedup_source:
+        apply_dedup_to_finding(target_finding, dedup_source, fp_scope, fp_value)
+        if target_report:
+            _save_report(target_report)
+        return {
+            "success": True,
+            "already_pushed": True,
+            "dedup_by_fingerprint": True,
+            "dedup_source_finding_id": dedup_source.get("finding_id"),
+            "bug_id": target_finding.get("tapd_bug_id"),
+            "url": target_finding.get("tapd_url", ""),
+            "message": "已通过内容指纹去重，复用源 finding 的 TAPD Bug",
         }
 
     # 如果用户填写了表单字段，使用用户填写的；否则从 finding 自动生成
@@ -1487,6 +1609,9 @@ async def push_finding_to_tapd(finding_id: str, request: PushToTapdRequest):
         target_finding["tapd_bug_id"] = result["bug_id"]
         target_finding["tapd_url"] = result["url"]
         target_finding["tapd_pushed_at"] = datetime.now().isoformat()
+
+        # D2-1: 推送成功后注册到 fingerprint 索引
+        _register_fingerprint(target_finding, target_report or {})
 
         # 持久化报告
         for rpt in _reports.values():
@@ -1674,7 +1799,11 @@ async def batch_push_findings_to_tapd(request: BatchPushToTapdRequest):
     """
     from services.tapd_service import (
         load_tapd_config, push_bug_to_tapd, finding_to_tapd_bug,
+        apply_dedup_to_finding,
     )
+
+    # D2-1: 确保 fingerprint 索引已构建
+    _ensure_fingerprint_index()
 
     if not request.finding_ids:
         raise HTTPException(status_code=400, detail="finding_ids 不能为空")
@@ -1739,6 +1868,22 @@ async def batch_push_findings_to_tapd(request: BatchPushToTapdRequest):
             skipped += 1
             continue
 
+        # D2-1: fingerprint 去重命中检查
+        fp_scope, fp_value = _get_or_compute_fingerprint(finding, rpt)
+        dedup_source = _lookup_dedup_source(fp_scope, fp_value, exclude_finding_id=fid)
+        if dedup_source:
+            apply_dedup_to_finding(finding, dedup_source, fp_scope, fp_value)
+            dirty_reports.add(rpt.get("report_id"))
+            results.append({
+                "finding_id": fid,
+                "status": "dedup_by_fingerprint",
+                "bug_id": finding.get("tapd_bug_id"),
+                "url": finding.get("tapd_url", ""),
+                "dedup_source_finding_id": dedup_source.get("finding_id"),
+            })
+            skipped += 1
+            continue
+
         # 自动生成 bug 字段
         report_context = {
             "report_id": rpt.get("report_id"),
@@ -1768,6 +1913,8 @@ async def batch_push_findings_to_tapd(request: BatchPushToTapdRequest):
             finding["tapd_url"] = result["url"]
             finding["tapd_pushed_at"] = datetime.now().isoformat()
             dirty_reports.add(rpt.get("report_id"))
+            # D2-1: 推送成功后注册到 fingerprint 索引
+            _register_fingerprint(finding, rpt)
             results.append({
                 "finding_id": fid,
                 "status": "pushed",
@@ -1792,12 +1939,15 @@ async def batch_push_findings_to_tapd(request: BatchPushToTapdRequest):
             except Exception as e:
                 logger.warning(f"batch_push: save report {rpt_id} failed: {e}")
 
+    # D2-1: 统计 dedup_by_fingerprint 项
+    dedup_count = sum(1 for r in results if r.get("status") == "dedup_by_fingerprint")
     return {
         "success": True,
         "data": {
             "total": len(request.finding_ids),
             "pushed": pushed,
             "skipped": skipped,
+            "dedup_by_fingerprint": dedup_count,
             "failed": failed,
             "not_found": not_found,
             "results": results,
