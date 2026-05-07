@@ -262,6 +262,192 @@ def api_push_defect_to_tapd(defect_id: int, req: PushToTapdRequest, db: Session 
     return result
 
 
+# ── TAPD → 本地缺陷状态机映射 ──
+TAPD_TO_LOCAL_STATUS = {
+    "in_progress": "confirmed",
+    "resolved": "fixed",
+    "verified": "verified",
+    "closed": "closed",
+    "reopened": "reopened",
+    "rejected": "rejected",
+    # new / postponed: 不动
+}
+
+
+def _shortest_transition_path(current: str, target: str) -> List[str]:
+    """BFS 计算从 current 到 target 经过状态机的最短路径（不含 current 自己）
+
+    返回中间状态序列（含 target）。无法到达返回空列表。
+    """
+    from services.defect_service import ALLOWED_TRANSITIONS
+    if current == target:
+        return []
+    from collections import deque
+    visited = {current}
+    queue = deque([(current, [])])
+    while queue:
+        node, path = queue.popleft()
+        for nxt in ALLOWED_TRANSITIONS.get(node, set()):
+            if nxt in visited:
+                continue
+            new_path = path + [nxt]
+            if nxt == target:
+                return new_path
+            visited.add(nxt)
+            queue.append((nxt, new_path))
+    return []
+
+
+def _do_sync_one_defect(db, defect, force_advance: bool = True) -> dict:
+    """单条缺陷的 TAPD 反向同步逻辑（内部复用）"""
+    from database.models import DefectEvent
+    from services.tapd_service import load_tapd_config, fetch_tapd_bug_status
+
+    evidence = defect.evidence_json or {}
+    bug_id = evidence.get("tapd_bug_id")
+    if not bug_id:
+        return {"success": False, "code": "NOT_PUSHED", "message": "该缺陷未推送过 TAPD"}
+
+    config = load_tapd_config()
+    if not config.get("workspace_id"):
+        return {"success": False, "code": "NO_TAPD_CONFIG", "message": "请先配置 TAPD"}
+
+    fetch = fetch_tapd_bug_status(config, bug_id)
+    if not fetch.get("success"):
+        return {
+            "success": False,
+            "code": fetch.get("code", "TAPD_API_ERROR"),
+            "message": fetch.get("message", "TAPD 查询失败"),
+        }
+
+    tapd_status = fetch.get("tapd_status") or "unknown"
+    tapd_status_name = fetch.get("tapd_status_name") or "未知"
+
+    # 写回最新 TAPD 状态到 evidence
+    evidence.update({
+        "tapd_status": tapd_status,
+        "tapd_status_name": tapd_status_name,
+        "tapd_last_sync_at": datetime.now().isoformat(),
+    })
+    if fetch.get("tapd_modified"):
+        evidence["tapd_modified"] = fetch["tapd_modified"]
+    defect.evidence_json = evidence
+
+    # 计算目标本地状态
+    target_local = TAPD_TO_LOCAL_STATUS.get(tapd_status)
+    advanced_steps = []
+    skipped_reason = None
+
+    if not target_local:
+        skipped_reason = f"TAPD 状态 {tapd_status} 无映射"
+    elif defect.status == target_local:
+        skipped_reason = "本地状态与目标一致"
+    elif force_advance:
+        path = _shortest_transition_path(defect.status, target_local)
+        if not path:
+            skipped_reason = f"状态机不可达: {defect.status} → {target_local}"
+        else:
+            for nxt in path:
+                from_status = defect.status
+                defect.status = nxt
+                if nxt == "closed":
+                    defect.closed_at = datetime.now()
+                advanced_steps.append({"from": from_status, "to": nxt})
+                ev = DefectEvent(
+                    defect_id=defect.id,
+                    event_type="tapd_sync",
+                    from_status=from_status,
+                    to_status=nxt,
+                    comment=f"TAPD 联动: {tapd_status_name}",
+                    evidence_json={"tapd_status": tapd_status, "tapd_bug_id": bug_id},
+                    created_by="system",
+                )
+                db.add(ev)
+
+    # 即便没推进也记一次同步事件，方便审计
+    if not advanced_steps:
+        ev = DefectEvent(
+            defect_id=defect.id,
+            event_type="tapd_sync_check",
+            comment=f"TAPD 状态: {tapd_status_name}" + (f" ({skipped_reason})" if skipped_reason else ""),
+            evidence_json={"tapd_status": tapd_status, "tapd_bug_id": bug_id, "skipped": skipped_reason},
+            created_by="system",
+        )
+        db.add(ev)
+
+    db.commit()
+    db.refresh(defect)
+
+    return {
+        "success": True,
+        "defect_id": defect.id,
+        "tapd_bug_id": bug_id,
+        "tapd_status": tapd_status,
+        "tapd_status_name": tapd_status_name,
+        "local_status": defect.status,
+        "advanced_steps": advanced_steps,
+        "skipped_reason": skipped_reason,
+    }
+
+
+# ── 12. POST /api/v2/defects/{defect_id}/sync-tapd-status — 单条同步 ──
+@router.post("/{defect_id}/sync-tapd-status")
+def api_sync_defect_tapd_status(defect_id: int, db: Session = Depends(get_db)):
+    """从 TAPD 拉取最新 Bug 状态并联动本地缺陷状态机"""
+    from database.models import Defect
+    defect = db.query(Defect).filter(Defect.id == defect_id).first()
+    if not defect:
+        raise HTTPException(status_code=404, detail=f"Defect {defect_id} not found")
+
+    return _do_sync_one_defect(db, defect, force_advance=True)
+
+
+# ── 13. POST /api/v2/defects/sync-tapd-status-batch — 批量同步 ──
+class BatchSyncTapdRequest(BaseModel):
+    defect_ids: Optional[List[int]] = None  # 指定 ID；为空则扫描所有已推送的缺陷
+    project_id: Optional[int] = None        # 缩小批量范围
+    force_advance: bool = True
+
+
+@router.post("/sync-tapd-status-batch")
+def api_sync_defects_tapd_status_batch(req: BatchSyncTapdRequest, db: Session = Depends(get_db)):
+    """批量同步多条已推送 TAPD 的缺陷状态"""
+    from database.models import Defect
+
+    q = db.query(Defect)
+    if req.defect_ids:
+        q = q.filter(Defect.id.in_(req.defect_ids))
+    if req.project_id is not None:
+        q = q.filter(Defect.project_id == req.project_id)
+
+    targets = q.all()
+    pushed_only = [d for d in targets if (d.evidence_json or {}).get("tapd_bug_id")]
+
+    results = []
+    advanced_count = 0
+    failed_count = 0
+    for d in pushed_only:
+        try:
+            r = _do_sync_one_defect(db, d, force_advance=req.force_advance)
+        except Exception as exc:
+            r = {"success": False, "defect_id": d.id, "code": "EXCEPTION", "message": str(exc)}
+        results.append(r)
+        if r.get("success"):
+            if r.get("advanced_steps"):
+                advanced_count += 1
+        else:
+            failed_count += 1
+
+    return {
+        "success": True,
+        "total": len(pushed_only),
+        "advanced": advanced_count,
+        "failed": failed_count,
+        "no_tapd_link": len(targets) - len(pushed_only),
+        "results": results,
+    }
+
+
 # ── 10. GET /api/v2/defects/summary/for-gate — 质量门禁缺陷摘要 ──
 @router.get("/summary/for-gate")
 def api_defect_summary(

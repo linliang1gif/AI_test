@@ -76,6 +76,32 @@ export default function DefectManagement() {
     fetchDefects()
   }
 
+  const handleSyncTapd = async (defectId) => {
+    const r = await fetch(`${API}/${defectId}/sync-tapd-status`, { method: 'POST', headers: { 'Content-Type': 'application/json' } })
+    const d = await r.json()
+    if (!r.ok || !d.success) {
+      alert(d.detail || d.message || 'TAPD 状态同步失败')
+      return
+    }
+    const steps = d.advanced_steps || []
+    const stepsTxt = steps.length ? steps.map(s => `${s.from}→${s.to}`).join(', ') : '无变化'
+    alert(`TAPD: ${d.tapd_status_name}\n本地: ${d.local_status}\n推进: ${stepsTxt}${d.skipped_reason ? `\n${d.skipped_reason}` : ''}`)
+    if (showDetail?.id === defectId) openDetail(defectId)
+    fetchDefects()
+  }
+
+  const handleBatchSyncTapd = async () => {
+    if (!confirm('对所有已推送 TAPD 的缺陷进行状态同步？\n（会从 TAPD 拉取最新状态并自动推动本地状态机）')) return
+    const r = await fetch(`${API}/sync-tapd-status-batch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force_advance: true }) })
+    const d = await r.json()
+    if (!r.ok || !d.success) {
+      alert(d.detail || d.message || '批量同步失败')
+      return
+    }
+    alert(`批量同步完成\n  扫描已推送: ${d.total}\n  状态推进: ${d.advanced}\n  失败: ${d.failed}\n  未推送跳过: ${d.no_tapd_link}`)
+    fetchDefects()
+  }
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex justify-between items-center mb-6">
@@ -83,7 +109,10 @@ export default function DefectManagement() {
           <h1 className="text-2xl font-bold text-slate-900">缺陷管理</h1>
           <p className="text-sm text-slate-500 mt-1">缺陷闭环跟踪 · 共 {total} 个缺陷</p>
         </div>
-        <button onClick={() => setShowCreate(true)} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm font-medium">+ 新建缺陷</button>
+        <div className="flex gap-2">
+          <button onClick={handleBatchSyncTapd} title="从 TAPD 拉取所有已推送缺陷的最新状态并推动本地状态机" className="px-3 py-2 border border-cyan-500 text-cyan-700 rounded-lg hover:bg-cyan-50 text-sm font-medium">⥂ 同步 TAPD</button>
+          <button onClick={() => setShowCreate(true)} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm font-medium">+ 新建缺陷</button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -129,15 +158,23 @@ export default function DefectManagement() {
                 <td className="px-4 py-3 text-center" onClick={e => e.stopPropagation()}>
                   <div className="flex justify-center gap-1 flex-wrap">
                     {d.evidence_json?.tapd_bug_id ? (
-                      <a
-                        href={d.evidence_json.tapd_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        title={`已推送 TAPD #${d.evidence_json.tapd_bug_id}`}
-                        className="px-2 py-0.5 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100"
-                      >
-                        TAPD #{d.evidence_json.tapd_bug_id}
-                      </a>
+                      <>
+                        <a
+                          href={d.evidence_json.tapd_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          title={`已推送 TAPD #${d.evidence_json.tapd_bug_id}${d.evidence_json.tapd_status_name ? ` · ${d.evidence_json.tapd_status_name}` : ''}`}
+                          className="px-2 py-0.5 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100"
+                        >
+                          TAPD #{d.evidence_json.tapd_bug_id}
+                          {d.evidence_json.tapd_status_name ? ` (${d.evidence_json.tapd_status_name})` : ''}
+                        </a>
+                        <button
+                          onClick={() => handleSyncTapd(d.id)}
+                          title="从 TAPD 拉取最新状态并联动本地状态机"
+                          className="px-1.5 py-0.5 text-xs bg-cyan-50 text-cyan-700 rounded hover:bg-cyan-100"
+                        >⥂</button>
+                      </>
                     ) : (
                       <button
                         onClick={() => handlePushToTapd(d.id)}
@@ -248,7 +285,13 @@ export default function DefectManagement() {
             {/* Transitions */}
             <div className="flex gap-2 mb-4 flex-wrap">
               {showDetail.evidence_json?.tapd_bug_id ? (
-                <a href={showDetail.evidence_json.tapd_url} target="_blank" rel="noreferrer" className="px-3 py-1.5 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100">TAPD #{showDetail.evidence_json.tapd_bug_id}</a>
+                <>
+                  <a href={showDetail.evidence_json.tapd_url} target="_blank" rel="noreferrer" className="px-3 py-1.5 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100">
+                    TAPD #{showDetail.evidence_json.tapd_bug_id}
+                    {showDetail.evidence_json.tapd_status_name ? ` (${showDetail.evidence_json.tapd_status_name})` : ''}
+                  </a>
+                  <button onClick={() => handleSyncTapd(showDetail.id)} title="同步 TAPD 状态" className="px-3 py-1.5 text-xs bg-cyan-50 text-cyan-700 rounded hover:bg-cyan-100">⥂ 同步</button>
+                </>
               ) : (
                 <button onClick={() => handlePushToTapd(showDetail.id)} className="px-3 py-1.5 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100">推送 TAPD</button>
               )}
