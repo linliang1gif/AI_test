@@ -218,6 +218,116 @@ def _parse_axure_datajs(file_path: Path) -> List[Dict[str, Any]]:
     return results
 
 
+# ══════════════════════════════════════════════════════════════════
+#  Axure type='label' 文本启发式分类（避免演示数据进入需求点）
+#  带来的问题：Axure 原型中的“¥12303.33”、“待审核”、“(下拉列表)”会被需求-代码对比
+#  误判为 missing。本分类器在解析阶段就把他们从 features 中过滤掉。
+# ══════════════════════════════════════════════════════════════════
+
+# 常见控件类型（noise）
+_AXURE_WIDGET_TYPES = (
+    '下拉列表', '文本框', '矩形', '矩形按钮', '按钮', '复选框', '单选框',
+    '图片', '图标', '形状', '圆形', '椭圆', '链接', '图像', '文本',
+    '占位符', '热区', '动态面板', '中继器', '内联框架', '表格', '面板',
+)
+
+# 演示用人名占位
+_DEMO_PERSONS = {
+    '张三', '李四', '王五', '赵六', '钱七', '孙八', '周九', '吴十',
+    'test', 'demo', 'sample', 'example',
+}
+
+# 演示状态/选项短词（精确匹配）
+_DEMO_STATUS_WORDS = {
+    '待审核', '已审核', '审核中', '审核通过', '审核拒绝', '审核不通过',
+    '草稿', '已提交', '已驳回', '已过期', '已完成', '已取消', '处理中',
+    '待处理', '待开票', '已开票', '已支付', '待支付', '已收款', '待收款',
+    '是', '否',  # 单个布尔短词
+}
+
+# 业务规则关键词（与 parse_axure_folder_structured 中一致）
+_RULE_KEYWORDS_RE = re.compile(
+    r'(必须|不能|不得|限制|校验|验证|范围|最大|最小|不超过|至少|'
+    r'当.*时|如果.*则|若.*则|规则|约束|条件|支持|默认)',
+    re.IGNORECASE,
+)
+
+# 金额：¥ / $ / ￥ + 数字（含小数）；或纯数字带单位后缀
+_DEMO_AMOUNT_RE = re.compile(
+    r'^\s*[¥$￥]\s*[\d,]+(\.\d+)?\s*$|'
+    r'^\s*[\d,]+(\.\d+)?\s*(KG|kg|元|件|个|岁|%)\s*$'
+)
+
+# 日期：YYYY-MM-DD / YYYY/MM/DD / YYYY年MM月DD日（可带时间）
+_DEMO_DATE_RE = re.compile(
+    r'^\s*\d{4}[-/年]\d{1,2}[-/月]\d{1,2}日?'
+    r'(\s+\d{1,2}[:：]\d{1,2}([:：]\d{1,2})?)?\s*$'
+)
+
+# 时间：HH:MM 或 HH:MM:SS
+_DEMO_TIME_RE = re.compile(r'^\s*\d{1,2}[:：]\d{1,2}([:：]\d{1,2})?\s*$')
+
+# 订单号格式：2-5 个大写字母 + 6-20 位数字
+_DEMO_ORDER_NO_RE = re.compile(r'^\s*[A-Z]{2,5}\d{6,20}\s*$')
+
+# 纯数字串：整数 ≥4 位 OR 整数 ≥1 位 + 小数 ≥2 位（典型金额演示值如 123.03 / 5.50）
+_DEMO_PURE_NUMBER_RE = re.compile(
+    r'^\s*[\d,]{4,}(\.\d+)?\s*$|'
+    r'^\s*\d+\.\d{2,}\s*$'
+)
+
+# 控件类型整体匹配：(下拉列表) / （矩形）
+_AXURE_WIDGET_BRACKET_RE = re.compile(
+    r'^\s*[\(（]\s*(' + '|'.join(_AXURE_WIDGET_TYPES) + r')\s*[\)）]\s*$'
+)
+
+# 纯标点 / 单字符
+_PUNCT_ONLY_RE = re.compile(r'^[\s\W_]{1,3}$')
+
+
+def _classify_axure_label_text(content: str) -> str:
+    """对 Axure type='label' 元件文本做四分类。
+
+    Returns:
+        "noise"      : 纯标点 / 控件类型标记 / 长度 <= 1
+        "demo_value" : 金额 / 日期 / 时间 / 订单号 / 演示状态 / 演示人名 / 纯数字
+        "rule"       : 含业务规则关键词
+        "field_name" : 其他（默认；保守保留作为字段名候选）
+    """
+    if not content:
+        return "noise"
+    s = content.strip()
+    if not s:
+        return "noise"
+    # ── 1) noise ──
+    if len(s) <= 1:
+        return "noise"
+    if _PUNCT_ONLY_RE.match(s):
+        return "noise"
+    if _AXURE_WIDGET_BRACKET_RE.match(s):
+        return "noise"
+    # ── 2) demo_value ──
+    if _DEMO_AMOUNT_RE.match(s):
+        return "demo_value"
+    if _DEMO_DATE_RE.match(s):
+        return "demo_value"
+    if _DEMO_TIME_RE.match(s):
+        return "demo_value"
+    if _DEMO_ORDER_NO_RE.match(s):
+        return "demo_value"
+    if _DEMO_PURE_NUMBER_RE.match(s):
+        return "demo_value"
+    if s in _DEMO_PERSONS:
+        return "demo_value"
+    if s in _DEMO_STATUS_WORDS:
+        return "demo_value"
+    # ── 3) rule ──
+    if _RULE_KEYWORDS_RE.search(s):
+        return "rule"
+    # ── 4) field_name (default) ──
+    return "field_name"
+
+
 def _extract_axure_annotations(content: str, source_name: str = 'data.js') -> List[Dict[str, Any]]:
     """从 Axure data.js 内容中提取注释，支持两种格式：
     1. 标准 JSON 格式: "label": "xxx", "说明": "xxx"
@@ -410,6 +520,7 @@ def parse_axure_folder_structured(folder_path: str) -> Dict[str, Any]:
         "rules": [],
         "fields": [],
         "axure_notes": [],
+        "demo_values": [],   # D2-2: type='label' 中被识别为演示数据/噪声的项不下游
         "stats": {
             "total_chars": len(raw_text),
             "file_type": "axure_folder",
@@ -430,8 +541,26 @@ def parse_axure_folder_structured(folder_path: str) -> Dict[str, Any]:
             result["axure_notes"].append(f"【{label}】{content}")
             if rule_keywords.search(content):
                 result["rules"].append(f"【{label}】{content}")
-            result["features"].append({"name": label, "source": "axure_annotation"})
-            # 识别字段
+            # D2-2: 对 annotation.label 也做分类，避免演示值/控件类型作为 feature.name
+            # 真实 Axure data.js 中绝大多数演示数据（如 ¥250.00、(下拉列表)、FKA20260407）
+            # 都走 type='annotation' 路径，且 label 字段是元件文本，content 字段才是需求说明。
+            label_kind = _classify_axure_label_text(label)
+            if label_kind in ("field_name", "rule"):
+                # label 本身是字段名 → 直接用作 feature.name
+                src = "axure_annotation" if label_kind == "field_name" else "axure_annotation_rule"
+                result["features"].append({"name": label, "source": src})
+            else:
+                # label 是 demo_value/noise → 用 content (desc) 作为 feature.name
+                # （因为 desc 才是真正的需求文字），原 label 进 demo_values 作审计
+                if content and content.strip():
+                    result["features"].append({
+                        "name": content.strip()[:80],
+                        "source": "axure_annotation_desc",
+                        "_demo_label": label,
+                    })
+                if label:
+                    result["demo_values"].append(label)
+            # 识别字段（行为不变；只看 label 是否含表单元件类型词）
             field_markers = ['文本框', '下拉列表', '输入', '选择', '日期']
             if any(m in label for m in field_markers):
                 result["fields"].append({"name": label, "type": "input", "required": False})
@@ -440,13 +569,24 @@ def parse_axure_folder_structured(folder_path: str) -> Dict[str, Any]:
             if rule_keywords.search(content):
                 result["rules"].append(content)
         elif a['type'] == 'label':
-            result["features"].append({"name": content, "source": "axure_label"})
+            # D2-2: 对 type='label' 做四分类，演示值/噪声不进 features
+            kind = _classify_axure_label_text(content)
+            if kind == "field_name":
+                result["features"].append({"name": content, "source": "axure_label"})
+            elif kind == "rule":
+                result["rules"].append(content)
+                # rule 同时以 axure_label_rule 身份进 features，保证 AI prompt 也能看到
+                result["features"].append({"name": content, "source": "axure_label_rule"})
+            else:
+                # demo_value / noise → 仅记在 demo_values，不作为需求点下游
+                result["demo_values"].append(content)
 
     result["stats"]["modules"] = len(result["modules"])
     result["stats"]["features"] = len(result["features"])
     result["stats"]["rules"] = len(result["rules"])
     result["stats"]["fields"] = len(result["fields"])
     result["stats"]["axure_notes"] = len(result["axure_notes"])
+    result["stats"]["demo_values"] = len(result["demo_values"])
 
     return result
 
