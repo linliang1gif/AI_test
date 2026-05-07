@@ -45,12 +45,17 @@ def step1_pick_finding(report_id: str | None, finding_id: str | None):
     r.raise_for_status()
     rep = r.json().get("report") or r.json()
     findings = rep.get("findings", [])
-    # 优先 risk，再 inconsistent
+    # 优先 risk，再 inconsistent；同时跳过已推过 TAPD 的 finding（除非显式指定 finding_id）
     for ftype in ("risk", "inconsistent"):
         for f in findings:
-            if f.get("type") == ftype and f.get("confidence", 0) >= 0.6:
-                return rep, f
-    fail("没找到 risk/inconsistent 类型的 finding")
+            if f.get("type") != ftype:
+                continue
+            if f.get("confidence", 0) < 0.6:
+                continue
+            if f.get("tapd_bug_id"):
+                continue  # 已推过，跳过
+            return rep, f
+    fail("没找到未推送过的 risk/inconsistent finding（可显式传 finding_id 强制选）")
 
 
 def step2_convert_to_defect(finding_id: str):
@@ -87,12 +92,8 @@ def step3_check_tapd_config():
 
 
 def step4_push_to_tapd(finding_id: str):
-    body = {
-        "title": None,  # 用 finding requirement 自动生成
-        "severity": "major",
-        "priority": "P2",
-        "code_location": None,
-    }
+    # 不传 severity / priority，让后端按 finding.risk_level 自动推断
+    body = {}
     r = requests.post(
         f"{BASE}/api/v2/code-compare/findings/{finding_id}/push-to-tapd",
         json=body,

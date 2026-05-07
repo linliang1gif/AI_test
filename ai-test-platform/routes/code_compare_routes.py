@@ -836,6 +836,29 @@ async def get_reports():
 #  4. 报告详情
 # ══════════════════════════════════════════════════════════════════
 
+_TAPD_MERGE_FIELDS = (
+    "tapd_bug_id", "tapd_url", "tapd_pushed_at",
+    "tapd_status", "tapd_status_name", "tapd_last_sync_at",
+    "tapd_modified",
+)
+
+
+def _merge_tapd_fields_from_memory(detail: dict, report_id: str) -> None:
+    """DB schema 缺 tapd_* 列，从 _reports 内存（持久化 JSON 来源）补齐"""
+    mem = _reports.get(report_id)
+    if not mem:
+        return
+    mem_by_id = {f.get("finding_id"): f for f in mem.get("findings", [])}
+    for fdb in detail.get("findings", []):
+        fmem = mem_by_id.get(fdb.get("finding_id"))
+        if not fmem:
+            continue
+        for k in _TAPD_MERGE_FIELDS:
+            v = fmem.get(k)
+            if v is not None:
+                fdb[k] = v
+
+
 @router.get("/api/v2/code-compare/reports/{report_id}")
 async def get_report_detail(report_id: str):
     # Phase C1: 优先查 DB
@@ -844,6 +867,8 @@ async def get_report_detail(report_id: str):
         try:
             detail = svc.get_report_detail(report_id)
             if detail:
+                # 补齐 DB schema 缺失的 tapd_* 字段
+                _merge_tapd_fields_from_memory(detail, report_id)
                 return {"success": True, "report": detail}
         except Exception as e:
             logger.warning(f"DB get_report_detail failed: {e}")
