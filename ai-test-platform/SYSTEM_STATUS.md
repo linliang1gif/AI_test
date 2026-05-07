@@ -1,338 +1,243 @@
-# 系统完整状态报告
+# AI 测试平台 — 系统状态报告
 
-**更新时间**: 2026-03-23  
-**系统版本**: 1.0.0  
-**状态**: 🟢 生产就绪
+**更新时间**: 2026-05-07
+**系统版本**: v1.x → 接近 v2.0
+**状态**: 🟢 核心功能可用，持续增强中
+**当前分支**: `feature/tapd-integration-and-code-compare`
 
-## 📊 系统概览
-
-### 两种工作模式
-
-| 模式 | 入口 | 耗时 | 输出 | 适用场景 |
-|------|------|------|------|---------|
-| **AI控制台** | `/ai-test-console` | 10-20秒 | 执行结果+AI报告 | 快速验证、回归测试 |
-| **传统流程** | `/projects` | 数分钟 | 测试用例+自动化脚本 | 完整测试设计 |
-
-### 核心模块状态
-
-| 模块 | 状态 | API端点 | 功能 |
-|------|------|---------|------|
-| Test Agent | 🟢 运行中 | `/api/agent/*` | AI决策分析 |
-| Strategy Engine | 🟢 运行中 | `/api/strategy/*` | 策略生成 |
-| Orchestrator | 🟢 运行中 | `/api/orchestrator/*` | 测试执行 |
-| Self-Healing | 🟢 运行中 | `/api/healing/*` | 自动修复 |
-| Pipeline | 🟢 运行中 | `/api/pipeline/*` | 流程编排 |
-
-## 🚀 快速访问
-
-### 前端页面
-- **AI测试控制台**: http://localhost:5173/ai-test-console ⭐
-- **项目管理**: http://localhost:5173/projects
-- **测试用例**: http://localhost:5173/test-cases
-- **测试执行**: http://localhost:5173/test-runs
-- **测试报告**: http://localhost:5173/reports
-- **AI分析**: http://localhost:5173/ai-insights
-- **测试数据工厂**: http://localhost:5173/test-data-factory
-
-### 后端API
-- **API文档**: http://localhost:8000/docs
-- **健康检查**: http://localhost:8000/api/pipeline/health
-
-### 测试工具
-- **快速测试页**: `frontend/test_ai_console.html`
-- **集成测试**: `python test_ai_console_integration.py`
-- **验收测试**: `python verify_ai_console.py`
-- **演示脚本**: `python demo_ai_console.py`
-
-## 📦 已完成功能
-
-### 五阶段系统（100%）
-- [x] Test Agent - AI决策中心（V2增强）
-- [x] Strategy Engine - 策略引擎（V2增强）
-- [x] Orchestrator - 执行调度器
-- [x] Self-Healing - 自动修复系统
-- [x] Pipeline - 流程总调度器
-- [x] AI测试控制台 - Web前端界面 ⭐
-
-### 传统流程（100%）
-- [x] 需求文档解析
-- [x] Swagger API解析
-- [x] AI生成测试用例
-- [x] AI生成自动化脚本
-- [x] 测试执行和报告
-- [x] Web界面管理
-
-### 辅助功能（100%）
-- [x] 测试数据工厂
-- [x] 数据集管理
-- [x] AI模型切换
-- [x] 断言引擎
-- [x] 知识库集成
-
-## 🧪 测试覆盖
-
-### 单元测试
-- ✅ Agent模块: 6个测试
-- ✅ Strategy模块: 7个测试
-- ✅ Orchestrator模块: 6个测试
-- ✅ Self-Healing模块: 6个测试
-- ✅ Pipeline模块: 6个测试
-
-### 集成测试
-- ✅ 三阶段流程: 21个测试
-- ✅ 四阶段流程: 4个测试
-- ✅ 五阶段流程: 21个测试
-- ✅ AI控制台: 8个测试
-
-### 验收测试
-- ✅ 基础集成测试: 3/3通过
-- ✅ 完整验收测试: 7/8通过（87.5%）
-- ✅ 场景演示测试: 3个场景
-
-## 📈 性能指标
-
-| 指标 | 目标 | 实际 | 状态 |
-|------|------|------|------|
-| AI控制台响应 | <30秒 | 10-20秒 | ✅ 优秀 |
-| P0功能测试 | <30秒 | 18秒 | ✅ 达标 |
-| P1功能测试 | <25秒 | 15秒 | ✅ 达标 |
-| P2功能测试 | <20秒 | 10秒 | ✅ 达标 |
-| API响应时间 | <1秒 | <0.5秒 | ✅ 优秀 |
-| 并发执行加速 | 2-3x | 3-5x | ✅ 优秀 |
-
-## 🛠️ 技术栈
-
-### 后端
-- Python 3.11+
-- FastAPI (Web框架)
-- Pydantic (数据验证)
-- Ollama (AI引擎)
-- SQLite (数据存储)
-
-### 前端
-- React 18
-- React Router
-- Tailwind CSS
-- Fetch API
-
-### AI模型
-- Ollama (本地部署)
-  - qwen2.5:1.5b (快速模型)
-  - qwen2.5:7b (精确模型)
-- DeepSeek (云端API)
-- OpenAI (云端API)
-- Mock (测试模式)
-
-## 📁 项目结构
-
-```
-ai-test-platform/
-├── agent/                    # 阶段1: AI决策中心
-├── strategy/                 # 阶段2: 策略引擎
-├── orchestrator/             # 阶段3: 执行调度器
-├── self_healing/             # 阶段4: 自动修复
-├── pipeline/                 # 阶段5: 流程编排
-├── frontend/                 # React前端
-│   └── src/
-│       └── pages/
-│           └── AiTestConsole.jsx  # ⭐ AI控制台
-├── app/                      # 传统流程模块
-├── test_data/                # 测试数据工厂
-├── assertion/                # 断言引擎
-├── knowledge/                # 知识库
-└── backend_api_server.py     # 统一后端服务
-```
-
-## 🎯 使用指南
-
-### 场景1: 快速验证（AI控制台）
-```bash
-# 1. 打开控制台
-浏览器访问: http://localhost:5173/ai-test-console
-
-# 2. 输入信息
-需求: "支付模块新增微信支付"
-优先级: P0
-
-# 3. 执行测试
-点击 "🚀 Run AI Test"
-
-# 4. 查看结果（10-20秒）
-- AI决策: 是否需要测试
-- 测试策略: 测试范围和类型
-- 执行结果: 通过/失败统计
-- 自愈过程: 自动修复记录
-- 最终报告: AI分析总结
-```
-
-### 场景2: 完整设计（传统流程）
-```bash
-# 1. 打开项目管理
-浏览器访问: http://localhost:5173/projects
-
-# 2. 上传文档
-- 需求文档 (Word/PDF)
-- Swagger文件 (JSON/YAML)
-
-# 3. AI生成
-- 测试用例Excel
-- pytest自动化脚本
-
-# 4. 执行和报告
-- 运行自动化测试
-- 生成企业级报告
-```
-
-## 📚 文档索引
-
-### 快速入门
-- **AI控制台**: `快速入门_AI控制台.md` ⭐
-- **传统流程**: `完整流程使用说明.md`
-- **两种模式对比**: `两种模式对比说明.md`
-
-### 使用说明
-- **AI控制台使用**: `AI测试控制台使用说明.md`
-- **界面说明**: `AI控制台界面说明.md`
-- **五阶段系统**: `五阶段系统使用指南.md`
-
-### 完成报告
-- **AI控制台**: `AI测试控制台完成报告.md`
-- **五阶段系统**: `五阶段系统完成总结.md`
-- **最终交付**: `AI测试控制台_最终交付.md`
-
-### 交付清单
-- **AI控制台**: `AI控制台交付清单.md`
-- **五阶段系统**: `五阶段完整交付清单.md`
-
-## 🔧 运维管理
-
-### 启动服务
-```bash
-# 后端
-python backend_api_server.py
-
-# 前端
-cd frontend
-npm run dev
-```
-
-### 健康检查
-```bash
-# 检查所有模块
-python verify_ai_console.py
-
-# 检查单个模块
-curl http://localhost:8000/api/pipeline/health
-```
-
-### 查看日志
-- 后端日志: Terminal 38输出
-- 前端日志: 浏览器控制台
-- AI日志: Ollama服务日志
-
-## 📊 统计数据
-
-### 代码规模
-- Python代码: 50+ 文件
-- React组件: 15+ 页面
-- API接口: 25+ 端点
-- 测试脚本: 30+ 文件
-
-### 测试覆盖
-- 单元测试: 31个
-- 集成测试: 49个
-- 验收测试: 8个
-- 总计: 88个测试
-
-## 🎉 里程碑
-
-- ✅ 2026-03-15: Test Agent模块完成
-- ✅ 2026-03-16: Strategy Engine完成
-- ✅ 2026-03-17: Orchestrator完成
-- ✅ 2026-03-18: Self-Healing完成
-- ✅ 2026-03-19: Pipeline完成
-- ✅ 2026-03-23: AI测试控制台完成 ⭐
-
-## 🔮 未来规划
-
-### 短期优化
-- [ ] 实时日志推送（WebSocket）
-- [ ] 结果导出（PDF/Excel）
-- [ ] 历史记录对比
-- [ ] 测试模板保存
-
-### 中期增强
-- [ ] 多项目支持
-- [ ] 权限管理
-- [ ] 团队协作
-- [ ] 性能监控
-
-### 长期愿景
-- [ ] 云端部署
-- [ ] 分布式执行
-- [ ] AI模型训练
-- [ ] 智能推荐
-
-## 📞 技术支持
-
-### 问题排查
-1. 查看文档: `快速入门_AI控制台.md`
-2. 运行测试: `python verify_ai_console.py`
-3. 检查日志: 后端Terminal输出
-4. 查看API: http://localhost:8000/docs
-
-### 常见问题
-- **Q**: 页面无法访问？
-  - **A**: 检查前端服务是否运行 `npm run dev`
-  
-- **Q**: API调用失败？
-  - **A**: 检查后端服务是否运行 `python backend_api_server.py`
-  
-- **Q**: AI响应慢？
-  - **A**: 切换到更快的模型 `qwen2.5:1.5b`
-  
-- **Q**: 执行失败？
-  - **A**: 查看Trace ID，使用 `/api/pipeline/trace/{id}` 查询详情
-
-## ✅ 验收确认
-
-### 功能完整性
-- [x] AI控制台前端页面
-- [x] 五阶段后端API
-- [x] 传统流程功能
-- [x] 测试数据工厂
-- [x] AI模型切换
-
-### 质量保证
-- [x] 87.5%验收通过率
-- [x] 所有核心功能正常
-- [x] 性能指标达标
-- [x] 文档完整齐全
-
-### 用户就绪
-- [x] 可以立即使用
-- [x] 文档清晰易懂
-- [x] 测试脚本可用
-- [x] 故障排查指南
-
-## 🎊 交付总结
-
-AI测试平台已完成所有核心功能开发，包括：
-- ✅ 五阶段AI自动化测试系统
-- ✅ AI测试控制台Web界面
-- ✅ 传统完整测试流程
-- ✅ 完整的测试和文档
-
-**系统状态**: 🟢 生产就绪，可以投入使用
-
-**核心价值**:
-- 从输入到结果，只需10-20秒
-- AI智能决策，避免无效测试
-- 自动修复失败，提高通过率
-- 全链路追踪，问题快速定位
-- 两种模式互补，满足不同需求
+> 上一版（2026-03-23）已归档为 `SYSTEM_STATUS.2026-03.md`。本版基于 git 历史合并最近 1.5 个月（40+ commit）的进展。
 
 ---
 
-**下一步**: 开始使用AI测试控制台进行日常测试工作  
-**访问**: http://localhost:5173/ai-test-console
+## 1. 总体概览
+
+平台从 **AI 测试控制台 + 五阶段系统**（v1.0）演进到包含完整 P1/P2/P3 阶段、缺陷生命周期、TAPD 集成、需求-代码对比 v2 的工程化版本。
+
+### 1.1 两种工作模式（保留）
+
+| 模式 | 入口 | 耗时 | 输出 | 适用场景 |
+|------|------|------|------|---------|
+| AI 控制台 | `/ai-test-console` | 10-20 秒 | 执行结果 + AI 报告 | 快速验证、回归测试 |
+| 传统流程 | `/projects` | 数分钟 | 测试用例 + 自动化脚本 | 完整测试设计 |
+
+### 1.2 服务端口
+
+| 服务 | 端口 | 入口 |
+|------|------|------|
+| 后端 FastAPI | **8001** | http://localhost:8001/health, /docs |
+| 前端 Vite | **5173** | http://localhost:5173/ |
+
+> 注：旧版文档写的是 8000，已统一改为 8001（前端 `vite.config.js` 已对应修正）。
+
+---
+
+## 2. 完成的功能模块
+
+### 2.1 早期里程碑（≤ 2026-03，已收录于旧版报告）
+
+- ✅ AI 五阶段系统：Test Agent / Strategy / Orchestrator / Self-Healing / Pipeline
+- ✅ AI 测试控制台
+- ✅ 传统流程：需求解析 / Swagger / 用例生成 / 自动化脚本
+- ✅ 测试数据工厂、断言引擎、知识库、AI 模型切换
+
+### 2.2 P1 系列（2026-04-30 ~ 05-02）
+
+| Code | 模块 | 状态 |
+|---|---|---|
+| P1-7D | 真实项目模式不安全方法保护 | ✅ |
+| P1-7E/7F | 报告持久化 + Reports API + TestRunDetail 报告按钮 | ✅ |
+| P1-8 | AI 用例评审 | ✅ |
+| P1-9 | 统一用例模型 + L2 变异 + 脚本导出 | ✅ |
+| P1-9.1 | 验收报告 | ✅ |
+
+### 2.3 P2 系列（2026-05-02 ~ 05-04）
+
+| Code | 模块 | 状态 |
+|---|---|---|
+| P2-1 | Docker CI/CD | ✅ |
+| P2-2 / P2-2.1 | 后端重构 + 安全加固 | ✅ |
+| P2-3 | Web UI 用例模型 | ✅ |
+| P2-4 / P2-4.1 | Playwright 引擎 MVP + 回归修复 | ✅ |
+| P2-5 | 视觉回归 MVP | ✅ |
+| P2-6 ~ P2-6B.2 | Playwright 增强 + API 性能 | ✅ |
+| P2-7 ~ P2-7.3 | Web UI 批量执行 + Trace + 信息架构 | ✅ |
+| P2-8 | AI Web UI 失败归因 | ✅ |
+| P2-9A / 9B / 9D | 用例组件拆分 + Web UI 稳定性 + 覆盖率 | ✅ |
+| P2-10 / 10.1 | 测试套管理 MVP + 回归修复 | ✅ |
+
+### 2.4 P3 系列（2026-05-04）
+
+| Code | 模块 | 测试通过率 |
+|---|---|---|
+| P3-1 | CI/CD 质量门禁 MVP | ✅ |
+| P3-3A | 测试数据增强与清理 | **44/44 PASS** |
+| P3-4A | 质量看板分析 MVP | **76/76 PASS** |
+| P3-4A.1 | 回归稳定性 + readiness check | FAIL=0 |
+| P3-4B | 质量趋势 + 模块风险分析 | ✅ |
+| P3-5 | 智能选测与风险推荐 MVP | **104/104 PASS, 回归 21/21** |
+| P3-5.1 | 工程收口 + 性能治理 | ✅ |
+
+### 2.5 缺陷生命周期（2026-05-04）
+
+- ✅ Defect 状态机：open / confirmed / fixed / verified / closed / rejected / reopened
+- ✅ 失败归因 → 缺陷自动建
+- ✅ 缺陷管理前端页面 + 缺陷详情 Modal + 事件历史
+
+### 2.6 Phase C2 安全加固（2026-05-05）
+
+- ✅ 安全硬化（SSRF 白名单、敏感信息脱敏）
+- ✅ 验证脚本稳定化
+- ✅ Phase D 路线图（待执行）
+
+### 2.7 当前分支：TAPD + 代码对比（2026-05-05 ~ 05-07）
+
+- ✅ TAPD 缺陷推送集成（基础）
+- ✅ 需求解析增强 + AI 路由 + 代码分析
+- ✅ 代码对比 quality baseline 测试
+- ✅ **代码对比 v2 引擎重写**（2026-05-06）
+  - 扩展代码清单：components / functions / conditions / api_calls / data_fields / template_conditions
+  - 倒排索引召回（中文 2/3-gram + 英文 token + 路径分段）
+  - 四态判断 prompt：implemented / inconsistent / partial / missing
+  - 源码片段证据（±8 行 + 敏感信息脱敏）
+  - 低置信度 / partial / inconsistent finding 二次复核
+- ✅ **TAPD 推送增强**（2026-05-06）
+  - 批量推送 finding → TAPD
+  - 单条 / 整报告状态同步
+  - 缺陷管理列表"推 TAPD"一键按钮（未推送显示按钮 / 已推送显示 TAPD #ID 链接）
+- ✅ 前端 inconsistent UI：粉色徽章、不一致表格（方面/需求/代码）、源码片段代码块
+
+---
+
+## 3. 测试覆盖
+
+| 类型 | 数量 | 备注 |
+|---|---|---|
+| 单元测试 | 31+ | 五阶段每模块 ~6 个 |
+| 集成测试 | 49+ | 三/四/五阶段流程 |
+| P3 验收 | **224 个 PASS** | P3-3A 44 + P3-4A 76 + P3-5 104 |
+| 回归 | 21 / 21 PASS（P3-5）| 多次维持 |
+| 冒烟 | + `tests/smoke_req_code_diff.py` | 代码对比引擎 |
+
+---
+
+## 4. 模块完成度（粗估）
+
+| 模块 | 完成度 | 备注 |
+|---|---|---|
+| 基础测试 / 用例管理 | 95% | P1-9 完成统一模型 |
+| AI 用例生成 / 评审 | 90% | P1-8 完成评审 |
+| Web UI 自动化 (Playwright) | 90% | P2-4~9 系列完成 |
+| API / 性能 / 视觉测试 | 85% | P2-5 / P2-6B 完成 |
+| 测试数据管理 | 85% | P3-3A 完成 |
+| 测试套 / 批量执行 | 90% | P2-7 / P2-10 完成 |
+| 缺陷管理 + TAPD 集成 | 80% | 含批量 / 状态同步 / 列表一键推 |
+| 需求-代码对比 | 75% | v2 已落地，待真实项目实测调优 |
+| 质量门禁 + Dashboard | 80% | P3-1 / P3-4A 完成 |
+| 智能选测 | 70% | P3-5 MVP 完成 |
+| **整体平均** | **84%** | 已超过 v1.0 的"生产就绪"线 |
+
+---
+
+## 5. 技术栈（更新）
+
+### 后端
+- Python 3.11+
+- FastAPI（33 个路由模块在 `routes/` 下）
+- SQLAlchemy + SQLite（缺陷生命周期 / 报告持久化 / TAPD 状态）
+- Pydantic
+- Ollama / DeepSeek / OpenAI / Mock 多 AI 提供商
+
+### 前端
+- React 18 + Vite + Ant Design
+- React Router
+- Tailwind CSS
+- 代理 `/api/`、`/health`、`/screenshots`、`/visual` → 后端 8001
+
+### 集成
+- Playwright（Web UI 引擎）
+- TAPD API（缺陷推送 + 状态同步）
+- GitLab API（私有仓库克隆）
+
+---
+
+## 6. 项目规模
+
+| 指标 | 当前 | vs 3 月 |
+|---|---|---|
+| Python 模块 | 100+ 文件 | ↑ 50+ |
+| 路由模块（routes/） | 30+ | ↑ 大量 |
+| React 页面 | 30+ | ↑ |
+| API 端点 | 100+ 实际可用 | ↑ |
+| 数据库表 | 缺陷 / 事件 / 报告 / 测试数据 / TAPD 状态 等多张 | ↑ |
+| 测试脚本 | 60+ | ↑ |
+
+---
+
+## 7. 短期 TODO
+
+1. ⏳ 推 GitHub（网络好后或推 origin gitlab）
+2. ⏳ 实测 v2 对比引擎（用真实项目，如蓝点 recycle-applet）
+3. ⏳ 7 列统计卡布局微调（栅格 24 / 7 ≈ 3.43，目前会换行）
+4. ⏳ Phase D 安全 + 工程化路线图
+
+---
+
+## 8. 启动 / 健康检查
+
+### 启动后端
+
+```bash
+cd ai-test-platform
+python app/main.py
+# 监听 http://0.0.0.0:8001
+```
+
+### 启动前端
+
+```bash
+cd ai-test-platform/frontend
+npm run dev
+# 监听 http://0.0.0.0:5173
+```
+
+### 健康检查
+
+```bash
+curl http://127.0.0.1:8001/health
+# 返回 {"status":"healthy", "modules": { ... 33 个模块均为 true }}
+```
+
+---
+
+## 9. 文档索引（最新）
+
+### 阶段验收报告（docs/）
+- P1-9 系列：unified testcase plan / acceptance / unified import / l2 mutation / script export
+- P2 系列：docker_cicd / backend_refactor / web_ui_case_model / playwright / visual_regression / api_performance / web_ui_batch / ai_ui_failure_analysis / web_ui_stability / coverage
+- P3 系列：ci_quality_gate / smart_test_selection（含 P3-5）
+
+### 路线图
+- `docs/phase_d_*` — 安全与工程化下一阶段（待执行）
+
+### 知识库
+- `docs/蓝点后端知识库.md` — 蓝点回收系统接口约定
+
+---
+
+## 10. 已知问题 / 注意事项
+
+- **360 文档卫士**：开发期间会随机加密某些 .py / .jsx 文件，导致 `edit` 工具报 "null bytes"。需要手动从 360 文档卫士里移出保护。
+- **GitHub 推送**：国内网络偶发 HTTP/2 framing layer / Connection reset，建议优先推 origin（公司内网 gitlab）。
+- **vite 多实例**：开发时容易同时跑 5173 + 5174，要保证只开一个并访问正确端口。
+
+---
+
+**最近 commit**：
+
+```
+d402fe8  feat(tapd): TAPD 推送增强 - 批量推送/状态同步/缺陷列表一键推
+65ca124  feat(code-compare): 重写需求-代码对比引擎，支持四态判断 + 代码片段证据
+70c78bf  test: add code compare quality baseline
+295f286  docs: add Phase D security and engineering roadmap
+449cf25  fix: harden security and stabilize validation scripts
+```
