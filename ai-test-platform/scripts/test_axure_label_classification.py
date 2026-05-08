@@ -21,7 +21,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from utils.document_parser import _classify_axure_label_text
+from utils.document_parser import _classify_axure_label_text, _strip_demo_suffix_from_label
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -228,6 +228,20 @@ def test_16_integration_parse_axure_folder_structured(tmp_dir=None):
         # label=field_name + content 含规则关键词 → rules 保留 【label】content
         {"type": "annotation", "label": "金额",
          "content": "金额必须大于零", "source": "x"},
+        # D2-4: 混合行 label（冒号型·演示人名）→ 剥离后应为 '供应商'
+        {"type": "annotation", "label": "供应商：王五",
+         "content": "供应商名称", "source": "x"},
+        # D2-4: 混合行 label（空格+货币）→ '含税总金额'
+        {"type": "annotation", "label": "含税总金额 ¥ 1250.01+$500",
+         "content": "合计含税金额", "source": "x"},
+        # D2-4: 混合行 label（圆括号+短编号）→ '物料名称'
+        {"type": "annotation", "label": "物料名称（TSFE001）",
+         "content": "物料名称", "source": "x"},
+        # D2-4: label 整体是订单号+圆括号 → 整条降级，content 进 features，label 进 demo_values
+        {"type": "annotation", "label": "RIA20260402014（采购入库）",
+         "content": "关联采购入库单", "source": "x"},
+        # D2-4: 控件类型整体 label → fields 不应记录这条
+        # （已有 label="(下拉列表)" 的 annotation 项覆盖该场景）
         # type='note' 项（行为不变）
         {"type": "note", "content": "页面描述：用于展示订单详情", "source": "x"},
     ]
@@ -320,14 +334,121 @@ def test_16_integration_parse_axure_folder_structured(tmp_dir=None):
     assert result["stats"]["demo_values"] == len(result["demo_values"])
 
     # ── 9) D2-3 follow-up: stats.annotations_total = 原始 annotation+note 总数 ──
-    # fake_annotations 中 type='annotation' 有 6 条 + type='note' 有 1 条 = 7
+    # fake_annotations 中 type='annotation' 有 10 条 + type='note' 有 1 条 = 11
     assert "annotations_total" in result["stats"], result["stats"]
-    assert result["stats"]["annotations_total"] == 7, (
-        f"expected annotations_total=7 (6 annotation + 1 note), "
+    assert result["stats"]["annotations_total"] == 11, (
+        f"expected annotations_total=11 (10 annotation + 1 note), "
         f"got {result['stats']['annotations_total']}"
     )
     # axure_notes 本身只含 type='note' 的 1 条
     assert result["stats"]["axure_notes"] == 1, result["stats"]["axure_notes"]
+
+    # ── 10) D2-4: 混合行 label 被正确剥离 ──
+    # '供应商：王五' → features 应包含 '供应商'（不包含原混合行）
+    assert "供应商：王五" not in feature_names, (
+        f"D2-4: mixed-row '供应商：王五' should be stripped, got: {feature_names}"
+    )
+    # '含税总金额 ¥ 1250.01+$500' → features 应包含 '含税总金额'
+    assert "含税总金额 ¥ 1250.01+$500" not in feature_names, (
+        f"D2-4: space-money mixed-row should be stripped, got: {feature_names}"
+    )
+    assert "含税总金额" in feature_names, (
+        f"D2-4: stripped '含税总金额' should be feature name, got: {feature_names}"
+    )
+    # '物料名称（TSFE001）' → features 应包含 '物料名称'（不包含原混合行）
+    assert "物料名称（TSFE001）" not in feature_names, (
+        f"D2-4: paren-code mixed-row should be stripped, got: {feature_names}"
+    )
+    # 'RIA20260402014（采购入库）' → label 整体降级，content '关联采购入库单' 进 features
+    assert "关联采购入库单" in feature_names, (
+        f"D2-4: label fully-demo should downgrade to content-based feature, got: {feature_names}"
+    )
+    assert "RIA20260402014（采购入库）" in result["demo_values"], (
+        f"D2-4: fully-demo label should be recorded in demo_values, got: {result['demo_values']}"
+    )
+
+    # ── 11) D2-4: fields 去噪——控件类型整体 label 不写 fields ──
+    field_names = {f["name"] for f in result["fields"]}
+    forbidden_in_fields = {"(下拉列表)", "(文本框)", "（矩形）"}
+    leak_fields = forbidden_in_fields & field_names
+    assert not leak_fields, (
+        f"D2-4: widget-type label leaked into fields: {leak_fields}"
+    )
+
+
+# ══════════════════════════════════════════════════════════════════
+#  17-24 D2-4: _strip_demo_suffix_from_label 混合行剥离
+# ══════════════════════════════════════════════════════════════════
+
+def _expect_strip(inp, expected, msg=""):
+    got = _strip_demo_suffix_from_label(inp)
+    assert got == expected, (
+        f"_strip_demo_suffix_from_label({inp!r}): expected {expected!r}, got {got!r} {msg}"
+    )
+
+
+def test_17_strip_colon_demo_person():
+    # 冒号分隔型：右侧是演示人名
+    _expect_strip("供应商：张三", "供应商")
+    _expect_strip("经办人：李四", "经办人")
+
+
+def test_18_strip_colon_demo_date():
+    # 冒号分隔型：右侧以日期/时间开头
+    _expect_strip("审核时间：2025-09-30 12：1", "审核时间")
+    _expect_strip("创建时间：2024/01/15 10:30", "创建时间")
+
+
+def test_19_strip_colon_real_value_kept():
+    # 冒号分隔型：右侧是真实字段值（非演示）→ 保留原文
+    _expect_strip("单据类型：标准采购应付", "单据类型：标准采购应付")
+
+
+def test_20_strip_space_money():
+    # 空格分隔 + 货币演示值
+    _expect_strip("含税总金额 ¥ 1250.01+$500", "含税总金额")
+    _expect_strip("合计 含税金额 ¥ 250.00", "合计 含税金额")
+
+
+def test_21_strip_colon_number_with_unit():
+    # 冒号分隔 + 右侧数字+单位（如 100kg）
+    _expect_strip("实际入库数量：100kg     l", "实际入库数量")
+    _expect_strip("净重：50kg", "净重")
+
+
+def test_22_strip_paren_demo_code():
+    # 圆括号型：内侧是订单号/短编号
+    _expect_strip("抓毛净色单卫衣布（TSFE001）", "抓毛净色单卫衣布")
+    _expect_strip("物料（POA20260324001）", "物料")
+
+
+def test_23_strip_paren_widget_type():
+    # 圆括号型：内侧是控件类型（文本框/下拉列表）
+    _expect_strip("备注(文本框)", "备注")
+    _expect_strip("状态（下拉列表）", "状态")
+
+
+def test_24_strip_discard_cases():
+    # 整体应被丢弃的情形（返回空串）
+    # 1) 左侧是订单号的圆括号型
+    _expect_strip("RIA20260402014（采购入库）", "")
+    # 2) 整体是演示值
+    _expect_strip("¥250.00", "")
+    _expect_strip("ZGA20260330001", "")
+    _expect_strip("待审核", "")
+    # 3) 整体是 noise
+    _expect_strip("(下拉列表)", "")
+    _expect_strip("(文本框)", "")
+    # 4) 空输入
+    _expect_strip("", "")
+    _expect_strip("   ", "")
+
+
+def test_25_strip_idempotent_clean_fields():
+    # 干净字段名 / rule 经过 strip 后不变（幂等性）
+    _expect_strip("供应商", "供应商")
+    _expect_strip("金额必须大于零", "金额必须大于零")
+    _expect_strip("采购订单列表", "采购订单列表")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -359,6 +480,16 @@ def main():
          test_15_field_name_with_value_suffix_kept_conservative),
         ("16_integration_parse_axure_folder_structured",
          test_16_integration_parse_axure_folder_structured),
+        # ── D2-4: 混合行剥离 ──
+        ("17_strip_colon_demo_person", test_17_strip_colon_demo_person),
+        ("18_strip_colon_demo_date", test_18_strip_colon_demo_date),
+        ("19_strip_colon_real_value_kept", test_19_strip_colon_real_value_kept),
+        ("20_strip_space_money", test_20_strip_space_money),
+        ("21_strip_colon_number_with_unit", test_21_strip_colon_number_with_unit),
+        ("22_strip_paren_demo_code", test_22_strip_paren_demo_code),
+        ("23_strip_paren_widget_type", test_23_strip_paren_widget_type),
+        ("24_strip_discard_cases", test_24_strip_discard_cases),
+        ("25_strip_idempotent_clean_fields", test_25_strip_idempotent_clean_fields),
     ]
 
     for name, fn in cases:

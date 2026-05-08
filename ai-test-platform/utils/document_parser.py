@@ -284,6 +284,37 @@ _AXURE_WIDGET_BRACKET_RE = re.compile(
 # 纯标点 / 单字符
 _PUNCT_ONLY_RE = re.compile(r'^[\s\W_]{1,3}$')
 
+# ── D2-4: 混合行剥离所需正则 ──────────────────────────────────────
+# 冒号分隔型：'字段名：演示值' / '字段名: 演示值'（左侧 2~40 字，不含冒号）
+_COLON_SEP_RE = re.compile(r'^([^：:]{2,40})[：:]\s*(.+)$')
+
+# 空格分隔 + 右侧以演示值开头：'字段名 ¥金额' / '字段名 100kg' / '字段名 2025-09-30 ...'
+_SPACE_DEMO_PREFIX_RE = re.compile(
+    r'^(.+?)\s+'
+    r'([¥$￥]\s*[\d,]+(?:\.\d+)?.*|'            # 货币
+    r'\d{4}[-/年]\d{1,2}[-/月].*|'              # 日期
+    r'\d{1,2}[:：]\d{1,2}(?:[:：]\d{1,2})?.*|'  # 时间
+    r'[A-Z]{2,5}\d{6,20}.*|'                    # 订单号
+    r'\d+(?:\.\d+)?\s*(?:kg|KG|元|件|个|%|斤)[\s\S]*)'  # 数字+单位
+    r'$'
+)
+
+# 右侧开头是演示值（允许尾串；辅助判断）
+_STARTS_DEMO_RE = re.compile(
+    r'^\s*([¥$￥]\s*[\d,]+(?:\.\d+)?|'
+    r'\d{4}[-/年]\d{1,2}[-/月]\d{1,2}|'
+    r'\d{1,2}[:：]\d{1,2}(?:[:：]\d{1,2})?|'
+    r'[A-Z]{2,5}\d{6,20}|'
+    r'\d+(?:\.\d+)?\s*(?:kg|KG|元|件|个|%|斤))'
+)
+
+# 圆括号包裹（末尾）：'字段名（XXX）' — 中英文括号都支持
+_PAREN_WRAP_RE = re.compile(r'^(.+?)\s*[（(]\s*([^）)]+?)\s*[）)]\s*$')
+
+# 短编号（字母+数字）：物料号/简单编号如 TSFE001、AB12、POA001，比订单号 regex 更宽松
+# 仅在圆括号内侧使用，避免误伤真实缩写（HTTP/JSON 等——它们不含数字）
+_SHORT_CODE_RE = re.compile(r'^[A-Za-z]{2,10}[-_]?\d{2,10}[A-Za-z0-9\-_]*$')
+
 
 def _classify_axure_label_text(content: str) -> str:
     """对 Axure type='label' 元件文本做四分类。
@@ -326,6 +357,78 @@ def _classify_axure_label_text(content: str) -> str:
         return "rule"
     # ── 4) field_name (default) ──
     return "field_name"
+
+
+def _strip_demo_suffix_from_label(label: str) -> str:
+    """D2-4: 对 Axure label 混合行剥离右侧演示值/控件类型后缀，返回真正的字段名。
+
+    处理的三类混合模式：
+      1. 冒号分隔型：'字段名：演示值' / '字段名: 演示值'
+         e.g. '供应商：张三'                 -> '供应商'
+              '审核时间：2025-09-30 12：1'    -> '审核时间'
+              '单据类型：标准采购应付'        -> 原文（右侧非演示值）
+      2. 空格分隔型：'字段名 <演示值>'（右侧以货币/日期/数字+单位/订单号开头）
+         e.g. '含税总金额 ¥ 1250.01+$500'    -> '含税总金额'
+              '合计 含税金额 ¥ 250.00'        -> '合计 含税金额'
+              '实际入库数量：100kg     l'     -> '实际入库数量' (走冒号分支)
+      3. 圆括号型：'字段名（演示编号/控件类型）'
+         e.g. '抓毛净色单卫衣布（TSFE001）'  -> '抓毛净色单卫衣布'
+              'RIA20260402014（采购入库）'    -> ''（左侧本身是订单号）
+              '备注(文本框)'                  -> '备注'
+
+    Returns:
+        剥离后的干净字段名；若整体是演示值/噪声或剥离后长度 < 2 → 返回空串。
+        若无任何混合模式匹配且整体是 field_name → 原样返回。
+    """
+    if not label:
+        return ""
+    s = label.strip()
+    if not s:
+        return ""
+
+    # 整体是演示值 / 噪声 → 丢弃
+    whole_kind = _classify_axure_label_text(s)
+    if whole_kind in ("demo_value", "noise"):
+        return ""
+
+    def _is_valid_left(left: str) -> bool:
+        """左侧需 >= 2 字符且自身不是演示值"""
+        return len(left) >= 2 and _classify_axure_label_text(left) != "demo_value"
+
+    # 1) 冒号分隔型（中/英冒号）
+    m = _COLON_SEP_RE.match(s)
+    if m:
+        left = m.group(1).strip()
+        right = m.group(2).strip()
+        right_kind = _classify_axure_label_text(right)
+        # 右侧是演示值 / 噪声 / 以演示值开头 → 剥离
+        if right_kind in ("demo_value", "noise") or _STARTS_DEMO_RE.match(right):
+            return left if _is_valid_left(left) else ""
+        # 右侧也是真实文字 → 保留原文
+        return s
+
+    # 2) 空格分隔 + 右侧以演示值开头
+    m = _SPACE_DEMO_PREFIX_RE.match(s)
+    if m:
+        left = m.group(1).strip()
+        return left if _is_valid_left(left) else s
+
+    # 3) 圆括号包裹（末尾）
+    m = _PAREN_WRAP_RE.match(s)
+    if m:
+        left = m.group(1).strip()
+        inside = m.group(2).strip()
+        # 左侧本身是演示值（如订单号）→ 整体丢弃
+        if _classify_axure_label_text(left) == "demo_value":
+            return ""
+        # 内侧是演示值 / 控件类型词 / 短编号（物料号） → 只留左侧
+        if (_classify_axure_label_text(inside) == "demo_value"
+                or inside in _AXURE_WIDGET_TYPES
+                or _SHORT_CODE_RE.match(inside)):
+            return left if _is_valid_left(left) else ""
+
+    # 无混合模式匹配 → 原样返回
+    return s
 
 
 def _extract_axure_annotations(content: str, source_name: str = 'data.js') -> List[Dict[str, Any]]:
@@ -547,12 +650,25 @@ def parse_axure_folder_structured(folder_path: str) -> Dict[str, Any]:
             # D2-2: 对 annotation.label 做四分类：
             #   field_name/rule → label 进 features
             #   demo_value/noise → content 进 features，原 label 进 demo_values
+            #
+            # D2-4: 对 field_name/rule 类 label 再做混合行剥离，去掉右侧演示值后缀：
+            #   '供应商：张三' -> '供应商' / '含税总金额 ¥ 1250.01+$500' -> '含税总金额'
+            #   若剥离后为空（如 'RIA20260402014（采购入库）'）→ 降级为 demo 处理。
+            cleaned_label = label
+            if label_kind in ("field_name", "rule"):
+                stripped = _strip_demo_suffix_from_label(label)
+                if not stripped:
+                    # 整条是演示值/噪声 → 降级为 demo 处理
+                    label_kind = "demo_value"
+                else:
+                    cleaned_label = stripped
+
             if label_kind in ("field_name", "rule"):
                 if rule_keywords.search(content):
-                    # 字段名/规则：rules 保留 【label】content 标准格式
-                    result["rules"].append(f"【{label}】{content}")
+                    # 字段名/规则：rules 保留 【label】content 标准格式（用 cleaned_label）
+                    result["rules"].append(f"【{cleaned_label}】{content}")
                 src = "axure_annotation" if label_kind == "field_name" else "axure_annotation_rule"
-                result["features"].append({"name": label, "source": src})
+                result["features"].append({"name": cleaned_label, "source": src})
             else:
                 if rule_keywords.search(content):
                     # demo/noise：rules 不带 【演示值】 前缀，仅用 content
@@ -565,10 +681,15 @@ def parse_axure_folder_structured(folder_path: str) -> Dict[str, Any]:
                     })
                 if label:
                     result["demo_values"].append(label)
-            # 识别字段（行为不变；只看 label 是否含表单元件类型词）
+            # D2-4: 识别表单字段时去噪——只有剥离后的字段名仍是 field_name 才记录
             field_markers = ['文本框', '下拉列表', '输入', '选择', '日期']
             if any(m in label for m in field_markers):
-                result["fields"].append({"name": label, "type": "input", "required": False})
+                cleaned_field_name = _strip_demo_suffix_from_label(label)
+                if (cleaned_field_name
+                        and _classify_axure_label_text(cleaned_field_name) == "field_name"):
+                    result["fields"].append({
+                        "name": cleaned_field_name, "type": "input", "required": False
+                    })
         elif a['type'] == 'note':
             result["axure_notes"].append(content)
             if rule_keywords.search(content):
