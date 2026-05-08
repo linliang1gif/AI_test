@@ -592,6 +592,11 @@ def parse_axure_folder_structured(folder_path: str) -> Dict[str, Any]:
     result["stats"]["fields"] = len(result["fields"])
     result["stats"]["axure_notes"] = len(result["axure_notes"])
     result["stats"]["demo_values"] = len(result["demo_values"])
+    # D2-3 follow-up: Axure 原始注释总数（含 type='annotation' 元件配对 + type='note' 手写注释）
+    # 因 D2-3 后 type='annotation' 不再进 axure_notes，UI「Axure 注释」应使用此计数而非 axure_notes.length
+    result["stats"]["annotations_total"] = sum(
+        1 for a in annotations if a.get("type") in ("annotation", "note")
+    )
 
     return result
 

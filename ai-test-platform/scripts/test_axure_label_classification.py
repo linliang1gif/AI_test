@@ -319,6 +319,16 @@ def test_16_integration_parse_axure_folder_structured(tmp_dir=None):
     assert "demo_values" in result["stats"], result["stats"]
     assert result["stats"]["demo_values"] == len(result["demo_values"])
 
+    # ── 9) D2-3 follow-up: stats.annotations_total = 原始 annotation+note 总数 ──
+    # fake_annotations 中 type='annotation' 有 6 条 + type='note' 有 1 条 = 7
+    assert "annotations_total" in result["stats"], result["stats"]
+    assert result["stats"]["annotations_total"] == 7, (
+        f"expected annotations_total=7 (6 annotation + 1 note), "
+        f"got {result['stats']['annotations_total']}"
+    )
+    # axure_notes 本身只含 type='note' 的 1 条
+    assert result["stats"]["axure_notes"] == 1, result["stats"]["axure_notes"]
+
 
 # ══════════════════════════════════════════════════════════════════
 #  主入口

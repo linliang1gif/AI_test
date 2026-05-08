@@ -333,7 +333,9 @@ export default function RequirementUpload() {
               )}
               <Descriptions.Item label="内容长度">{preview.raw_text_length} 字符</Descriptions.Item>
               {sourceType === 'folder' ? (
-                <Descriptions.Item label="Axure 注释">{preview.structured.stats.axure_notes || 0} 条</Descriptions.Item>
+                <Descriptions.Item label="Axure 注释">
+                  {(preview.structured.stats.annotations_total ?? preview.structured.stats.axure_notes) || 0} 条
+                </Descriptions.Item>
               ) : (
                 <Descriptions.Item label="文件类型">{preview.structured.stats.file_type}</Descriptions.Item>
               )}
