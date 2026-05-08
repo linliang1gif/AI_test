@@ -160,9 +160,16 @@ def _extract_code_items(code_data: Dict) -> List[Dict]:
         methods = comp.get("methods", [])
         fields = comp.get("data_fields", [])
         conds = comp.get("template_conditions", [])
+        cn_labels = comp.get("chinese_labels", [])
+        java_fields = comp.get("fields", [])  # Java @ApiModelProperty 字段
         detail = f"组件 {comp.get('name','')}: 方法[{', '.join(methods[:15])}]; 字段[{', '.join(fields[:15])}]"
         if conds:
             detail += f"; 条件[{', '.join(c[:60] for c in conds[:8])}]"
+        if cn_labels:
+            detail += f"; 中文标签[{', '.join(cn_labels[:20])}]"
+        comp_desc = comp.get("description", "")
+        if comp_desc:
+            detail += f"; 描述[{comp_desc}]"
         _add(comp.get("name", ""), comp.get("type", "component"),
              comp.get("file", ""), comp.get("line", 0), detail,
              weight=2.0, source_obj=comp)
@@ -174,6 +181,24 @@ def _extract_code_items(code_data: Dict) -> List[Dict]:
             _add(f"v-if {cond[:60]}", "template_condition",
                  comp.get("file", ""), comp.get("line", 0),
                  f"{comp.get('name','')} 模板条件: {cond}", weight=1.4)
+        # Java 字段（含中文标签）→ 每个字段一个 code_item
+        for jf in java_fields[:50]:
+            label = jf.get("label", "")
+            fname = jf.get("field_name", "")
+            validations = jf.get("validations", [])
+            jf_detail = f"{comp.get('name','')}.{fname} @ApiModelProperty(\"{label}\")"
+            if validations:
+                jf_detail += f" 验证: {', '.join(validations)}"
+            _add(f"{label} ({fname})" if fname else label, "java_field",
+                 comp.get("file", ""), jf.get("line", 0),
+                 jf_detail, weight=2.2, source_obj=jf)
+        # Vue 中文标签 → 每个标签一个 code_item（权重稍低）
+        if comp.get("type") == "vue_component" and cn_labels:
+            for lb in cn_labels[:40]:
+                _add(lb, "template_label",
+                     comp.get("file", ""), 0,
+                     f"{comp.get('name','')} 模板中文: {lb}",
+                     weight=1.8)
 
     for route in code_data.get("routes", []):
         name = f"{route.get('method','GET')} {route.get('path','')}"
@@ -450,12 +475,12 @@ def _rule_based_diff(req_points: List[Dict], code_items: List[Dict],
             })
 
     for ci in code_items:
-        if ci["id"] not in matched_code_ids and ci["type"] in {"api_route", "function", "component"}:
+        if ci["id"] not in matched_code_ids and ci["type"] == "api_route":
             extra_code.append({
                 "code_item": ci["name"],
                 "code_id": ci["id"],
                 "file": ci.get("file", ""),
-                "notes": "代码中存在但需求文档中未提及（规则匹配）",
+                "notes": "API 路由存在但需求文档中未提及",
             })
 
     return {
@@ -846,19 +871,27 @@ def _ai_diff(
                 print(f"  ⚠️ 复核失败: {e}")
 
     # ── 额外代码（在召回中没被任何需求命中的） ──
+    # 只报告 api_route 为真正"超范围"；function/component 多为技术内部实现，不报告
+    _EXTRA_EXCLUDE_NAMES = {
+        "main", "init", "setup", "created", "mounted", "onload", "onshow",
+        "onready", "onhide", "onunload", "destroyed", "beforecreate",
+        "beforemount", "beforedestroy", "updated", "tostring", "hashcode",
+        "equals", "getset", "builder",
+    }
     extra_candidates = [
         ci for ci in code_items
         if ci["id"] not in matched_code_ids
-        and ci["type"] in {"api_route", "function", "component"}
+        and ci["type"] == "api_route"
         and ci.get("name")
+        and ci.get("name", "").lower() not in _EXTRA_EXCLUDE_NAMES
     ]
-    for ci in extra_candidates[:80]:
+    for ci in extra_candidates[:30]:
         all_extra.append({
             "code_item": ci["name"],
             "code_id": ci["id"],
             "file": ci.get("file", ""),
             "line": ci.get("line", 0),
-            "notes": "代码中存在但未被任何需求点命中（可能为额外实现/技术代码/需求遗漏）",
+            "notes": "API 路由存在但未被需求文档中任何功能点覆盖",
         })
 
     summary = {

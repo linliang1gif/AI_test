@@ -116,7 +116,10 @@ async def req_code_diff(request: ReqCodeDiffRequest):
             print(f"⚠️ AI 客户端初始化失败，使用规则匹配: {e}")
 
     try:
-        diff_result = run_req_code_diff(req_data, code_analysis, ai_client=ai_client)
+        diff_result = run_req_code_diff(
+            req_data, code_analysis, ai_client=ai_client,
+            code_dir=str(code_path),
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"对比分析失败: {str(e)}")
 

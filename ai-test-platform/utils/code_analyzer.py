@@ -186,6 +186,30 @@ def _parse_vue_file(content: str, rel_path: str, result: Dict):
             "context": "vue_template",
         })
 
+    # 模板中的中文标签（label, placeholder, title 属性 + 纯文本）
+    chinese_labels = []
+    # 属性值中的中文
+    label_attrs = re.findall(
+        r'(?:label|placeholder|title|name|header)\s*=\s*["\']([^"\']*[\u4e00-\u9fff][^"\']*)["\']',
+        template
+    )
+    chinese_labels.extend(label_attrs)
+    # 标签内的纯中文文本（如 <text>供应商</text>, <span>付款单号</span>）
+    tag_texts = re.findall(r'>([^<]*[\u4e00-\u9fff][^<]*)<', template)
+    for txt in tag_texts:
+        txt = txt.strip()
+        if 2 <= len(txt) <= 30 and not re.match(r'^[\s\d.]+$', txt):
+            chinese_labels.append(txt)
+    # 去重保序
+    seen = set()
+    unique_labels = []
+    for lb in chinese_labels:
+        lb = lb.strip()
+        if lb and lb not in seen:
+            seen.add(lb)
+            unique_labels.append(lb)
+    comp["chinese_labels"] = unique_labels[:100]
+
     # API 调用
     api_patterns = [
         r'(?:this\.)?\$(?:http|axios|api|request)\.\s*(get|post|put|delete|patch)\s*\(\s*[\'"`]([^\'"`]+)',
@@ -308,11 +332,17 @@ def _parse_java_file(content: str, rel_path: str, result: Dict):
     """解析 Java 文件"""
     # 类
     for m in re.finditer(r'(?:public|private|protected)?\s*class\s+(\w+)', content):
-        result["components"].append({
+        class_comp = {
             "name": m.group(1), "file": rel_path,
             "type": "java_class",
             "line": content[:m.start()].count('\n') + 1,
-        })
+            "fields": [],          # 字段列表（含中文标签）
+            "chinese_labels": [],  # 所有中文标注（@ApiModelProperty 值）
+        }
+        result["components"].append(class_comp)
+
+    # 字段级注解提取（@ApiModelProperty + 验证注解）
+    _extract_java_fields(content, rel_path, result)
 
     # 方法
     for m in re.finditer(
@@ -364,6 +394,79 @@ def _parse_java_file(content: str, rel_path: str, result: Dict):
             "line": content[:m.start()].count('\n') + 1,
             "context": "java_if",
         })
+
+
+def _extract_java_fields(content: str, rel_path: str, result: Dict):
+    """
+    从 Java 源码中提取字段声明 + @ApiModelProperty 中文标签 + 验证注解。
+    将中文标签注入到对应 class component 的 fields / chinese_labels 中。
+    """
+    # 找所有 @ApiModelProperty("中文") 或 @ApiModelProperty(value="中文")
+    api_model_re = re.compile(
+        r'@ApiModelProperty\s*\(\s*(?:value\s*=\s*)?["\']([^"\']+)["\']',
+        re.MULTILINE
+    )
+    # 字段声明: private Type fieldName;
+    field_decl_re = re.compile(
+        r'(?:private|protected|public)\s+(?:[\w<>\[\],\s]+?)\s+(\w+)\s*[;=]'
+    )
+    # 验证注解
+    validation_re = re.compile(
+        r'@(NotNull|NotBlank|NotEmpty|Size|Min|Max|Digits|Pattern|Email|DecimalMin|DecimalMax)'
+    )
+
+    lines = content.split('\n')
+    # 找到当前文件对应的 class component
+    file_comps = [c for c in result["components"]
+                  if c["file"] == rel_path and c["type"] == "java_class"]
+
+    # 逐行扫描，收集字段信息
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        # 检测 @ApiModelProperty
+        am_match = api_model_re.search(line)
+        if am_match:
+            chinese_label = am_match.group(1).strip()
+            # 向下找字段声明（通常在 1-5 行内）
+            field_name = None
+            validations = []
+            for j in range(i, min(i + 6, len(lines))):
+                fline = lines[j].strip()
+                vm = validation_re.search(fline)
+                if vm:
+                    validations.append(vm.group(1))
+                fm = field_decl_re.search(fline)
+                if fm:
+                    field_name = fm.group(1)
+                    break
+
+            field_info = {
+                "label": chinese_label,
+                "field_name": field_name or "",
+                "validations": validations,
+                "file": rel_path,
+                "line": i + 1,
+            }
+
+            # 注入到 class component
+            if file_comps:
+                file_comps[-1]["fields"].append(field_info)
+                file_comps[-1]["chinese_labels"].append(chinese_label)
+
+            # 同时加入全局搜索（让 code_items 能索引到中文）
+            result.setdefault("java_fields", []).append(field_info)
+        i += 1
+
+    # 提取 @ApiModel(description="...") 类描述
+    api_model_class_re = re.compile(
+        r'@ApiModel\s*\([^)]*(?:description|value)\s*=\s*["\']([^"\']+)["\']'
+    )
+    for m in api_model_class_re.finditer(content):
+        desc = m.group(1).strip()
+        if file_comps and desc:
+            file_comps[-1].setdefault("description", "")
+            file_comps[-1]["description"] = desc
 
 
 # ======== 汇总工具 ========
