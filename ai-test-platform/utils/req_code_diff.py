@@ -71,14 +71,26 @@ def run_req_code_diff(
     # 3. 构建倒排索引以便按需求做召回
     code_index = _build_code_index(code_items)
 
-    # 4. 对比
-    if ai_client:
-        return _ai_diff(
-            req_points, code_items, code_index, code_analysis,
+    # 3.5 T1A: 确定性规则门禁层 — 拦截能用静态信号判定的需求点
+    from utils.rule_gate import run_rule_gate
+    gate_result = run_rule_gate(req_points, code_analysis, code_dir)
+    gated_findings = gate_result["gated_findings"]
+    remaining_points = gate_result["uncovered_points"]
+
+    # 4. 对比（仅剩余需求点走 AI / rule-based）
+    if ai_client and remaining_points:
+        ai_result = _ai_diff(
+            remaining_points, code_items, code_index, code_analysis,
             ai_client, max_prompt_chars, code_dir,
         )
-    result = _rule_based_diff(req_points, code_items, code_index)
-    result["_ai_fallback"] = False
+    elif remaining_points:
+        ai_result = _rule_based_diff(remaining_points, code_items, code_index)
+        ai_result["_ai_fallback"] = False
+    else:
+        ai_result = _empty_result()
+
+    # 5. 合并规则门禁 findings + AI/rule 结果
+    result = _merge_gate_findings(gated_findings, ai_result, gate_result["stats"])
     return result
 
 
@@ -313,6 +325,88 @@ def _load_snippet(code_dir: Optional[str], rel_path: str, line: int,
         "end": end,
         "snippet": "\n".join(snippet_lines)[:4000],
     }
+
+
+def _empty_result() -> Dict:
+    """空结果模板（所有 req 都被 rule_gate 处理时使用）"""
+    return {
+        "summary": {
+            "total_req_points": 0,
+            "total_code_items": 0,
+            "matched": 0,
+            "unimplemented": 0,
+            "extra_code": 0,
+        },
+        "matched": [],
+        "unimplemented": [],
+        "extra_code": [],
+        "bugs": [],
+        "test_suggestions": [],
+    }
+
+
+def _merge_gate_findings(
+    gated: List[Dict], ai_result: Dict, gate_stats: Dict
+) -> Dict:
+    """
+    合并规则门禁结果 + AI/rule-based 结果。
+
+    规则门禁产出的 finding 按 status 分类：
+      - implemented → matched
+      - missing → unimplemented
+      - inconsistent → bugs
+    """
+    merged = {k: list(v) if isinstance(v, list) else v
+              for k, v in ai_result.items()}
+
+    for gf in gated:
+        req = gf.get("requirement", {})
+        status = gf.get("status", "")
+        note = gf.get("note", "")
+        evidence = gf.get("evidence_quote", "")[:400]
+        entry_base = {
+            "requirement": req.get("name", ""),
+            "req_id": req.get("id", ""),
+            "file": gf.get("evidence_file", ""),
+            "line": (gf.get("evidence_lines") or (0, 0))[0],
+            "rule_type": gf.get("rule_type", ""),
+            "rule_engine": gf.get("rule_engine", ""),
+            "confidence": gf.get("confidence", 1.0),
+        }
+        if status == "implemented":
+            merged.setdefault("matched", []).append({
+                **entry_base,
+                "code_item": f"[rule_gate] {note}",
+                "status": "已实现（规则确认）",
+                "notes": f"{note}\n{evidence}".strip(),
+            })
+        elif status == "missing":
+            merged.setdefault("unimplemented", []).append({
+                **entry_base,
+                "severity": "high",
+                "suggestion": note,
+            })
+        elif status == "inconsistent":
+            merged.setdefault("bugs", []).append({
+                "title": f"[规则检测] {req.get('name','')}: {note[:50]}",
+                "severity": "medium",
+                "requirement": req.get("name", ""),
+                "rule_type": gf.get("rule_type", ""),
+                "evidence_file": gf.get("evidence_file", ""),
+                "evidence_quote": evidence,
+                "notes": note,
+            })
+
+    # 更新 summary 计数
+    summary = merged.get("summary", {})
+    summary["rule_gate_stats"] = gate_stats
+    summary["total_req_points"] = (
+        summary.get("total_req_points", 0) + gate_stats.get("gated", 0)
+    )
+    summary["matched"] = len(merged.get("matched", []))
+    summary["unimplemented"] = len(merged.get("unimplemented", []))
+    merged["summary"] = summary
+    return merged
 
 
 def _rule_based_diff(req_points: List[Dict], code_items: List[Dict],
