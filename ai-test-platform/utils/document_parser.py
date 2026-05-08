@@ -641,45 +641,33 @@ def parse_axure_folder_structured(folder_path: str) -> Dict[str, Any]:
         content = a['content']
         if a['type'] == 'annotation':
             label = a.get('label', '')
-            label_kind = _classify_axure_label_text(label)
-            # D2-3: annotation 不再进 axure_notes（避免与 features 内容重复 +
-            # 避免 【演示值】content 形式污染需求点拆点链）。axure_notes 留给
-            # type='note'（用户在 Axure 里手写的真正需求注释）。raw_text 仍由
-            # parse_axure_folder() 单独生成 【label】content 拼接供 AI 上下文。
-            #
-            # D2-2: 对 annotation.label 做四分类：
-            #   field_name/rule → label 进 features
-            #   demo_value/noise → content 进 features，原 label 进 demo_values
-            #
-            # D2-4: 对 field_name/rule 类 label 再做混合行剥离，去掉右侧演示值后缀：
-            #   '供应商：张三' -> '供应商' / '含税总金额 ¥ 1250.01+$500' -> '含税总金额'
-            #   若剥离后为空（如 'RIA20260402014（采购入库）'）→ 降级为 demo 处理。
-            cleaned_label = label
-            if label_kind in ("field_name", "rule"):
-                stripped = _strip_demo_suffix_from_label(label)
-                if not stripped:
-                    # 整条是演示值/噪声 → 降级为 demo 处理
-                    label_kind = "demo_value"
-                else:
-                    cleaned_label = stripped
-
-            if label_kind in ("field_name", "rule"):
-                if rule_keywords.search(content):
-                    # 字段名/规则：rules 保留 【label】content 标准格式（用 cleaned_label）
-                    result["rules"].append(f"【{cleaned_label}】{content}")
-                src = "axure_annotation" if label_kind == "field_name" else "axure_annotation_rule"
-                result["features"].append({"name": cleaned_label, "source": src})
-            else:
-                if rule_keywords.search(content):
-                    # demo/noise：rules 不带 【演示值】 前缀，仅用 content
-                    result["rules"].append(content)
-                if content and content.strip():
-                    result["features"].append({
-                        "name": content.strip()[:80],
-                        "source": "axure_annotation_desc",
-                        "_demo_label": label,
-                    })
-                if label:
+            # D2-5: annotation 的 feature.name 统一用 content（产品经理在 Axure 序号
+            # 圆圈里打的真正注释文字），不再从 label 启发式剥离字段名。这是因为：
+            #   - 带序号的 Axure 元件才会产生 type='annotation'（Axure 机制本身保证）
+            #   - content 是产品经理写的需求说明 — 真正要做代码比对的是这段文字
+            #   - label 只是原型画面上的展示样式（如 '¥250.00' / 'IAN202603200001' /
+            #     '销售方：张三'），不需要去代码里验证具体数值
+            # 保留 D2-2/D2-3/D2-4 的行为：
+            #   - rules 用 content（规则关键字检测不变），不再带 【label】 前缀
+            #   - demo/noise 类 label 或整体降级的混合行 label 进 demo_values 审计
+            #   - fields 基于 label 控件类型识别 + _strip_demo_suffix_from_label 去噪
+            #   - annotation 不进 axure_notes（axure_notes 留给 type='note'）
+            #   - raw_text 仍由 parse_axure_folder() 单独生成 【label】content 拼接
+            if content and content.strip():
+                result["features"].append({
+                    "name": content.strip()[:80],
+                    "source": "axure_annotation",
+                    "_label_hint": label,  # 原型展示文字，仅参考，不参与比对
+                })
+            if rule_keywords.search(content):
+                result["rules"].append(content)
+            # label 审计：demo/noise 直接进 demo_values；整体降级的混合行也进
+            if label:
+                label_kind = _classify_axure_label_text(label)
+                if label_kind in ("demo_value", "noise"):
+                    result["demo_values"].append(label)
+                elif not _strip_demo_suffix_from_label(label):
+                    # 整体是演示值（如 'RIA20260402014（采购入库）' 左侧是订单号）
                     result["demo_values"].append(label)
             # D2-4: 识别表单字段时去噪——只有剥离后的字段名仍是 field_name 才记录
             field_markers = ['文本框', '下拉列表', '输入', '选择', '日期']

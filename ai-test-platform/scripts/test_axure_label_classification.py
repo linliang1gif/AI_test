@@ -284,8 +284,19 @@ def test_16_integration_parse_axure_folder_structured(tmp_dir=None):
     rule_sources = [f["source"] for f in result["features"] if f["name"] == "金额必须大于零"]
     assert "axure_label_rule" in rule_sources, rule_sources
 
-    # ── 5) type='annotation' label=field_name 时正常进 features ──
-    assert "供应商" in feature_names, feature_names
+    # ── 5) D2-5: type='annotation' 的 feature.name 统一用 content（不再用 label） ──
+    # label='供应商' content='供应商名称必须非空' → feature.name = content
+    assert "供应商名称必须非空" in feature_names, (
+        f"D2-5: annotation content should be feature name, got: {feature_names}"
+    )
+    # label='供应商'（纯 field_name）也不再作为 feature.name
+    assert "供应商" not in feature_names, (
+        f"D2-5: pure field_name label should NOT be feature name anymore, got: {feature_names}"
+    )
+    # 常用断言：feature 源包含 D2-5 的 axure_annotation
+    annotation_sources = {f["source"] for f in result["features"]
+                          if f["name"] == "供应商名称必须非空"}
+    assert "axure_annotation" in annotation_sources, annotation_sources
 
     # ── 5b) D2-3: type='annotation' 不再进 axure_notes（仅 type='note' 进） ──
     for ann_label in ("供应商", "¥250.00", "(下拉列表)", "FKA202604070001", "金额"):
@@ -312,18 +323,19 @@ def test_16_integration_parse_axure_folder_structured(tmp_dir=None):
     assert "付款单号" in feature_names, feature_names
     assert "FKA202604070001" in result["demo_values"], result["demo_values"]
 
-    # ── 6b) D2-3: rules 写入按 label 类型分流 ──
+    # ── 6b) D2-5: rules 统一用 content，任何情况下都不再带 【label】 前缀 ──
     rules = result["rules"]
-    # demo label + content 含规则关键词 → 进 rules 但不带 【】 前缀
     assert "金额必须保留2位小数" in rules, (
-        f"demo-label rule should be in rules (without prefix), got: {rules}"
+        f"D2-5: rule content should be in rules, got: {rules}"
+    )
+    assert "金额必须大于零" in rules, (
+        f"D2-5: rule content should be in rules, got: {rules}"
     )
     assert "【¥1250.01】金额必须保留2位小数" not in rules, (
-        f"demo-label rule should NOT carry 【】 prefix, got: {rules}"
+        f"D2-5: rule should NOT carry 【】 prefix, got: {rules}"
     )
-    # field_name label + content 含规则关键词 → 保留 【label】content
-    assert "【金额】金额必须大于零" in rules, (
-        f"field_name-label rule should keep 【label】content prefix, got: {rules}"
+    assert "【金额】金额必须大于零" not in rules, (
+        f"D2-5: rule should NOT carry 【】 prefix anymore, got: {rules}"
     )
 
     # ── 7) type='note' 行为不变（进 axure_notes） ──
@@ -343,28 +355,34 @@ def test_16_integration_parse_axure_folder_structured(tmp_dir=None):
     # axure_notes 本身只含 type='note' 的 1 条
     assert result["stats"]["axure_notes"] == 1, result["stats"]["axure_notes"]
 
-    # ── 10) D2-4: 混合行 label 被正确剥离 ──
-    # '供应商：王五' → features 应包含 '供应商'（不包含原混合行）
-    assert "供应商：王五" not in feature_names, (
-        f"D2-4: mixed-row '供应商：王五' should be stripped, got: {feature_names}"
+    # ── 10) D2-5: feature.name = content，label 不再进 features ──
+    # 原混合行 label 本身就不进 features（D2-5 不再用 label）
+    for forbidden_label in ("供应商：王五",
+                             "含税总金额 ¥ 1250.01+$500",
+                             "含税总金额",   # D2-4 strip 后的中间态也不应出现
+                             "物料名称（TSFE001）",
+                             "金额",         # 纯 field_name label
+                             "供应商"):       # 纯 field_name label
+        assert forbidden_label not in feature_names, (
+            f"D2-5: label '{forbidden_label}' should NOT be feature name anymore, "
+            f"got: {feature_names}"
+        )
+    # D2-5: features.name 走 content
+    assert "供应商名称" in feature_names, (
+        f"D2-5: content '供应商名称' should be feature name, got: {feature_names}"
     )
-    # '含税总金额 ¥ 1250.01+$500' → features 应包含 '含税总金额'
-    assert "含税总金额 ¥ 1250.01+$500" not in feature_names, (
-        f"D2-4: space-money mixed-row should be stripped, got: {feature_names}"
+    assert "合计含税金额" in feature_names, (
+        f"D2-5: content '合计含税金额' should be feature name, got: {feature_names}"
     )
-    assert "含税总金额" in feature_names, (
-        f"D2-4: stripped '含税总金额' should be feature name, got: {feature_names}"
+    assert "物料名称" in feature_names, (
+        f"D2-5: content '物料名称' should be feature name, got: {feature_names}"
     )
-    # '物料名称（TSFE001）' → features 应包含 '物料名称'（不包含原混合行）
-    assert "物料名称（TSFE001）" not in feature_names, (
-        f"D2-4: paren-code mixed-row should be stripped, got: {feature_names}"
-    )
-    # 'RIA20260402014（采购入库）' → label 整体降级，content '关联采购入库单' 进 features
     assert "关联采购入库单" in feature_names, (
-        f"D2-4: label fully-demo should downgrade to content-based feature, got: {feature_names}"
+        f"D2-5: content '关联采购入库单' should be feature name, got: {feature_names}"
     )
+    # demo_values 审计：全降级的 label 仍进 demo_values
     assert "RIA20260402014（采购入库）" in result["demo_values"], (
-        f"D2-4: fully-demo label should be recorded in demo_values, got: {result['demo_values']}"
+        f"D2-5: fully-demo label should be recorded in demo_values, got: {result['demo_values']}"
     )
 
     # ── 11) D2-4: fields 去噪——控件类型整体 label 不写 fields ──
