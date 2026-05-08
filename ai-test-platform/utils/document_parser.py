@@ -538,20 +538,25 @@ def parse_axure_folder_structured(folder_path: str) -> Dict[str, Any]:
         content = a['content']
         if a['type'] == 'annotation':
             label = a.get('label', '')
-            result["axure_notes"].append(f"【{label}】{content}")
-            if rule_keywords.search(content):
-                result["rules"].append(f"【{label}】{content}")
-            # D2-2: 对 annotation.label 也做分类，避免演示值/控件类型作为 feature.name
-            # 真实 Axure data.js 中绝大多数演示数据（如 ¥250.00、(下拉列表)、FKA20260407）
-            # 都走 type='annotation' 路径，且 label 字段是元件文本，content 字段才是需求说明。
             label_kind = _classify_axure_label_text(label)
+            # D2-3: annotation 不再进 axure_notes（避免与 features 内容重复 +
+            # 避免 【演示值】content 形式污染需求点拆点链）。axure_notes 留给
+            # type='note'（用户在 Axure 里手写的真正需求注释）。raw_text 仍由
+            # parse_axure_folder() 单独生成 【label】content 拼接供 AI 上下文。
+            #
+            # D2-2: 对 annotation.label 做四分类：
+            #   field_name/rule → label 进 features
+            #   demo_value/noise → content 进 features，原 label 进 demo_values
             if label_kind in ("field_name", "rule"):
-                # label 本身是字段名 → 直接用作 feature.name
+                if rule_keywords.search(content):
+                    # 字段名/规则：rules 保留 【label】content 标准格式
+                    result["rules"].append(f"【{label}】{content}")
                 src = "axure_annotation" if label_kind == "field_name" else "axure_annotation_rule"
                 result["features"].append({"name": label, "source": src})
             else:
-                # label 是 demo_value/noise → 用 content (desc) 作为 feature.name
-                # （因为 desc 才是真正的需求文字），原 label 进 demo_values 作审计
+                if rule_keywords.search(content):
+                    # demo/noise：rules 不带 【演示值】 前缀，仅用 content
+                    result["rules"].append(content)
                 if content and content.strip():
                     result["features"].append({
                         "name": content.strip()[:80],

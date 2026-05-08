@@ -222,6 +222,12 @@ def test_16_integration_parse_axure_folder_structured(tmp_dir=None):
         # label=订单号 demo_value → features.name = content
         {"type": "annotation", "label": "FKA202604070001",
          "content": "付款单号", "source": "x"},
+        # label=demo_value + content 含规则关键词 → rules 应取 content（不带 【】 前缀）
+        {"type": "annotation", "label": "¥1250.01",
+         "content": "金额必须保留2位小数", "source": "x"},
+        # label=field_name + content 含规则关键词 → rules 保留 【label】content
+        {"type": "annotation", "label": "金额",
+         "content": "金额必须大于零", "source": "x"},
         # type='note' 项（行为不变）
         {"type": "note", "content": "页面描述：用于展示订单详情", "source": "x"},
     ]
@@ -264,13 +270,18 @@ def test_16_integration_parse_axure_folder_structured(tmp_dir=None):
     rule_sources = [f["source"] for f in result["features"] if f["name"] == "金额必须大于零"]
     assert "axure_label_rule" in rule_sources, rule_sources
 
-    # ── 5) type='annotation' 新行为：label=field_name 时正常进 features ──
+    # ── 5) type='annotation' label=field_name 时正常进 features ──
     assert "供应商" in feature_names, feature_names
-    assert any("供应商" in n for n in result["axure_notes"]), result["axure_notes"]
 
-    # ── 6) type='annotation' 新行为：label=demo_value 时，
+    # ── 5b) D2-3: type='annotation' 不再进 axure_notes（仅 type='note' 进） ──
+    for ann_label in ("供应商", "¥250.00", "(下拉列表)", "FKA202604070001", "金额"):
+        assert not any(ann_label in n for n in result["axure_notes"]), (
+            f"D2-3: annotation '{ann_label}' should NOT enter axure_notes anymore, "
+            f"got: {result['axure_notes']}"
+        )
+
+    # ── 6) type='annotation' label=demo_value 时，
     #       features.name = content (desc)，原 label 进 demo_values ──
-    # ¥250.00 不应作为 feature.name；它的 desc "对应订单主表的实付/退总金额" 才是 feature.name
     assert "¥250.00" not in feature_names, (
         f"annotation.label='¥250.00' should NOT be feature name, but found: {feature_names}"
     )
@@ -280,9 +291,6 @@ def test_16_integration_parse_axure_folder_structured(tmp_dir=None):
     assert "¥250.00" in result["demo_values"], result["demo_values"]
 
     # 同理：(下拉列表) label
-    assert "(下拉列表)" not in feature_names or list(feature_names).count("(下拉列表)") == 0, (
-        f"annotation.label='(下拉列表)' should NOT leak into features"
-    )
     assert "支持全部、待审核筛选" in feature_names, feature_names
 
     # 同理：订单号 label
@@ -290,7 +298,21 @@ def test_16_integration_parse_axure_folder_structured(tmp_dir=None):
     assert "付款单号" in feature_names, feature_names
     assert "FKA202604070001" in result["demo_values"], result["demo_values"]
 
-    # ── 7) type='note' 行为不变（仅进 axure_notes） ──
+    # ── 6b) D2-3: rules 写入按 label 类型分流 ──
+    rules = result["rules"]
+    # demo label + content 含规则关键词 → 进 rules 但不带 【】 前缀
+    assert "金额必须保留2位小数" in rules, (
+        f"demo-label rule should be in rules (without prefix), got: {rules}"
+    )
+    assert "【¥1250.01】金额必须保留2位小数" not in rules, (
+        f"demo-label rule should NOT carry 【】 prefix, got: {rules}"
+    )
+    # field_name label + content 含规则关键词 → 保留 【label】content
+    assert "【金额】金额必须大于零" in rules, (
+        f"field_name-label rule should keep 【label】content prefix, got: {rules}"
+    )
+
+    # ── 7) type='note' 行为不变（进 axure_notes） ──
     assert "页面描述：用于展示订单详情" in result["axure_notes"], result["axure_notes"]
 
     # ── 8) stats 含 demo_values 计数 ──
