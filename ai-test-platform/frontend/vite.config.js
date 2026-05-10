@@ -15,7 +15,7 @@ export default defineConfig({
     proxy: {
       // 只代理 /api/ 开头的请求到后端（注意末尾的斜杠）
       '/api/': {
-        target: 'http://127.0.0.1:8001',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         secure: false,
         ws: true,
@@ -32,17 +32,17 @@ export default defineConfig({
         },
       },
       '/health': {
-        target: 'http://127.0.0.1:8001',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         secure: false,
       },
       '/screenshots': {
-        target: 'http://127.0.0.1:8001',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         secure: false,
       },
       '/visual': {
-        target: 'http://127.0.0.1:8001',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
         secure: false,
       }

@@ -582,3 +582,207 @@ class RequirementConfirmQuestion(Base):
     answer = Column(Text, default=None)
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  AI Product Studio 数据模型
+# ══════════════════════════════════════════════════════════════════
+
+class ProductIdea(Base):
+    """产品想法"""
+    __tablename__ = 'product_ideas'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    idea_id = Column(String(100), unique=True, nullable=False)
+    project_id = Column(Integer, default=None)
+    title = Column(String(500), nullable=False)
+    product_direction = Column(Text, default='')
+    target_users = Column(Text, default='')
+    pain_points = Column(Text, default='')
+    existing_assets = Column(Text, default='')
+    current_blockers = Column(Text, default='')
+    constraints = Column(Text, default='')
+    status = Column(String(50), default='created')
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    artifacts = relationship("ProductArtifact", back_populates="idea", cascade="all, delete-orphan")
+    runs = relationship("ProductStudioRun", back_populates="idea", cascade="all, delete-orphan")
+
+
+class ProductStudioRun(Base):
+    """Product Studio AI 执行记录"""
+    __tablename__ = 'product_studio_runs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(100), unique=True, nullable=False)
+    idea_id = Column(String(100), ForeignKey('product_ideas.idea_id'), nullable=False)
+    run_type = Column(String(50), nullable=False)  # product_solution/prd/prototype/test_strategy/acceptance_criteria
+    input_payload = Column(JSON, default=dict)
+    output_text = Column(Text, default='')
+    output_json = Column(JSON, default=None)
+    status = Column(String(50), default='created')  # created/running/succeeded/failed
+    model_name = Column(String(200), default='')
+    token_input = Column(Integer, default=0)
+    token_output = Column(Integer, default=0)
+    cost_estimate = Column(Float, default=0.0)
+    trace_id = Column(String(100), nullable=False)
+    error_message = Column(Text, default=None)
+    started_at = Column(DateTime, default=None)
+    finished_at = Column(DateTime, default=None)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    idea = relationship("ProductIdea", back_populates="runs")
+
+
+class ProductArtifact(Base):
+    """Product Studio 产物"""
+    __tablename__ = 'product_artifacts'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    artifact_id = Column(String(100), unique=True, nullable=False)
+    idea_id = Column(String(100), ForeignKey('product_ideas.idea_id'), nullable=False)
+    run_id = Column(String(100), default=None)
+    artifact_type = Column(String(50), nullable=False)  # product_solution/prd/prototype/test_strategy/acceptance_criteria
+    title = Column(String(500), default='')
+    content_markdown = Column(Text, default='')
+    content_json = Column(JSON, default=None)
+    status = Column(String(50), default='draft')  # draft/confirmed/archived
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    idea = relationship("ProductIdea", back_populates="artifacts")
+
+
+class ProductArtifactTraceLink(Base):
+    """Product Studio 产物 → 测试资产 追溯关联"""
+    __tablename__ = 'product_artifact_trace_links'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    link_id = Column(String(100), unique=True, nullable=False)
+    artifact_id = Column(String(100), ForeignKey('product_artifacts.artifact_id'), nullable=False)
+    source_artifact_type = Column(String(50), nullable=False)  # prd/product_solution/test_strategy/acceptance_criteria
+    target_type = Column(String(50), nullable=False)  # requirement_point/test_case/test_point
+    target_id = Column(String(100), nullable=False)
+    generation_run_id = Column(String(100), default=None)
+    confidence_score = Column(Float, default=0.0)
+    status = Column(String(50), default='draft')  # draft/confirmed/rejected
+    quality_score = Column(Float, default=None)
+    quality_reason = Column(Text, default=None)
+    review_reason = Column(Text, default=None)
+    reviewed_at = Column(DateTime, default=None)
+    reviewed_by = Column(String(100), default=None)
+    promoted_at = Column(DateTime, default=None)
+    promoted_target_id = Column(String(100), default=None)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+# ══════════════════════════════════════════════════════════════════
+#  AI Dev Studio 数据模型
+# ══════════════════════════════════════════════════════════════════
+
+class DevTask(Base):
+    """开发任务"""
+    __tablename__ = 'dev_tasks'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    dev_task_id = Column(String(100), unique=True, nullable=False)
+    source_type = Column(String(50), nullable=False)  # product_artifact / test_case / manual
+    source_id = Column(String(100), default=None)
+    idea_id = Column(String(100), default=None)
+    project_id = Column(Integer, default=None)
+    title = Column(String(500), nullable=False)
+    description = Column(Text, default='')
+    status = Column(String(50), default='created')  # created / planning / planned / archived
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    artifacts = relationship("DevArtifact", back_populates="task", cascade="all, delete-orphan")
+    runs = relationship("DevStudioRun", back_populates="task", cascade="all, delete-orphan")
+
+
+class DevStudioRun(Base):
+    """Dev Studio AI 执行记录"""
+    __tablename__ = 'dev_studio_runs'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    run_id = Column(String(100), unique=True, nullable=False)
+    dev_task_id = Column(String(100), ForeignKey('dev_tasks.dev_task_id'), nullable=False)
+    run_type = Column(String(50), nullable=False)  # dev_plan / api_design / db_design / file_impact / test_plan
+    input_payload = Column(JSON, default=dict)
+    output_text = Column(Text, default='')
+    output_json = Column(JSON, default=None)
+    status = Column(String(50), default='created')  # created / running / succeeded / failed
+    model_name = Column(String(200), default='')
+    token_input = Column(Integer, default=0)
+    token_output = Column(Integer, default=0)
+    cost_estimate = Column(Float, default=0.0)
+    trace_id = Column(String(100), nullable=False)
+    batch_id = Column(String(100), default=None)
+    error_message = Column(Text, default=None)
+    started_at = Column(DateTime, default=None)
+    finished_at = Column(DateTime, default=None)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    task = relationship("DevTask", back_populates="runs")
+
+
+class DevArtifact(Base):
+    """Dev Studio 产物"""
+    __tablename__ = 'dev_artifacts'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    dev_artifact_id = Column(String(100), unique=True, nullable=False)
+    dev_task_id = Column(String(100), ForeignKey('dev_tasks.dev_task_id'), nullable=False)
+    run_id = Column(String(100), default=None)
+    artifact_type = Column(String(50), nullable=False)  # dev_plan / api_design / db_design / file_impact / test_plan
+    title = Column(String(500), default='')
+    content_markdown = Column(Text, default='')
+    content_json = Column(JSON, default=None)
+    status = Column(String(50), default='draft')  # draft / confirmed / archived
+    batch_id = Column(String(100), default=None)
+    batch_index = Column(Integer, default=None)
+    parent_artifact_id = Column(String(100), default=None)
+    reference_artifact_ids = Column(Text, default=None)  # JSON string
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    task = relationship("DevTask", back_populates="artifacts")
+
+
+# ── Phase 7: CodeMap ──────────────────────────────────────────
+
+class CodeMapSnapshot(Base):
+    __tablename__ = 'code_map_snapshots'
+    snapshot_id = Column(String(100), primary_key=True)
+    dev_task_id = Column(String(100), default=None)
+    project_root = Column(String(1000), nullable=False)
+    total_files = Column(Integer, default=0)
+    total_dirs = Column(Integer, default=0)
+    backend_files = Column(Integer, default=0)
+    frontend_files = Column(Integer, default=0)
+    scan_duration_ms = Column(Integer, default=0)
+    status = Column(String(50), default='completed')  # completed / failed
+    error_message = Column(Text, default=None)
+    created_at = Column(DateTime, default=datetime.now)
+
+    files = relationship("CodeMapFile", back_populates="snapshot", cascade="all, delete-orphan")
+
+
+class CodeMapFile(Base):
+    __tablename__ = 'code_map_files'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    snapshot_id = Column(String(100), ForeignKey('code_map_snapshots.snapshot_id'))
+    file_path = Column(String(2000), nullable=False)
+    relative_path = Column(String(2000), nullable=False)
+    file_type = Column(String(50), default='unknown')   # py / jsx / ts / json / md / yaml / sql / etc
+    category = Column(String(100), default='other')      # route / service / model / page / component / config / script / doc / test / other
+    module = Column(String(200), default=None)           # e.g. routes/dev_studio_routes.py → dev_studio
+    size_bytes = Column(Integer, default=0)
+    line_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.now)
+
+    snapshot = relationship("CodeMapSnapshot", back_populates="files")

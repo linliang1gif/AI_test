@@ -7,6 +7,7 @@ LLM Client - 统一的LLM调用客户端
 
 import os
 import json
+import time
 import requests
 from typing import Dict, Any, Optional
 from pathlib import Path
@@ -173,36 +174,50 @@ class LLMClient:
     
     def _openai_compatible_generate(self, prompt: str, system_prompt: Optional[str],
                                     temperature: float, max_tokens: int) -> str:
-        """OpenAI兼容API生成（支持OpenAI和DeepSeek）"""
-        try:
-            url = f"{self.base_url}/chat/completions"
-            
-            messages = []
-            if system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
-            messages.append({"role": "user", "content": prompt})
-            
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}"
-            }
-            
-            payload = {
-                "model": self.model,
-                "messages": messages,
-                "temperature": temperature,
-                "max_tokens": max_tokens
-            }
-            
-            response = requests.post(url, json=payload, headers=headers, timeout=120)
-            response.raise_for_status()
-            
-            result = response.json()
-            return result['choices'][0]['message']['content']
-            
-        except Exception as e:
-            print(f"❌ {self.provider.upper()} API调用失败: {e}")
-            raise
+        """OpenAI兼容API生成（支持OpenAI和DeepSeek），含自动重试"""
+        url = f"{self.base_url}/chat/completions"
+
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens
+        }
+
+        max_retries = 3
+        last_err = None
+        for attempt in range(max_retries):
+            try:
+                response = requests.post(url, json=payload, headers=headers, timeout=300)
+                response.raise_for_status()
+
+                result = response.json()
+                return result['choices'][0]['message']['content']
+
+            except Exception as e:
+                last_err = e
+                err_str = str(e)
+                retryable = ("ended prematurely" in err_str or
+                             "timed out" in err_str.lower() or
+                             "connection" in err_str.lower() or
+                             "502" in err_str or "503" in err_str)
+                if retryable and attempt < max_retries - 1:
+                    wait = 3 * (attempt + 1)
+                    print(f"⚠️ {self.provider.upper()} API 重试 ({attempt+1}/{max_retries})，{wait}s 后重试: {err_str[:80]}")
+                    time.sleep(wait)
+                    continue
+                print(f"❌ {self.provider.upper()} API调用失败: {e}")
+                raise
 
 
 # 全局客户端实例
