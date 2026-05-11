@@ -28,6 +28,7 @@ import QualityDashboard from './pages/QualityDashboard'
 import TestSelection from './pages/TestSelection'
 import RequirementUpload from './pages/RequirementUpload'
 import CodeCompare from './pages/CodeCompare'
+import VisualTesting from './pages/VisualTesting'
 
 // 健康检查轮询间隔（毫秒）
 const HEALTH_CHECK_INTERVAL = 30000
@@ -233,6 +234,7 @@ function App() {
                 { to: '/test-data', icon: '■', label: '测试数据' },
                 { to: '/defects', icon: '■', label: '缺陷管理' },
                 { to: '/quality-dashboard', icon: '■', label: '质量驾驶舱' },
+                { to: '/visual-testing', icon: '■', label: '视觉测试' },
                 { to: '/test-selection', icon: '■', label: '智能选测' },
               ].map(item => (
                 <NavLink 
@@ -468,6 +470,7 @@ function App() {
               <Route path="/test-data" element={<TestDataManagement />} />
               <Route path="/defects" element={<DefectManagement />} />
               <Route path="/quality-dashboard" element={<QualityDashboard />} />
+              <Route path="/visual-testing" element={<VisualTesting />} />
               <Route path="/test-selection" element={<TestSelection />} />
               <Route path="/real-project-onboarding" element={<RealProjectOnboarding />} />
               

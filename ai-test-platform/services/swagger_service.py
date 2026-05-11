@@ -16,6 +16,9 @@ from sqlalchemy.orm.attributes import flag_modified
 from database.models import ApiSpec, TestCase, Project
 from database.repository import ApiSpecRepository, TestCaseRepository
 import sys
+import logging
+
+logger = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from modules.swagger import SwaggerTestCaseGenerator
 from core import TestCase as CoreTestCase
@@ -254,13 +257,13 @@ class SwaggerService:
             生成的测试用例列表
         """
         try:
-            print(f"[DEBUG] 开始生成测试用例: swagger_file={swagger_file}")
+            logger.info(f"[DEBUG] 开始生成测试用例: swagger_file={swagger_file}")
             
             # 使用 SwaggerTestCaseGenerator 生成用例
             generator = SwaggerTestCaseGenerator(swagger_file)
             core_test_cases: List[CoreTestCase] = generator.generate_all_testcases()
             
-            print(f"[DEBUG] SwaggerTestCaseGenerator 生成了 {len(core_test_cases)} 个用例")
+            logger.info(f"[DEBUG] SwaggerTestCaseGenerator 生成了 {len(core_test_cases)} 个用例")
             
             # 转换为数据库模型
             db_test_cases = []
@@ -304,8 +307,8 @@ class SwaggerService:
                 self.db.add(db_tc)
                 db_test_cases.append(db_tc)
             
-            print(f"[DEBUG] 跳过已存在用例: {skipped_count} 个")
-            print(f"[DEBUG] 准备保存新用例(L1): {len(db_test_cases)} 个")
+            logger.info(f"[DEBUG] 跳过已存在用例: {skipped_count} 个")
+            logger.info(f"[DEBUG] 准备保存新用例(L1): {len(db_test_cases)} 个")
             
             # ── P1-9C: L2 参数变异用例 ──
             l2_count = 0
@@ -328,7 +331,7 @@ class SwaggerService:
                 is_v2 = swagger_data.get("swagger", "").startswith("2") or "swagger" in swagger_data
                 for api_path, path_info in swagger_data.get("paths", {}).items():
                     if l2_count >= L2_MAX:
-                        print(f"[INFO] L2 已达上限 {L2_MAX}，跳过剩余接口")
+                        logger.info(f"[INFO] L2 已达上限 {L2_MAX}，跳过剩余接口")
                         break
                     for http_method, info in path_info.items():
                         if l2_count >= L2_MAX:
@@ -403,18 +406,18 @@ class SwaggerService:
                             self.db.add(db_tc)
                             db_test_cases.append(db_tc)
                             l2_count += 1
-                print(f"[DEBUG] L2 变异用例生成: {l2_count} 个")
+                logger.info(f"[DEBUG] L2 变异用例生成: {l2_count} 个")
             except Exception as l2_err:
-                print(f"[WARN] L2 变异用例生成跳过: {l2_err}")
+                logger.info(f"[WARN] L2 变异用例生成跳过: {l2_err}")
             
             self.db.commit()
             
-            print(f"[DEBUG] 成功保存 {len(db_test_cases)} 个测试用例 (L1 + L2)")
+            logger.info(f"[DEBUG] 成功保存 {len(db_test_cases)} 个测试用例 (L1 + L2)")
             
             return db_test_cases
             
         except Exception as e:
-            print(f"[ERROR] 生成测试用例失败: {str(e)}")
+            logger.info(f"[ERROR] 生成测试用例失败: {str(e)}")
             import traceback
             traceback.print_exc()
             return []

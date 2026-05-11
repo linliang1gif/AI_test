@@ -204,13 +204,13 @@ def scan_page(url: str, cookies: Optional[List[Dict]] = None,
         try:
             if browser:
                 browser.close()
-        except:
-            pass
+        except Exception as _e:
+            logger.debug("browser.close() failed: %s", _e)
         try:
             if pw:
                 pw.stop()
-        except:
-            pass
+        except Exception as _e:
+            logger.debug("playwright.stop() failed: %s", _e)
 
     return result
 
@@ -301,13 +301,13 @@ def save_login_session(
         try:
             if browser:
                 browser.close()
-        except:
-            pass
+        except Exception as _e:
+            logger.debug("browser.close() failed: %s", _e)
         try:
             if pw:
                 pw.stop()
-        except:
-            pass
+        except Exception as _e:
+            logger.debug("playwright.stop() failed: %s", _e)
 
 
 def load_login_session(project_id: str) -> Optional[Dict]:
@@ -398,7 +398,8 @@ def _rule_based_generate(page_info: Dict[str, Any]) -> Dict[str, Any]:
     try:
         from urllib.parse import urlparse
         path = urlparse(page_url).path or "/"
-    except:
+    except Exception as _e:
+        logger.debug("urlparse(%s) failed: %s", page_url, _e)
         path = "/"
 
     steps = [

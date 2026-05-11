@@ -15,6 +15,9 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 添加项目根目录到路径
 sys.path.append(str(Path(__file__).parent.parent))
@@ -301,10 +304,10 @@ async def get_status():
 # 启动服务器
 def start_server():
     """启动API服务器"""
-    print("🚀 启动 AI Test Platform API 服务器")
-    print(f"📁 数据目录: {config.paths.data_dir}")
-    print(f"📁 输出目录: {config.paths.output_dir}")
-    print("🌐 API文档: http://localhost:8000/docs")
+    logger.info("🚀 启动 AI Test Platform API 服务器")
+    logger.info(f"📁 数据目录: {config.paths.data_dir}")
+    logger.info(f"📁 输出目录: {config.paths.output_dir}")
+    logger.info("🌐 API文档: http://localhost:8000/docs")
     
     uvicorn.run(
         "api_server:app",

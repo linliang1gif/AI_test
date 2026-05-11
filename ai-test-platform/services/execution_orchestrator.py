@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from sqlalchemy.orm import Session
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
@@ -81,12 +84,12 @@ class ExecutionOrchestrator:
         )
         
         run_id = test_run.id
-        print(f"✅ 创建TestRun: {run_id}")
+        logger.info(f"✅ 创建TestRun: {run_id}")
         
         try:
             # 2. 创建RunCase记录
             run_cases = self._create_run_cases(run_id, test_cases)
-            print(f"✅ 创建RunCase: {len(run_cases)}个")
+            logger.info(f"✅ 创建RunCase: {len(run_cases)}个")
             
             # 3. 状态流转: created → queued
             self._update_run_status(run_id, 'queued', created_by, '进入执行队列')
@@ -98,7 +101,7 @@ class ExecutionOrchestrator:
             self._update_run_status(run_id, 'running', created_by, '开始执行测试')
             
             # 6. 执行测试用例
-            print(f"🚀 开始执行测试...")
+            logger.info(f"🚀 开始执行测试...")
             
             # 逐个执行测试用例并记录RunStep
             execution_results = []
@@ -150,17 +153,17 @@ class ExecutionOrchestrator:
                     # 根据结果更新step2状态
                     if status_str == 'passed':
                         self.update_run_step_status(step2.id, 'passed', created_by, '执行成功')
-                        print(f"  ✅ {test_case.id}: passed")
+                        logger.info(f"  ✅ {test_case.id}: passed")
                     else:
                         self.update_run_step_status(step2.id, 'failed', created_by, f'执行失败: {result.error}')
-                        print(f"  ❌ {test_case.id}: {status_str}")
+                        logger.info(f"  ❌ {test_case.id}: {status_str}")
                     
                     # 记录请求/响应快照到RunStep
                     self._record_execution_snapshot(step2.id, test_case, result)
                     
                 except Exception as e:
                     # 执行异常
-                    print(f"  ❌ {test_case.id}: error - {e}")
+                    logger.info(f"  ❌ {test_case.id}: error - {e}")
                     self.update_run_step_status(step1.id, 'failed', created_by, f'执行异常: {str(e)}')
                     
                     # 创建失败的ExecutionResult
@@ -195,7 +198,7 @@ class ExecutionOrchestrator:
                 f"执行完成: {stats['passed']}/{stats['total']} 通过"
             )
             
-            print(f"✅ 执行完成: {final_status}")
+            logger.info(f"✅ 执行完成: {final_status}")
             
             return {
                 'success': True,
@@ -208,7 +211,7 @@ class ExecutionOrchestrator:
             
         except Exception as e:
             # 执行失败,标记为failed
-            print(f"❌ 执行失败: {e}")
+            logger.info(f"❌ 执行失败: {e}")
             self._update_run_status(
                 run_id, 
                 'failed', 
@@ -284,7 +287,7 @@ class ExecutionOrchestrator:
         )
         
         self.test_run_service.update_run_status(run_id, status_data)
-        print(f"  状态流转: → {status}")
+        logger.info(f"  状态流转: → {status}")
     
     def _update_run_cases(
         self,
@@ -343,7 +346,7 @@ class ExecutionOrchestrator:
                 repo.update(run_case.id, updates)
                 
             except Exception as e:
-                print(f"  ⚠️  更新RunCase失败: {e}")
+                logger.info(f"  ⚠️  更新RunCase失败: {e}")
     
     def _calculate_statistics(self, results: List[ExecutionResult]) -> Dict[str, int]:
         """计算统计信息"""

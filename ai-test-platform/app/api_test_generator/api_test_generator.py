@@ -16,6 +16,9 @@ import json
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 from jinja2 import Template
+import logging
+
+logger = logging.getLogger(__name__)
 
 class ApiTestGenerator:
     """API测试生成器"""
@@ -42,10 +45,10 @@ class ApiTestGenerator:
                     f.write(test_content)
                 
                 generated_files[api['endpoint']] = str(file_path)
-                print(f"✅ 生成API测试: {file_name}")
+                logger.info(f"✅ 生成API测试: {file_name}")
                 
             except Exception as e:
-                print(f"❌ 生成API测试失败 {api['endpoint']}: {e}")
+                logger.info(f"❌ 生成API测试失败 {api['endpoint']}: {e}")
         
         return generated_files
     

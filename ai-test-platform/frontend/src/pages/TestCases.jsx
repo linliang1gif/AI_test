@@ -2069,7 +2069,7 @@ export default function TestCases() {
                       vr.status === 'baseline_created' ? 'bg-blue-50 border-blue-200' :
                       'bg-red-50 border-red-200'
                     }`}>
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <span>{vr.status === 'passed' ? '✅' : vr.status === 'baseline_created' ? '📸' : '❌'}</span>
                         <span className="font-medium">{vr.name}</span>
                         {vr.baseline_created ? (
@@ -2077,7 +2077,34 @@ export default function TestCases() {
                         ) : vr.status === 'passed' ? (
                           <span className="text-green-600">diff_ratio={vr.diff_ratio} (阈值: {vr.threshold})</span>
                         ) : (
-                          <span className="text-red-600">视觉差异超过阈值 diff_ratio={vr.diff_ratio} &gt; {vr.threshold}</span>
+                          <>
+                            <span className="text-red-600">视觉差异超过阈值 diff_ratio={vr.diff_ratio} &gt; {vr.threshold}</span>
+                            <button
+                              onClick={async () => {
+                                const bid = vr.baseline_id || (vr.baseline_path || '').split(/[/\\]/).pop()?.replace(/\.png$/, '')
+                                if (!bid) { alert('无法识别 baseline_id'); return }
+                                if (!confirm(`批准并用本次截图覆盖基线 ${bid}？\n下次执行时将以此为新基准。`)) return
+                                try {
+                                  const runId = (vr.current_path || '').split(/[/\\]/).pop()?.replace(/\.png$/, '')?.replace(`${bid}_`, '')
+                                  await api.v2.visual.approveBaseline(bid, {
+                                    source: runId ? 'specific_run' : 'latest_current',
+                                    run_id: runId || undefined,
+                                    note: '从用例结果页批准',
+                                  })
+                                  alert('✓ 基线已更新，下次执行将使用新基线。')
+                                } catch (e) {
+                                  alert(`批准失败: ${e.message}`)
+                                }
+                              }}
+                              className="ml-2 px-2 py-0.5 bg-green-600 text-white rounded hover:bg-green-700 text-[11px]">
+                              ✓ 批准并更新基线
+                            </button>
+                            <a href="/visual-testing"
+                              className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded hover:bg-slate-200 text-[11px]"
+                              title="进入视觉测试中心">
+                              管理基线 →
+                            </a>
+                          </>
                         )}
                       </div>
                       {!vr.baseline_created && (

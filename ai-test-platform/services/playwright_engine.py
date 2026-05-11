@@ -236,7 +236,7 @@ def execute_web_ui(
             for assertion in assertions:
                 # P2-5: screenshot_match needs special handling
                 if isinstance(assertion, dict) and assertion.get("type") == "screenshot_match":
-                    vr = _execute_screenshot_match(page, assertion, case_id, run_id)
+                    vr = _execute_screenshot_match(page, assertion, case_id, run_id, execution_config)
                     result.visual_results.append(vr)
                     ar = AssertionResult(
                         type="screenshot_match",
@@ -301,21 +301,21 @@ def execute_web_ui(
         try:
             if browser:
                 browser.close()
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("[P2] browser/pw cleanup: %s", _e)
         try:
             if pw:
                 pw.stop()
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("[P2] browser/pw cleanup: %s", _e)
         result.finished_at = datetime.now().isoformat()
         # 计算总耗时
         try:
             t0 = datetime.fromisoformat(result.started_at)
             t1 = datetime.fromisoformat(result.finished_at)
             result.duration_ms = (t1 - t0).total_seconds() * 1000
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("[P2] browser/pw cleanup: %s", _e)
 
     return result
 
@@ -428,9 +428,17 @@ def _execute_step(engine_ctx: dict, step, idx: int, base_url: str, case_id: str,
             final_url_lower = page.url.lower()
             if intended_path and intended_path not in page.url:
                 if any(k in final_url_lower for k in ("/login", "/sso", "/auth", "/signin", "/cas")):
+                    # 登录跳转：保留 warning 不 fail（兼容"测试未登录跳登录页"的场景）
                     sr.error_message = f"[登录跳转] 已重定向到登录页 {page.url}"
                 elif any(k in final_url_lower for k in ("/403", "/401", "/forbidden", "/unauthorized")):
-                    sr.error_message = f"[权限异常] 目标 {target} 返回 403，当前账号可能无此页面权限"
+                    # P2-6B.1: 权限拒绝必须 fail-fast，避免后续步骤连环假失败误导排查
+                    sr.status = "failed"
+                    sr.error_message = (
+                        f"[权限异常] 目标 {target} 被重定向到 {page.url} (403/401)，当前账号无该页面权限。"
+                        f"请：① 换有权限的账号 ② 调整用例路径 ③ 或改成「页面元素可见 .access-denied」等权限拦截断言。"
+                    )
+                    sr.duration_ms = (time.time() - t0) * 1000
+                    return sr
                 else:
                     sr.error_message = f"[重定向] 目标 {target} → 实际 {page.url}"
 
@@ -674,8 +682,8 @@ def _execute_step(engine_ctx: dict, step, idx: int, base_url: str, case_id: str,
         sr.error_message = str(e)[:500]
         try:
             sr.current_url = page.url
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("[P2] browser/pw cleanup: %s", _e)
 
     sr.duration_ms = (time.time() - t0) * 1000
     return sr
@@ -791,24 +799,139 @@ def _execute_assertion(page, assertion) -> AssertionResult:
     return ar
 
 
-def _execute_screenshot_match(page, assertion: dict, case_id: str, run_id: str) -> dict:
-    """P2-5: Take screenshot and compare against baseline."""
-    from services.visual_diff import compare_screenshot
+def _resolve_selector_masks(page, masks: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """
+    在截图前调用：对 type=selector 的 mask 用 Playwright 拿 bbox，转成可应用的格式。
+    rect 类型直接透传。selector 解析失败 → 跳过 + warning。
+    """
+    if not masks:
+        return []
+    out = []
+    for m in masks:
+        if not isinstance(m, dict):
+            continue
+        mtype = (m.get("type") or "rect").lower()
+        if mtype != "selector":
+            out.append(m)
+            continue
+        sel = (m.get("selector") or "").strip()
+        if not sel:
+            continue
+        try:
+            locator = page.locator(sel).first
+            box = locator.bounding_box(timeout=2000)
+            if not box:
+                logger.info(f"selector mask 元素不可见，跳过: {sel}")
+                continue
+            out.append({
+                "type": "selector",
+                "selector": sel,
+                "padding": int(m.get("padding", 0) or 0),
+                "bbox": {
+                    "x": int(box["x"]),
+                    "y": int(box["y"]),
+                    "w": int(box["width"]),
+                    "h": int(box["height"]),
+                },
+            })
+        except Exception as e:
+            logger.warning(f"selector mask 解析失败 {sel}: {e}")
+    return out
+
+
+def _execute_screenshot_match(page, assertion: dict, case_id: str, run_id: str,
+                               execution_config: Optional[dict] = None) -> dict:
+    """
+    P2-5 + 企业级升级: 视觉对比。
+
+    命名空间优先级（从高到低）：
+      1) assertion.env / assertion.viewport / assertion.branch（用例侧覆盖）
+      2) execution_config.visual_env / execution_config.visual_branch（运行时配置）
+      3) execution_config.app_env / execution_config.viewport（环境/视口推断）
+      4) "default"
+
+    Mask 来源（合并）：
+      - assertion.masks（用例侧提供）
+      - sidecar.metadata.masks（基线已配置）
+      Selector mask 在截图前实时解析 bbox。
+    """
+    from services.visual_diff import (
+        compare_screenshot, make_baseline_id, read_meta,
+    )
+    execution_config = execution_config or {}
     name = assertion.get("name", "default")
     threshold = float(assertion.get("threshold", 0.05))
+
+    # ── 命名空间推断 ──
+    eff_env = (
+        assertion.get("env")
+        or execution_config.get("visual_env")
+        or execution_config.get("app_env")
+        or execution_config.get("env")
+        or os.getenv("APP_MODE", "default")
+    )
+    eff_viewport = assertion.get("viewport") or execution_config.get("viewport")
+    if not eff_viewport:
+        # 兜底：从 playwright page 实时读取 viewport 尺寸
+        try:
+            vs = page.viewport_size
+            if vs and vs.get("width") and vs.get("height"):
+                eff_viewport = {"width": int(vs["width"]), "height": int(vs["height"])}
+        except Exception as _e:
+            logger.debug("[P2] browser/pw cleanup: %s", _e)
+    eff_branch = (
+        assertion.get("branch")
+        or execution_config.get("visual_branch")
+        or os.getenv("GIT_BRANCH", "default")
+    )
+
+    # ── Mask 收集 + selector bbox 解析 ──
+    raw_masks = list(assertion.get("masks") or [])
+    # 也读 sidecar 已有的 selector masks（只读，不改）
+    try:
+        bid_preview = make_baseline_id(case_id, name, env=eff_env, viewport=eff_viewport, branch=eff_branch)
+        sidecar_masks = (read_meta(bid_preview) or {}).get("masks") or []
+        # 合并去重：按 (selector or x,y,w,h) 唯一化
+        seen = set()
+        merged = []
+        for m in raw_masks + sidecar_masks:
+            if not isinstance(m, dict):
+                continue
+            key = m.get("selector") or f"rect:{m.get('x')}:{m.get('y')}:{m.get('w')}:{m.get('h')}"
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(m)
+        raw_masks = merged
+    except Exception as e:
+        logger.warning(f"sidecar mask 合并失败: {e}")
+
+    resolved_masks = _resolve_selector_masks(page, raw_masks)
+    algorithm = assertion.get("algorithm", "pixel")
+
     try:
         png_bytes = page.screenshot()
-        vr = compare_screenshot(png_bytes, case_id, run_id, name, threshold)
+        vr = compare_screenshot(
+            png_bytes, case_id, run_id, name, threshold,
+            masks=resolved_masks, algorithm=algorithm,
+            env=eff_env, viewport=eff_viewport, branch=eff_branch,
+        )
         return {
             "type": "screenshot_match",
             "name": vr.name,
             "status": vr.status,
+            "baseline_id": vr.baseline_id,
             "baseline_created": vr.baseline_created,
             "baseline_path": os.path.basename(vr.baseline_path) if vr.baseline_path else "",
             "current_path": os.path.basename(vr.current_path) if vr.current_path else "",
             "diff_path": os.path.basename(vr.diff_path) if vr.diff_path else "",
             "diff_ratio": vr.diff_ratio,
             "threshold": vr.threshold,
+            "algorithm": vr.algorithm,
+            "masks_applied": vr.masks_applied,
+            "env": vr.env,
+            "viewport": vr.viewport,
+            "branch": vr.branch,
             "error_message": vr.error_message,
             "reason": vr.reason,
         }
@@ -818,12 +941,18 @@ def _execute_screenshot_match(page, assertion: dict, case_id: str, run_id: str) 
             "type": "screenshot_match",
             "name": name,
             "status": "failed",
+            "baseline_id": "",
             "baseline_created": False,
             "baseline_path": "",
             "current_path": "",
             "diff_path": "",
             "diff_ratio": 0.0,
             "threshold": threshold,
+            "algorithm": algorithm,
+            "masks_applied": 0,
+            "env": "default",
+            "viewport": "default",
+            "branch": "default",
             "error_message": str(e)[:500],
             "reason": "",
         }

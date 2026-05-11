@@ -1,6 +1,6 @@
 # AI 测试平台 — 系统状态报告
 
-**更新时间**: 2026-05-07
+**更新时间**: 2026-05-08
 **系统版本**: v1.x → 接近 v2.0
 **状态**: 🟢 核心功能可用，持续增强中
 **当前分支**: `feature/tapd-integration-and-code-compare`
@@ -105,6 +105,14 @@
   - 单条 / 整报告状态同步
   - 缺陷管理列表"推 TAPD"一键按钮（未推送显示按钮 / 已推送显示 TAPD #ID 链接）
 - ✅ 前端 inconsistent UI：粉色徽章、不一致表格（方面/需求/代码）、源码片段代码块
+- ✅ **中文标签桥接修复**（2026-05-08，commit `0f31082`）
+  - 根因：中文需求（"供应商"、"财务应付单号"）vs 英文代码变量名（`supplier`、`paymentNo`）→ 倒排索引交集 = 0 → 全部需求判 missing、全部代码判"超范围"
+  - `code_analyzer.py`：提取 Java `@ApiModelProperty` 中文标签 + Vue 模板中文文本（label/placeholder/title 属性 + 标签内纯文本）
+  - `req_code_diff.py`：`_extract_code_items` 为 `java_field` / `template_label` 类型创建带中文名的 code_item；`extra_code` 只报告 `api_route`，不再报内部函数/组件
+  - `code_analysis_routes.py`：传 `code_dir` 给 `run_req_code_diff`
+  - 匹配率：0% → 78%（蓝点 23 个 Vue 文件，173 个唯一中文标签）
+  - 超范围误报：80 → ~0
+  - ⏳ **待处理**：复合需求（如"支持筛选"）置信度仍偏低
 
 ---
 
@@ -131,7 +139,7 @@
 | 测试数据管理 | 85% | P3-3A 完成 |
 | 测试套 / 批量执行 | 90% | P2-7 / P2-10 完成 |
 | 缺陷管理 + TAPD 集成 | 80% | 含批量 / 状态同步 / 列表一键推 |
-| 需求-代码对比 | 75% | v2 已落地，待真实项目实测调优 |
+| 需求-代码对比 | 82% | v2 + 中文标签桥接（匹配率 78%），待复合需求优化 |
 | 质量门禁 + Dashboard | 80% | P3-1 / P3-4A 完成 |
 | 智能选测 | 70% | P3-5 MVP 完成 |
 | **整体平均** | **84%** | 已超过 v1.0 的"生产就绪"线 |
@@ -176,9 +184,10 @@
 ## 7. 短期 TODO
 
 1. ⏳ 推 GitHub（网络好后或推 origin gitlab）
-2. ⏳ 实测 v2 对比引擎（用真实项目，如蓝点 recycle-applet）
-3. ⏳ 7 列统计卡布局微调（栅格 24 / 7 ≈ 3.43，目前会换行）
-4. ⏳ Phase D 安全 + 工程化路线图
+2. ✅ ~~实测 v2 对比引擎~~（蓝点 recycle-applet，2026-05-08 完成中文标签桥接）
+3. ⏳ 复合需求匹配优化（如"支持筛选"置信度偏低）
+4. ⏳ 7 列统计卡布局微调（栅格 24 / 7 ≈ 3.43，目前会换行）
+5. ⏳ Phase D 安全 + 工程化路线图
 
 ---
 
@@ -235,9 +244,9 @@ curl http://127.0.0.1:8001/health
 **最近 commit**：
 
 ```
+0f31082  fix(diff): extract Chinese labels from Java/Vue for keyword matching
 d402fe8  feat(tapd): TAPD 推送增强 - 批量推送/状态同步/缺陷列表一键推
 65ca124  feat(code-compare): 重写需求-代码对比引擎，支持四态判断 + 代码片段证据
 70c78bf  test: add code compare quality baseline
 295f286  docs: add Phase D security and engineering roadmap
-449cf25  fix: harden security and stabilize validation scripts
 ```

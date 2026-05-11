@@ -300,8 +300,8 @@ class CodeCompareStorageService:
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 results.append(data)
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("silent error suppressed at %s: %s", __name__, _e)
         return results
 
     def _load_legacy_report(self, report_id: str) -> Optional[dict]:
@@ -309,14 +309,14 @@ class CodeCompareStorageService:
         if path.exists():
             try:
                 return json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("silent error suppressed at %s: %s", __name__, _e)
         # scan all
         for f in LEGACY_REPORTS_DIR.glob("*.json"):
             try:
                 data = json.loads(f.read_text(encoding="utf-8"))
                 if data.get('report_id') == report_id:
                     return data
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("silent error suppressed at %s: %s", __name__, _e)
         return None

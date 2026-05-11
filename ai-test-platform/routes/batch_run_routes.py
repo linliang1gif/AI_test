@@ -9,6 +9,10 @@ POST   /api/v2/batch-runs/{batch_id}/stop      停止
 GET    /api/v2/batch-runs/{batch_id}/report    报告
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 import json
 import threading
 from typing import Any, Dict, List, Optional
@@ -114,7 +118,7 @@ def _run_batch_in_background(batch_id: str):
         service = BatchRunService(db=None)
         service.execute_batch(batch_id)
     except Exception as e:
-        print(f"⚠️  批量任务 {batch_id} 执行异常: {e}")
+        logger.info(f"⚠️  批量任务 {batch_id} 执行异常: {e}")
         import traceback
         traceback.print_exc()
 

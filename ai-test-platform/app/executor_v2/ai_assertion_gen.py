@@ -9,6 +9,9 @@ import re
 from typing import Any, Dict, List, Optional
 
 import httpx
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def _get_llm_config() -> dict:
@@ -154,7 +157,7 @@ def generate_assertions_for_api(
                 })
         return valid if valid else _fallback_assertions(path)
     except Exception as e:
-        print(f"  [AI断言] LLM调用失败({e})，使用规则回退")
+        logger.info(f"  [AI断言] LLM调用失败({e})，使用规则回退")
         return _fallback_assertions(path)
 
 
@@ -238,7 +241,7 @@ def generate_assertions_batch(
         return cleaned
 
     except Exception as e:
-        print(f"  [AI断言] 批量LLM调用失败({e})，使用规则回退")
+        logger.info(f"  [AI断言] 批量LLM调用失败({e})，使用规则回退")
         result = {}
         for api in apis:
             key = f"{api['method']} {api['path']}"

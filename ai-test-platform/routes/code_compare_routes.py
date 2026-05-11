@@ -36,6 +36,9 @@ from typing import Optional, List, Dict, Any, Tuple
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
+import logging
+
+logger = logging.getLogger(__name__)
 
 # ── 导入解析工具 ──
 try:
@@ -102,8 +105,8 @@ def _load_persisted_reports():
         try:
             data = json.loads(f.read_text(encoding="utf-8"))
             _reports[data["report_id"]] = data
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("[P1] report/cache load fallback: %s", _e)
 
 
 def _load_persisted_requirements():
@@ -113,8 +116,8 @@ def _load_persisted_requirements():
             data = json.loads(f.read_text(encoding="utf-8"))
             req_id = f.stem  # filename without .json
             _requirement_cache[req_id] = data
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("[P1] report/cache load fallback: %s", _e)
 
 
 def _save_requirement_cache(req_id: str, data: dict):
@@ -136,8 +139,8 @@ def _load_persisted_snapshots():
                 sid = info.get("meta", {}).get("snapshot_id") or sid
                 info["path"] = str(snap_dir)
                 _code_snapshots[sid] = info
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.warning("[P1] report/cache load fallback: %s", _e)
         elif sid.startswith("snap_"):
             # 兼容旧快照：没有 meta 文件但目录存在，自动恢复
             total_files = sum(1 for _ in snap_dir.rglob("*") if _.is_file())
@@ -841,10 +844,10 @@ async def analyze_requirement_code(request: AnalyzeRequest):
                 ai_client.ai_config["model"] = request.model
             actual_model = getattr(ai_client, 'ai_config', {}).get('model', '?')
             actual_provider = getattr(ai_client, 'provider', '?')
-            print(f"🤖 代码对比使用: provider={actual_provider}, model={actual_model} (请求: provider={request.provider}, model={request.model})")
+            logger.info(f"🤖 代码对比使用: provider={actual_provider}, model={actual_model} (请求: provider={request.provider}, model={request.model})")
             ai_mode = "ai_deep"
         except Exception as e:
-            print(f"⚠️ AI 客户端初始化失败，使用规则匹配: {e}")
+            logger.info(f"⚠️ AI 客户端初始化失败，使用规则匹配: {e}")
             ai_mode = "fallback"
 
     try:
@@ -1466,7 +1469,7 @@ def _resolve_tapd_iteration(config: dict, iteration_name: str) -> Optional[str]:
                 if iteration_name in (it.get("name") or ""):
                     return it.get("id")
     except Exception as e:
-        print(f"⚠️  查找 TAPD 迭代失败: {e}")
+        logger.info(f"⚠️  查找 TAPD 迭代失败: {e}")
     return None
 
 @router.get("/api/v2/code-compare/tapd/config")

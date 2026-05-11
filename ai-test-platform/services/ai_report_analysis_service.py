@@ -6,6 +6,10 @@ Phase 19: AI 报告分析服务
 2. LLM 分析增强 (llm) — 可选，失败自动回退 rule_based
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 import json
 import os
 import math
@@ -113,14 +117,14 @@ class AiReportAnalysisService:
 
         if provider == "llm":
             try:
-                print(f"🤖 调用 LLM 分析: {AI_REPORT_MODEL} ...")
+                logger.info(f"🤖 调用 LLM 分析: {AI_REPORT_MODEL} ...")
                 llm_result = self._llm_analysis(metrics)
                 llm_result["provider"] = "llm"
                 llm_result["run_id"] = run_id
                 analysis = llm_result
-                print(f"✅ LLM 分析完成")
+                logger.info(f"✅ LLM 分析完成")
             except Exception as e:
-                print(f"⚠️ LLM 分析失败，使用 rule_based: {e}")
+                logger.info(f"⚠️ LLM 分析失败，使用 rule_based: {e}")
                 analysis = rule_analysis
 
         # 4. 持久化
@@ -442,7 +446,7 @@ class AiReportAnalysisService:
         for route in MODEL_ROUTES:
             model_name = route["name"]
             try:
-                print(f"    🔄 尝试模型: {model_name} ({route['model']})")
+                logger.info(f"    🔄 尝试模型: {model_name} ({route['model']})")
                 headers = {
                     "Authorization": f"Bearer {route['api_key']}",
                     "Content-Type": "application/json",
@@ -465,12 +469,12 @@ class AiReportAnalysisService:
                     data = resp.json()
 
                 result = self._parse_llm_response(data, model_name)
-                print(f"    ✅ {model_name} 成功")
+                logger.info(f"    ✅ {model_name} 成功")
                 return result
 
             except Exception as e:
                 last_error = e
-                print(f"    ⚠️ {model_name} 失败: {e}")
+                logger.info(f"    ⚠️ {model_name} 失败: {e}")
                 continue
 
         raise last_error or RuntimeError("所有模型均失败")

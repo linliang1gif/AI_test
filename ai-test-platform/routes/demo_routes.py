@@ -13,6 +13,9 @@ from sqlalchemy.orm import Session
 
 from database.session import get_db
 from database.models import Project, Environment, AuthProfile, ApiSpec, TestCase, TestRun, RunCase
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v2/demo", tags=["Demo"])
 
@@ -134,7 +137,7 @@ def _create_demo_project(db: Session) -> dict:
             tc.source = "demo_swagger"
         db.commit()
     except Exception as e:
-        print(f"⚠️ Swagger 自动生成用例失败: {e}，将仅使用 seed 用例")
+        logger.info(f"⚠️ Swagger 自动生成用例失败: {e}，将仅使用 seed 用例")
 
     # 6. 插入 seed 异常用例
     seed_cases = _build_seed_cases()
@@ -175,7 +178,7 @@ def _create_demo_project(db: Session) -> dict:
         result = gov_svc.govern_all(force=True)
         governed = result.get("updated", 0)
     except Exception as e:
-        print(f"⚠️ 治理推断失败: {e}")
+        logger.info(f"⚠️ 治理推断失败: {e}")
 
     total_cases = db.query(TestCase).filter(
         TestCase.source.in_(["demo_swagger", "demo_seed"])

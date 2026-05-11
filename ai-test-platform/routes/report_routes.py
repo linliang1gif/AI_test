@@ -17,6 +17,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 import sys
+import logging
+
+logger = logging.getLogger(__name__)
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from database.session import get_db
@@ -112,7 +115,7 @@ def generate_report(
         db.commit()
     except Exception as e:
         db.rollback()
-        print(f"⚠️  报告入库失败: {e}")
+        logger.info(f"⚠️  报告入库失败: {e}")
 
     return ReportResponse(
         success=True,

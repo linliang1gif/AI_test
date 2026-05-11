@@ -54,8 +54,8 @@ def get_overview(db: Session, project_id: int = None, days: int = 7):
                 gate_evaluated += 1
                 if s['gate_status'] == 'passed':
                     gate_passed_count += 1
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("silent error suppressed at %s: %s", __name__, _e)
     gate_pass_rate = round(gate_passed_count / gate_evaluated, 4) if gate_evaluated else 0
 
     # --- defects ---
@@ -74,8 +74,8 @@ def get_overview(db: Session, project_id: int = None, days: int = 7):
             s = json.loads(r.summary or '{}')
             ds = s.get('data_summary', {})
             data_issue_count += ds.get('missing_variables', 0) + ds.get('data_validation_errors', 0)
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("silent error suppressed at %s: %s", __name__, _e)
 
     # --- flaky candidates (run_cases failed then passed in same period) ---
     flaky_candidate_count = 0
@@ -93,8 +93,8 @@ def get_overview(db: Session, project_id: int = None, days: int = 7):
                 )
             )
             flaky_candidate_count = flaky_q.count()
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("silent error suppressed at %s: %s", __name__, _e)
 
     # --- risk_level ---
     risk_level = "low"
@@ -371,8 +371,8 @@ def get_data_issues(db: Session, project_id: int = None, days: int = 7):
                 data_issue_runs += 1
             for did in ds.get('dataset_ids', []):
                 datasets_used.add(str(did))
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("silent error suppressed at %s: %s", __name__, _e)
 
     return {
         "data_validation_errors": total_validation_errors,
@@ -452,8 +452,8 @@ def get_defect_trend(db: Session, project_id: int = None, days: int = 14):
             day = ev.created_at.strftime('%Y-%m-%d') if ev.created_at else None
             if day and day in buckets:
                 buckets[day]["reopened"] += 1
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.debug("silent error suppressed at %s: %s", __name__, _e)
 
     open_before = sum(1 for d in defects
                       if d.created_at and d.created_at < cutoff
@@ -500,8 +500,8 @@ def get_data_issue_trend(db: Session, project_id: int = None, days: int = 14):
             buckets[day]["cf"] += cf
             if ve or mv or cf:
                 buckets[day]["issue_runs"] += 1
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("silent error suppressed at %s: %s", __name__, _e)
 
     return [
         {
@@ -582,8 +582,8 @@ def get_performance_trend(db: Session, project_id: int = None, days: int = 14):
                 buckets[day]["errors"] += ps.get('error_count', 0)
                 buckets[day]["total"] += ps.get('total_requests', 0)
                 buckets[day]["tf"] += ps.get('threshold_failed_count', 0)
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("silent error suppressed at %s: %s", __name__, _e)
 
     run_ids = list(run_day.keys())
     perf_ids = [r[0] for r in db.query(TestCase.id).filter(TestCase.case_type == 'performance').all()]
@@ -646,8 +646,8 @@ def get_visual_trend(db: Session, project_id: int = None, days: int = 14):
                 dr = vs.get('max_diff_ratio', 0)
                 if dr:
                     buckets[day]["diffs"].append(dr)
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("silent error suppressed at %s: %s", __name__, _e)
 
     run_ids = list(run_day.keys())
     vis_ids = [r[0] for r in db.query(TestCase.id).filter(TestCase.case_type == 'visual').all()]
@@ -666,8 +666,8 @@ def get_visual_trend(db: Session, project_id: int = None, days: int = 14):
                 for a in (ad if isinstance(ad, list) else []):
                     if isinstance(a, dict) and 'diff_ratio' in a:
                         buckets[day]["diffs"].append(a['diff_ratio'])
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("silent error suppressed at %s: %s", __name__, _e)
 
     if not buckets:
         return []
@@ -807,8 +807,8 @@ def get_quality_regression(db: Session, project_id: int = None, days: int = 7):
                 ds = s.get('data_summary', {})
                 if ds:
                     di += ds.get('data_validation_errors', 0) + ds.get('missing_variables', 0)
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.debug("silent error suppressed at %s: %s", __name__, _e)
         gpr = gp / ge if ge else 0
         dq = db.query(Defect).filter(Defect.created_at >= start, Defect.created_at < end)
         if project_id:

@@ -21,6 +21,9 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+import logging
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -371,7 +374,7 @@ def _try_ai_review(cases: List[TestCase], rule_result: Dict) -> Optional[Dict]:
             return ai_data
 
     except Exception as e:
-        print(f"⚠️  AI 评审失败（降级规则评审）: {e}")
+        logger.info(f"⚠️  AI 评审失败（降级规则评审）: {e}")
         traceback.print_exc()
 
     return None
@@ -742,7 +745,7 @@ def _ai_heal_one(tc: TestCase, issues: List[str], fix_suggestion: str) -> Option
 }}"""
 
         # 日志只打印摘要，不打印完整 prompt
-        print(f"🔧 AI 自愈 [{tc.id}]: 发送 prompt ({len(prompt)} chars)")
+        logger.info(f"🔧 AI 自愈 [{tc.id}]: 发送 prompt ({len(prompt)} chars)")
         response = client.generate_text(prompt)
         text = response.strip()
         json_match = re.search(r'\{[\s\S]*\}', text)
@@ -750,6 +753,6 @@ def _ai_heal_one(tc: TestCase, issues: List[str], fix_suggestion: str) -> Option
             return json.loads(json_match.group())
 
     except Exception as e:
-        print(f"⚠️  AI 自愈失败 [{tc.id}]: {type(e).__name__}: {str(e)[:200]}")
+        logger.info(f"⚠️  AI 自愈失败 [{tc.id}]: {type(e).__name__}: {str(e)[:200]}")
 
     return None

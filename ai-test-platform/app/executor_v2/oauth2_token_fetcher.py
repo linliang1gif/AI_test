@@ -18,6 +18,9 @@ OAuth2 Token 自动获取器
 import time
 import requests
 from typing import Any, Dict, Optional, Tuple
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # 内存缓存: { cache_key: { access_token, token_type, expires_at } }
@@ -54,7 +57,7 @@ def fetch_oauth2_token(auth_config: Dict[str, Any], env_key: str = "default", fo
         if entry["expires_at"] > time.time() + _REFRESH_MARGIN:
             return entry["access_token"], entry["token_type"]
         else:
-            print(f"🔄 OAuth2 Token 即将过期，自动刷新 (env={env_key})")
+            logger.info(f"🔄 OAuth2 Token 即将过期，自动刷新 (env={env_key})")
 
     # 构建请求
     token_url = auth_config.get("token_url", "")
@@ -89,10 +92,10 @@ def fetch_oauth2_token(auth_config: Dict[str, Any], env_key: str = "default", fo
         # client_credentials 只需要 client_authorization
         pass
 
-    print(f"🔑 正在获取 OAuth2 Token: {token_url}")
-    print(f"   grant_type={grant_type}, username={form_data.get('username', 'N/A')}")
-    print(f"   headers: { {k: (v[:30] + '...' if len(v) > 30 else v) for k, v in headers.items()} }")
-    print(f"   form_data keys: {list(form_data.keys())}")
+    logger.info(f"🔑 正在获取 OAuth2 Token: {token_url}")
+    logger.info(f"   grant_type={grant_type}, username={form_data.get('username', 'N/A')}")
+    logger.info(f"   headers: { {k: (v[:30] + '...' if len(v) > 30 else v) for k, v in headers.items()} }")
+    logger.info(f"   form_data keys: {list(form_data.keys())}")
 
     try:
         resp = requests.post(
@@ -113,8 +116,8 @@ def fetch_oauth2_token(auth_config: Dict[str, Any], env_key: str = "default", fo
 
     if resp.status_code != 200:
         error_desc = data.get("error_description") or data.get("error") or data.get("message") or data.get("msg") or resp.text[:200]
-        print(f"❌ OAuth2 返回 {resp.status_code}: {error_desc}")
-        print(f"   完整响应: {resp.text[:500]}")
+        logger.info(f"❌ OAuth2 返回 {resp.status_code}: {error_desc}")
+        logger.info(f"   完整响应: {resp.text[:500]}")
         raise Exception(f"OAuth2 返回 {resp.status_code}: {error_desc}")
 
     access_token = data.get("access_token", "")
@@ -134,7 +137,7 @@ def fetch_oauth2_token(auth_config: Dict[str, Any], env_key: str = "default", fo
     }
 
     preview = access_token[:20] + "..." if len(access_token) > 20 else access_token
-    print(f"✅ OAuth2 Token 获取成功! (有效期 {expires_in}s, preview={preview})")
+    logger.info(f"✅ OAuth2 Token 获取成功! (有效期 {expires_in}s, preview={preview})")
     return access_token, token_type
 
 

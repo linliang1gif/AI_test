@@ -12,6 +12,9 @@ import yaml
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 from urllib.parse import urljoin
+import logging
+
+logger = logging.getLogger(__name__)
 
 class SwaggerApiParser:
     """Swagger/OpenAPI解析器"""
@@ -40,7 +43,7 @@ class SwaggerApiParser:
             return True
             
         except Exception as e:
-            print(f"加载Swagger文件失败: {e}")
+            logger.info(f"加载Swagger文件失败: {e}")
             return False
     
     def load_swagger_url(self, url: str) -> bool:
@@ -59,7 +62,7 @@ class SwaggerApiParser:
             return True
             
         except Exception as e:
-            print(f"从URL加载Swagger失败: {e}")
+            logger.info(f"从URL加载Swagger失败: {e}")
             return False
     
     def _extract_base_url(self):
@@ -116,7 +119,7 @@ class SwaggerApiParser:
             return api_info
             
         except Exception as e:
-            print(f"解析API失败 {method} {path}: {e}")
+            logger.info(f"解析API失败 {method} {path}: {e}")
             return None
     
     def _parse_parameters(self, parameters: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

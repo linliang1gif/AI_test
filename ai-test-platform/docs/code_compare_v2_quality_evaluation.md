@@ -37,6 +37,10 @@
 | 人工确认 | `routes/code_compare_routes.py::confirm_finding` | 7 种 manual_status |
 | Finding 转缺陷 / 用例 / 待确认 / 误报 | `convert-to-defect/case/question` + `mark-false-positive` | 4 个动作 |
 | 标题/描述生成 | `services/tapd_service.py::finding_to_tapd_bug` | 8/8 单元测试 |
+| **Java 中文标签提取** | `utils/code_analyzer.py::_extract_java_fields` | 提取 `@ApiModelProperty` 中文 value + `@ApiModel` description + 验证注解 |
+| **Vue 模板中文标签提取** | `utils/code_analyzer.py::_parse_vue_file` | 提取 label/placeholder/title 属性中文 + 标签内纯文本（如 `<text>供应商</text>`） |
+| **中文 code_item 索引** | `utils/req_code_diff.py::_extract_code_items` | 为 `java_field`（权重 2.2）和 `template_label`（权重 1.8）创建带中文名的 code_item |
+| **extra_code 过滤** | `utils/req_code_diff.py::_ai_diff` / `_rule_based_diff` | 只报告 `api_route` 为超范围，排除内部函数/组件 |
 
 ## 3. 检索召回机制
 
@@ -48,6 +52,7 @@
 |---|---|---|---|
 | 文件遍历 | `scan_code_directory` | 项目目录 | 按语言分桶的文件清单 |
 | 单文件解析 | `_parse_vue_file` / `_parse_js_file` / `_parse_python_file` / `_parse_java_file` | 文件内容 + 相对路径 | 组件 / 函数 / 类 / 方法的结构化条目 |
+| **中文标签提取** | `_extract_java_fields` + `_parse_vue_file` 中文标签段 | Java `@ApiModelProperty` / Vue 模板属性 | 组件 `.chinese_labels[]` + `.fields[]`（2026-05-08 新增） |
 | 摘要 | `summarize_code_analysis` | 全量解析结果 | 给 AI prompt 的代码摘要文本 |
 
 ### 3.2 需求侧检索
@@ -154,6 +159,9 @@
 | TAPD 实推 bug | 1055833~1055839 共 6 条（其中 1055833 已删）| TAPD 项目 50366622 |
 | 标题/描述生成单元测试 | 8/8 PASS | `scripts/test_finding_to_tapd_bug.py` |
 | 标题/描述生成回归 | 修复语气 / 模板后再跑 8/8 PASS | 同上 |
+| **中文标签桥接匹配率** | 0% → 78%（蓝点 23 Vue 文件，173 个唯一中文标签） | `scripts/test_real_match.py`（2026-05-08） |
+| **extra_code 误报修复** | 80 → ~0（只报 api_route） | commit `0f31082` |
+| **回归测试** | T1A 12/12, D2 25/25, fingerprint 14/14, tapd_bug 8/8, classifier 9/9 全部 PASS | 2026-05-08 |
 
 ## 8. 未验证风险
 
@@ -170,7 +178,7 @@
 
 | 风险 | 状态 |
 |---|---|
-| 假阳性率（FP）| 未量化 |
+| 假阳性率（FP）| 部分缓解（中文标签桥接后 missing FP 大幅下降，extra FP 已修复；复合需求 FP 待优化） |
 | 假阴性率（FN）| 未量化 |
 | 同质 finding 重复率 | 未量化 |
 | 复核覆盖率与翻转率 | 未量化 |
@@ -292,4 +300,4 @@
 
 ---
 
-*文档生成日期：2026-05-07；适用分支：`feature/tapd-integration-and-code-compare`；HEAD：`e7d6bf7`*
+*文档更新日期：2026-05-08；适用分支：`feature/tapd-integration-and-code-compare`；HEAD：`0f31082`*

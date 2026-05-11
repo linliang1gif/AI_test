@@ -12,6 +12,9 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+import logging
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -113,7 +116,7 @@ async def req_code_diff(request: ReqCodeDiffRequest):
         try:
             ai_client = get_ai_client(provider=request.provider)
         except Exception as e:
-            print(f"⚠️ AI 客户端初始化失败，使用规则匹配: {e}")
+            logger.info(f"⚠️ AI 客户端初始化失败，使用规则匹配: {e}")
 
     try:
         diff_result = run_req_code_diff(

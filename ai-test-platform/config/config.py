@@ -101,7 +101,7 @@ class Config:
             openai_base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
             anthropic_base_url=os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
-            default_model=os.getenv("DEFAULT_AI_MODEL", "deepseek-chat"),
+            default_model=os.getenv("DEFAULT_AI_MODEL", "deepseek-v4-pro"),
             default_provider=os.getenv("DEFAULT_AI_PROVIDER", "deepseek"),
             temperature=float(os.getenv("AI_TEMPERATURE", "0.2")),
             max_tokens=int(os.getenv("AI_MAX_TOKENS", "4000")),

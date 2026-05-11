@@ -6,10 +6,13 @@ Swagger/OpenAPI 导入路由
 
 import json
 
+
+import logging
+logger = logging.getLogger(__name__)
 import requests
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Body
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from database import get_db
 from database.models import TestCase, ApiSpec
@@ -24,6 +27,7 @@ from schemas.swagger_schemas import (
     GenerateTestCasesRequest,
     GenerateTestCasesResponse
 )
+from backend.danger_guard import check_confirm, ConfirmRequest
 
 router = APIRouter(prefix="/api/v2", tags=["Swagger导入"])
 
@@ -472,8 +476,8 @@ def _yapi_to_openapi(categories: list, project_id, yapi_base: str) -> dict:
                     operation["requestBody"] = {
                         "content": {"application/json": {"schema": schema}}
                     }
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.warning("[P1] swagger schema parse: %s", _e)
 
             if path not in paths:
                 paths[path] = {}
@@ -865,7 +869,7 @@ async def get_api_spec_content(
                     with open(file_path, 'r', encoding='utf-8') as f:
                         return json.load(f)
             except Exception as e:
-                print(f"无法从raw_spec_path读取: {e}")
+                logger.warning("无法从 raw_spec_path 读取: %s", e)
         
         # 2. 尝试从uploads目录读取
         if api_spec.source_url:
@@ -876,7 +880,7 @@ async def get_api_spec_content(
                     with open(file_path, 'r', encoding='utf-8') as f:
                         return json.load(f)
             except Exception as e:
-                print(f"无法从uploads读取: {e}")
+                logger.warning("无法从 uploads 读取: %s", e)
         
         raise HTTPException(status_code=404, detail="OpenAPI文件不存在")
     except HTTPException:
@@ -971,8 +975,8 @@ async def get_swagger_coverage(
                         for method in path_info:
                             if method.upper() in ("GET", "POST", "PUT", "DELETE", "PATCH"):
                                 spec_apis.add((method.upper(), path))
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.warning("[P1] swagger schema parse: %s", _e)
             all_apis |= spec_apis
             spec_details.append({
                 "api_spec_id": spec.id,
@@ -1130,7 +1134,8 @@ async def get_test_case(
 @router.post("/test-cases/batch-delete")
 def batch_delete_test_cases(
     request: dict,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    body: Optional[ConfirmRequest] = Body(None),
 ):
     """
     批量删除测试用例（V2 数据库版 — 软删除）
@@ -1141,6 +1146,8 @@ def batch_delete_test_cases(
     Body:
       ids: list[str]  — 要删除的测试用例 ID 列表
     """
+    # Phase 10B: 危险操作守卫
+    check_confirm("BULK_DELETE_TEST_CASES", (body or ConfirmRequest()).confirm, (body or ConfirmRequest()).confirm_text)
     ids = request.get("ids", [])
     if not ids:
         raise HTTPException(status_code=400, detail="缺少 ids")

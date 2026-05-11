@@ -266,8 +266,8 @@ def _run_migrations():
                         f"CREATE INDEX IF NOT EXISTS {idx_name} ON {tbl} ({col})"
                     ))
                     created.append(idx_name)
-                except Exception:
-                    pass  # index may already exist in older SQLite
+                except Exception as _e:
+                    logger.debug("[P2] startup probe fallback: %s", _e)  # index may already exist in older SQLite
             db.commit()
             if created:
                 logger.info(f"P3-5.1 索引迁移: 已创建/确认 {len(created)} 个索引")

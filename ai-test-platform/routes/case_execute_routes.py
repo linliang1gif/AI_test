@@ -1034,7 +1034,7 @@ def execute_test_case(
         db.commit()
     except Exception as e:
         db.rollback()
-        print(f"⚠️  写入执行记录失败: {e}")
+        logger.info(f"⚠️  写入执行记录失败: {e}")
 
     # 9. 返回结果
     return ExecuteResponse(
@@ -1112,8 +1112,8 @@ def _load_dataset_variables(dataset_id: str, db: Session) -> Dict[str, Any]:
         for ds in datasets:
             if str(ds.get('id')) == str(dataset_id):
                 return ds.get('variables', {}) or ds.get('data', {}) or {}
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("[P1] dataset lookup / jwt decode: %s", _e)
     return {}
 
 
@@ -1174,7 +1174,7 @@ def _prepare_environment_auth(db: Session, env_id: Optional[int]) -> Dict[str, A
                     extra={"header_name": "Authorization", "prefix": f"{token_type} "},
                 )
             except Exception as e:
-                print(f"⚠️  OAuth2 自动获取 Token 失败: {e}")
+                logger.info(f"⚠️  OAuth2 自动获取 Token 失败: {e}")
                 # 回退: 尝试使用配置中的静态 access_token
                 fallback_token = auth_config.get("access_token", "")
                 if fallback_token:
@@ -1197,7 +1197,7 @@ def _prepare_environment_auth(db: Session, env_id: Optional[int]) -> Dict[str, A
             if token:
                 AuthManager.set_token(token=token, auth_type="custom", env_key=env_key, extra={"header_name": header_name, "prefix": prefix})
     except Exception as e:
-        print(f"⚠️  加载环境鉴权配置失败: {e}")
+        logger.info(f"⚠️  加载环境鉴权配置失败: {e}")
     return context
 
 
@@ -1390,8 +1390,8 @@ async def update_quick_token(request: dict, db: Session = Depends(get_db)):
         payload += "=" * (4 - len(payload) % 4)
         decoded = json.loads(b64.urlsafe_b64decode(payload))
         pin = str(decoded.get("pin", ""))
-    except Exception:
-        pass
+    except Exception as _e:
+        logger.warning("[P1] dataset lookup / jwt decode: %s", _e)
 
     # 更新配置
     new_config = {"token": token, "header_name": "Authorization", "prefix": "Bearer "}

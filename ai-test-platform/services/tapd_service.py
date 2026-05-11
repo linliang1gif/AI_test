@@ -32,8 +32,8 @@ def load_tapd_config() -> Dict[str, Any]:
     if TAPD_CONFIG_FILE.exists():
         try:
             return json.loads(TAPD_CONFIG_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("[P1] tapd config read: %s", _e)
     return {}
 
 

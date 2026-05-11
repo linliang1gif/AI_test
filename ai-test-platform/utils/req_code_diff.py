@@ -569,18 +569,40 @@ def _normalize_status(s: Any) -> str:
     return _STATUS_MAP.get(str(s).strip(), "uncertain")
 
 
-def _format_candidate_block(req_id: str, req: Dict, candidates: List[Dict]) -> str:
-    """把单条需求的候选代码格式化成 prompt 内的小节。"""
+def _format_candidate_block(
+    req_id: str,
+    req: Dict,
+    candidates: List[Dict],
+    code_dir: Optional[str] = None,
+    snippet_top_k: int = 3,
+) -> str:
+    """把单条需求的候选代码格式化成 prompt 内的小节。
+
+    - 前 snippet_top_k 条候选附带真实源码片段（让 AI 能看到具体实现）
+    - 其余候选保留名字+detail 作为线索
+    """
     head = f"### {req_id} {req.get('source','')} 需求\n- 需求原文: {req.get('detail') or req.get('name','')}"
     if not candidates:
         return head + "\n- 候选代码: （未召回到相关代码）"
-    lines = [head, f"- 候选代码（已按相关度排序，共 {len(candidates)} 条，仅供你定位，最终判断需基于这些线索）:"]
-    for c in candidates:
+    lines = [
+        head,
+        f"- 候选代码（已按相关度排序，共 {len(candidates)} 条；"
+        f"前 {min(snippet_top_k, len(candidates))} 条附真实源码片段；"
+        f"仅供你定位，最终判断必须基于下面给出的代码线索，不得凭印象或捏造）:"
+    ]
+    for i, c in enumerate(candidates):
         loc = f"{c.get('file','')}:{c.get('line',0)}" if c.get("line") else c.get("file", "")
         lines.append(f"  * [{c.get('type','')}] {c.get('name','')[:80]}  @ {loc}")
-        detail = (c.get("detail") or "")[:160]
+        detail = (c.get("detail") or "")[:400]
         if detail:
             lines.append(f"      detail: {detail}")
+        # 前 snippet_top_k 条给出真实源码
+        if i < snippet_top_k and code_dir and c.get("file"):
+            snip = _load_snippet(code_dir, c.get("file", ""), c.get("line", 0) or 1)
+            if snip:
+                lines.append(f"      源码片段 ({snip['file']}:{snip['start']}-{snip['end']}):")
+                for sl in snip["snippet"].splitlines():
+                    lines.append(f"      | {sl}")
     return "\n".join(lines)
 
 
@@ -603,10 +625,11 @@ def _ai_diff(
    - partial：核心功能存在，但缺少校验/边界/分支/文案等细节
    - inconsistent：代码与需求字面或行为不一致（例如校验范围不同、文案不同、状态流转不同）
    - missing：在候选代码中找不到对应实现
-2. 强制定位：每条结论必须给出 file 与（如能给出）line；引用候选代码以外的"凭印象"判断不允许
-3. 不一致细节：partial / inconsistent 必须在 inconsistencies 字段说明"需求要求 vs 代码实际"对比项
-4. 不要发明：候选代码没出现的文件/函数不要捏造
-5. 输出严格 JSON，不要解释文字"""
+2. **必须阅读源码片段**：前几条候选会附带真实源码片段（标记为"源码片段"）。判断前必须先读完片段内容，基于片段里**真实存在的**标签、状态值、字段来得结论。例如需求是"支持 全部/待审核/待开票 筛选"，只要片段里真的出现这些中文文案（哪怕在 template 的 label/tab 里），就判 implemented 而不是 missing。
+3. 强制定位：每条结论 file 与 code_item **必须从候选代码列表里照抄**，不得简写、改写、合成新名字。候选里没有的组件名/文件名一律不得出现在输出里。
+4. 不一致细节：partial / inconsistent 必须在 inconsistencies 字段说明"需求要求 vs 代码实际"对比项
+5. 不要发明：候选代码没出现的文件/函数一律不要捏造。**宁可降 confidence 到 0.3，也不要编造**。
+6. 输出严格 JSON，不要解释文字"""
 
     BATCH_SIZE = 6
     all_matched: List[Dict] = []
@@ -634,7 +657,7 @@ def _ai_diff(
             candidates_by_req[p["id"]] = cand
             for c in cand:
                 matched_code_ids.add(c["id"])
-            candidate_blocks.append(_format_candidate_block(p["id"], p, cand))
+            candidate_blocks.append(_format_candidate_block(p["id"], p, cand, code_dir=code_dir))
 
         prompt_body = "\n\n".join(candidate_blocks)
 
@@ -697,8 +720,31 @@ def _ai_diff(
                 line_ = int(line_)
             except Exception:
                 line_ = 0
+
+            # ── 幻觉校验：AI 返回的 code_item / file 必须在候选池内 ──
+            ai_code_item = (r.get("code_item") or "").strip()
+            candidates_for_req = candidates_by_req.get(req_id, [])
+            candidate_names = {c.get("name", "").strip() for c in candidates_for_req}
+            candidate_files = {c.get("file", "").strip() for c in candidates_for_req}
+            hallucinated = False
+            # code_item 幻觉（AI 编造组件/函数名）
+            if ai_code_item and ai_code_item not in candidate_names and \
+               not any(ai_code_item in cn or cn in ai_code_item for cn in candidate_names if cn):
+                hallucinated = True
+            # file 幻觉（AI 编造文件名）
+            if file_ and file_ not in candidate_files:
+                hallucinated = True
+            # 幻觉处理：missing 下调为 uncertain（拒绝误报），置信度削半
+            if hallucinated:
+                print(f"  ⚠️ {req_id} AI 幻觉检测: code_item='{ai_code_item}' file='{file_}' 不在候选池 → 降级")
+                confidence = min(confidence, 0.4)
+                if status == "missing":
+                    status = "uncertain"
+
             evidence_snippet = _load_snippet(code_dir, file_, line_) if file_ else None
             notes = r.get("notes", "")
+            if hallucinated:
+                notes = f"[已降级·AI 引用了候选池外的代码项] {notes}"
             incs = r.get("inconsistencies") or []
             test_points = r.get("test_points") or []
 

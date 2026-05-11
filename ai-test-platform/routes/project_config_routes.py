@@ -4,7 +4,7 @@
 项目配置路由 - 使用数据库
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -22,6 +22,7 @@ from schemas.project_schemas import (
     AuthProfileUpdate,
     AuthProfileResponse
 )
+from backend.danger_guard import check_confirm, ConfirmRequest
 
 router = APIRouter(prefix="/api/v2", tags=["项目配置"])
 
@@ -112,9 +113,12 @@ async def update_project(
 @router.delete("/projects/{project_id}", status_code=204)
 async def delete_project(
     project_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    body: Optional[ConfirmRequest] = Body(None),
 ):
     """删除项目"""
+    # Phase 10B: 危险操作守卫
+    check_confirm("DELETE_PROJECT", (body or ConfirmRequest()).confirm, (body or ConfirmRequest()).confirm_text)
     try:
         service = ProjectService(db)
         success = service.delete_project(project_id)
@@ -219,9 +223,12 @@ async def update_environment(
 @router.delete("/environments/{env_id}", status_code=204)
 async def delete_environment(
     env_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    body: Optional[ConfirmRequest] = Body(None),
 ):
     """删除环境"""
+    # Phase 10B: 危险操作守卫
+    check_confirm("DELETE_ENVIRONMENT", (body or ConfirmRequest()).confirm, (body or ConfirmRequest()).confirm_text)
     try:
         service = EnvironmentService(db)
         success = service.delete_environment(env_id)

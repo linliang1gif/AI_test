@@ -9,12 +9,15 @@ from pydantic import BaseModel
 from typing import List, Optional
 import asyncio
 import json
+import logging
 import sys
 import tempfile
 import os
 import uuid
 from pathlib import Path
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 # 添加项目路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -30,7 +33,7 @@ try:
     from utils.document_parser import parse_document, parse_document_structured, parse_axure_folder, parse_axure_folder_structured
     DOC_PARSER_AVAILABLE = True
 except ImportError as e:
-    print(f"  文档解析工具导入失败: {e}")
+    logger.info(f"  文档解析工具导入失败: {e}")
     DOC_PARSER_AVAILABLE = False
 
 # 导入知识库检索
@@ -38,7 +41,7 @@ try:
     from knowledge.manual_retriever import retrieve_manual_context, retrieve_for_modules
     KB_AVAILABLE = True
 except ImportError as e:
-    print(f"  知识库检索导入失败: {e}")
+    logger.info(f"  知识库检索导入失败: {e}")
     KB_AVAILABLE = False
 
 # 导入 SVN 工具
@@ -46,7 +49,7 @@ try:
     from utils.svn_utils import svn_downloader
     SVN_AVAILABLE = True
 except ImportError as e:
-    print(f"  SVN 工具导入失败: {e}")
+    logger.info(f"  SVN 工具导入失败: {e}")
     SVN_AVAILABLE = False
 
 router = APIRouter()
@@ -128,7 +131,7 @@ def _parse_ai_testcase_response(response: str) -> list:
             scan_text = response[arr_start + 1:] if arr_start >= 0 else response
             partial = _scan_complete_objects(scan_text)
             if partial:
-                print(f"⚠️ AI 响应被截断，已 fallback 解析出 {len(partial)} 条完整用例")
+                logger.info(f"⚠️ AI 响应被截断，已 fallback 解析出 {len(partial)} 条完整用例")
                 return partial
             raise json.JSONDecodeError("无法解析 AI 响应", response[:200], 0)
 
@@ -233,8 +236,8 @@ async def generate_testcases(request: TestCaseGenerate):
                 ctx = retrieve_manual_context(request.requirement[:500], n_results=3)
                 if ctx:
                     kb_ref = f"\n\n【操作手册参考】:\n{ctx[:3000]}\n"
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.warning("[P1] knowledge base retrieve fallback: %s", _e)
 
         # 构建提示词
         prompt = f"""请为以下需求生成{request.count}个测试用例，返回JSON数组格式：
@@ -303,8 +306,8 @@ async def generate_testcases(request: TestCaseGenerate):
             
         except json.JSONDecodeError as e:
             # JSON 解析失败，返回默认测试用例
-            print(f"JSON 解析失败: {e}")
-            print(f"原始响应: {response[:500]}")
+            logger.info(f"JSON 解析失败: {e}")
+            logger.info(f"原始响应: {response[:500]}")
             
             return {
                 "success": True,
@@ -340,7 +343,7 @@ async def generate_testcases_from_svn(request: SVNTestCaseGenerate):
     
     try:
         # 1. 从 SVN 下载文件
-        print(f"📥 开始从 SVN 下载文件: {request.svn_url}")
+        logger.info(f"📥 开始从 SVN 下载文件: {request.svn_url}")
         success, file_path, error = svn_downloader.download(
             svn_url=request.svn_url,
             username=request.svn_username,
@@ -350,12 +353,12 @@ async def generate_testcases_from_svn(request: SVNTestCaseGenerate):
         if not success:
             raise HTTPException(status_code=400, detail=f"SVN 下载失败: {error}")
         
-        print(f"✅ 文件下载成功: {file_path}")
+        logger.info(f"✅ 文件下载成功: {file_path}")
         
         # 2. 解析文档内容
         try:
             content = parse_document(file_path)
-            print(f"✅ 文档解析成功，内容长度: {len(content)} 字符")
+            logger.info(f"✅ 文档解析成功，内容长度: {len(content)} 字符")
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"文档解析失败: {str(e)}")
         
@@ -387,8 +390,8 @@ async def generate_testcases_from_svn(request: SVNTestCaseGenerate):
                 ctx = retrieve_manual_context(content[:500], n_results=3)
                 if ctx:
                     kb_ref = f"\n\n【操作手册参考】:\n{ctx[:3000]}\n"
-            except Exception:
-                pass
+            except Exception as _e:
+                logger.warning("[P1] knowledge base retrieve fallback: %s", _e)
 
         # 构建提示词
         prompt = f"""请为以下需求文档生成{target_count}个测试用例，返回JSON数组格式：
@@ -436,7 +439,7 @@ async def generate_testcases_from_svn(request: SVNTestCaseGenerate):
 - 测试数据必须是具体示例，不能是泛指"""
         
         # 调用 AI
-        print(f"🤖 开始 AI 生成，目标: {target_count} 个测试用例")
+        logger.info(f"🤖 开始 AI 生成，目标: {target_count} 个测试用例")
         response = await asyncio.to_thread(
             client.generate_text,
             prompt=prompt,
@@ -467,15 +470,15 @@ async def generate_testcases_from_svn(request: SVNTestCaseGenerate):
             if not isinstance(testcases, list):
                 testcases = [testcases]
             
-            print(f"✅ AI 生成成功: {len(testcases)} 个测试用例")
+            logger.info(f"✅ AI 生成成功: {len(testcases)} 个测试用例")
             
             # 4. 清理临时文件
             try:
                 import os
                 os.unlink(file_path)
-                print(f"🗑️  已删除临时文件: {file_path}")
-            except:
-                pass
+                logger.info("🗑️  已删除临时文件: %s", file_path)
+            except Exception as _e:
+                logger.debug("删除临时文件失败 %s: %s", file_path, _e)
             
             return {
                 "success": True,
@@ -487,8 +490,8 @@ async def generate_testcases_from_svn(request: SVNTestCaseGenerate):
             }
             
         except json.JSONDecodeError as e:
-            print(f"JSON 解析失败: {e}")
-            print(f"原始响应: {response[:500]}")
+            logger.info(f"JSON 解析失败: {e}")
+            logger.info(f"原始响应: {response[:500]}")
             
             return {
                 "success": False,
@@ -836,7 +839,7 @@ async def generate_testcases_from_file(
         structured = parse_document_structured(tmp_path)
         raw_text = structured["raw_text"]
         stats = structured["stats"]
-        print(f"📄 文档解析完成: {file.filename}, {stats}")
+        logger.info(f"📄 文档解析完成: {file.filename}, {stats}")
 
         if not raw_text or len(raw_text.strip()) < 10:
             raise HTTPException(status_code=400, detail="文档内容为空或过短，无法生成测试用例")
@@ -889,9 +892,9 @@ async def generate_testcases_from_file(
                 kb_context = retrieve_manual_context(kb_query, n_results=5)
                 if kb_context:
                     kb_hint = f"\n\n【操作手册参考（来自知识库）】:\n{kb_context[:4000]}"
-                    print(f"📚 知识库命中: {len(kb_context)} 字符")
+                    logger.info(f"📚 知识库命中: {len(kb_context)} 字符")
             except Exception as e:
-                print(f"⚠️ 知识库检索异常: {e}")
+                logger.info(f"⚠️ 知识库检索异常: {e}")
 
         prompt = f"""请为以下需求文档生成{count}个功能测试用例，返回JSON数组格式。
 
@@ -943,7 +946,7 @@ async def generate_testcases_from_file(
         client = get_ai_client(use_ollama=use_ollama, use_mock=use_mock, provider=provider)
 
         use_model = model or getattr(client, 'ai_config', {}).get("model", None) or "deepseek-chat"
-        print(f"🤖 AI 生成中，提供商={provider or 'auto'}, 模型={use_model}, 目标: {count} 个测试用例...")
+        logger.info(f"🤖 AI 生成中，提供商={provider or 'auto'}, 模型={use_model}, 目标: {count} 个测试用例...")
         response = await asyncio.to_thread(
             client.generate_text,
             prompt=prompt,
@@ -956,11 +959,11 @@ async def generate_testcases_from_file(
         # 5. 解析 AI 响应
         try:
             testcases = _parse_ai_testcase_response(response)
-            print(f"✅ AI 生成成功: {len(testcases)} 个测试用例")
+            logger.info(f"✅ AI 生成成功: {len(testcases)} 个测试用例")
 
             # 6. 保存到数据库
             saved_ids = _save_testcases_to_db(db, testcases, source="ai_generated")
-            print(f"💾 已保存 {len(saved_ids)} 条用例到数据库")
+            logger.info(f"💾 已保存 {len(saved_ids)} 条用例到数据库")
 
             return {
                 "success": True,
@@ -979,8 +982,8 @@ async def generate_testcases_from_file(
             }
 
         except json.JSONDecodeError as e:
-            print(f"JSON 解析失败: {e}")
-            print(f"原始响应: {response[:500]}")
+            logger.info(f"JSON 解析失败: {e}")
+            logger.info(f"原始响应: {response[:500]}")
             return {
                 "success": False,
                 "error": "AI 响应格式不正确",
@@ -1027,7 +1030,7 @@ async def generate_testcases_from_folder(request: FolderRequest, db: Session = D
         structured = parse_axure_folder_structured(str(folder))
         raw_text = structured["raw_text"]
         stats = structured["stats"]
-        print(f"📂 Axure 文件夹解析完成: {folder.name}, {stats}")
+        logger.info(f"📂 Axure 文件夹解析完成: {folder.name}, {stats}")
 
         if not raw_text or len(raw_text.strip()) < 10:
             raise HTTPException(status_code=400, detail="文件夹内容为空或过短，无法生成测试用例")
@@ -1074,9 +1077,9 @@ async def generate_testcases_from_folder(request: FolderRequest, db: Session = D
                 kb_context = retrieve_manual_context(" ".join(query_parts), n_results=5)
                 if kb_context:
                     kb_hint = f"\n\n【操作手册参考（来自知识库）】:\n{kb_context[:4000]}"
-                    print(f"📚 知识库命中: {len(kb_context)} 字符")
+                    logger.info(f"📚 知识库命中: {len(kb_context)} 字符")
             except Exception as e:
-                print(f"⚠️ 知识库检索异常: {e}")
+                logger.info(f"⚠️ 知识库检索异常: {e}")
 
         prompt = f"""请为以下需求文档生成{request.count}个功能测试用例，返回JSON数组格式。
 
@@ -1128,7 +1131,7 @@ async def generate_testcases_from_folder(request: FolderRequest, db: Session = D
         client = get_ai_client(use_ollama=use_ollama, use_mock=use_mock, provider=request.provider)
 
         use_model = request.model or getattr(client, 'ai_config', {}).get("model", None) or "deepseek-chat"
-        print(f"🤖 AI 生成中，提供商={request.provider or 'auto'}, 模型={use_model}, 目标: {request.count} 个测试用例...")
+        logger.info(f"🤖 AI 生成中，提供商={request.provider or 'auto'}, 模型={use_model}, 目标: {request.count} 个测试用例...")
         response = await asyncio.to_thread(
             client.generate_text,
             prompt=prompt,
@@ -1141,11 +1144,11 @@ async def generate_testcases_from_folder(request: FolderRequest, db: Session = D
         # 5. 解析 AI 响应
         try:
             testcases = _parse_ai_testcase_response(response)
-            print(f"✅ AI 生成成功: {len(testcases)} 个测试用例")
+            logger.info(f"✅ AI 生成成功: {len(testcases)} 个测试用例")
 
             # 6. 保存到数据库
             saved_ids = _save_testcases_to_db(db, testcases, source="ai_generated")
-            print(f"💾 已保存 {len(saved_ids)} 条用例到数据库")
+            logger.info(f"💾 已保存 {len(saved_ids)} 条用例到数据库")
 
             return {
                 "success": True,
@@ -1164,8 +1167,8 @@ async def generate_testcases_from_folder(request: FolderRequest, db: Session = D
             }
 
         except json.JSONDecodeError as e:
-            print(f"JSON 解析失败: {e}")
-            print(f"原始响应: {response[:500]}")
+            logger.info(f"JSON 解析失败: {e}")
+            logger.info(f"原始响应: {response[:500]}")
             return {
                 "success": False,
                 "error": "AI 响应格式不正确",

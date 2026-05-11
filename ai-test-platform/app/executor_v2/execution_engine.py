@@ -4,6 +4,10 @@ Executor V2 - 执行引擎主入口
 编排：TestCaseV2 → HttpRunner → AssertionEngine → ResultWriter
 """
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 import uuid
 import time
 from datetime import datetime
@@ -183,13 +187,13 @@ class ExecutionEngineV2:
         for case in cases:
             result = self.execute_case(case, run_id=run_id)
             results.append(result)
-            print(f"  [{result.status.upper():>6}] {case.title} ({result.duration_ms:.0f}ms)")
+            logger.info(f"  [{result.status.upper():>6}] {case.title} ({result.duration_ms:.0f}ms)")
 
         # 打印汇总
         total = len(results)
         passed = sum(1 for r in results if r.passed)
         failed = total - passed
-        print(f"\n  汇总: {passed}/{total} 通过, {failed} 失败")
+        logger.info(f"\n  汇总: {passed}/{total} 通过, {failed} 失败")
 
         return results
 

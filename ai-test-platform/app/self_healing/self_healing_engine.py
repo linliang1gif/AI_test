@@ -17,6 +17,9 @@ import time
 import subprocess
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 # 知识库（懒加载）
 try:
@@ -56,34 +59,34 @@ class SelfHealingEngine:
         for attempt in range(self.max_retries + 1):
             healing_result['total_attempts'] = attempt + 1
             
-            print(f"\n🔄 执行测试 - 第 {attempt + 1} 次尝试")
+            logger.info(f"\n🔄 执行测试 - 第 {attempt + 1} 次尝试")
             
             # 执行pytest
             test_result = self._run_pytest(test_files, pytest_args)
             
             if test_result['success']:
-                print("✅ 测试执行成功！")
+                logger.info("✅ 测试执行成功！")
                 healing_result['success'] = True
                 healing_result['final_result'] = test_result
                 break
             
             if attempt >= self.max_retries:
-                print(f"❌ 达到最大重试次数 ({self.max_retries})，停止自修复")
+                logger.info(f"❌ 达到最大重试次数 ({self.max_retries})，停止自修复")
                 healing_result['final_result'] = test_result
                 break
             
             # 分析错误并尝试修复
-            print(f"🔍 分析错误并尝试修复...")
+            logger.info(f"🔍 分析错误并尝试修复...")
             
             healing_attempt = self._attempt_healing(test_result, attempt + 1)
             healing_result['healing_attempts'].append(healing_attempt)
             
             if not healing_attempt['fixed']:
-                print(f"❌ 第 {attempt + 1} 次修复失败")
+                logger.info(f"❌ 第 {attempt + 1} 次修复失败")
                 healing_result['final_result'] = test_result
                 break
             
-            print(f"✅ 第 {attempt + 1} 次修复完成，等待 {self.retry_delay} 秒后重试...")
+            logger.info(f"✅ 第 {attempt + 1} 次修复完成，等待 {self.retry_delay} 秒后重试...")
             time.sleep(self.retry_delay)
         
         return healing_result
@@ -140,7 +143,7 @@ class SelfHealingEngine:
         
         try:
             # 1. 分析错误
-            print("  📊 分析测试错误...")
+            logger.info("  📊 分析测试错误...")
             errors = self.error_analyzer.analyze_pytest_output(
                 test_result['stdout'], 
                 test_result['stderr']
@@ -153,7 +156,7 @@ class SelfHealingEngine:
                 return healing_attempt
             
             # 2. 为每个错误生成修复方案
-            print(f"  🔧 为 {len(errors)} 个错误生成修复方案...")
+            logger.info(f"  🔧 为 {len(errors)} 个错误生成修复方案...")
             
             all_fixes_successful = True
             
@@ -163,20 +166,20 @@ class SelfHealingEngine:
                 
                 if not fix_result['success']:
                     all_fixes_successful = False
-                    print(f"    ❌ 修复失败: {fix_result['error']}")
+                    logger.info(f"    ❌ 修复失败: {fix_result['error']}")
                 else:
-                    print(f"    ✅ 修复成功: {fix_result['file_path']}")
+                    logger.info(f"    ✅ 修复成功: {fix_result['file_path']}")
             
             healing_attempt['fixed'] = all_fixes_successful
             
             if all_fixes_successful:
-                print("  🎉 所有错误修复完成")
+                logger.info("  🎉 所有错误修复完成")
             else:
                 healing_attempt['error_message'] = '部分错误修复失败'
             
         except Exception as e:
             healing_attempt['error_message'] = f'修复过程异常: {str(e)}'
-            print(f"  ❌ 修复过程异常: {e}")
+            logger.info(f"  ❌ 修复过程异常: {e}")
         
         # 记录修复历史
         self.healing_history.append(healing_attempt)
@@ -203,8 +206,8 @@ class SelfHealingEngine:
                     patterns = _healing_knowledge.search_fix_pattern(error, top_k=3)
                     if patterns and patterns[0]['similarity'] >= HEALING_THRESHOLD:
                         matched_pattern = patterns[0]
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.debug("[P2] self-healing fallback: %s", _e)
 
             file_path = Path(error.get('file_path', ''))
             if not file_path.exists():
@@ -217,7 +220,7 @@ class SelfHealingEngine:
             # 2. 命中历史修复，直接应用
             if matched_pattern:
                 fixed_code = matched_pattern['fix_pattern']
-                print(f"  ✅ 命中历史修复方案（相似度 {matched_pattern['similarity']:.2f}），跳过AI生成")
+                logger.info(f"  ✅ 命中历史修复方案（相似度 {matched_pattern['similarity']:.2f}），跳过AI生成")
                 fix_result['from_knowledge_base'] = True
                 fix_result['pattern_id'] = matched_pattern['pattern_id']
             else:
@@ -233,8 +236,8 @@ class SelfHealingEngine:
                 if matched_pattern and _healing_knowledge:
                     try:
                         _healing_knowledge.update_pattern_result(matched_pattern['pattern_id'], False)
-                    except Exception:
-                        pass
+                    except Exception as _e:
+                        logger.debug("[P2] self-healing fallback: %s", _e)
                 return fix_result
 
             # 备份原文件
@@ -265,8 +268,8 @@ class SelfHealingEngine:
                             fix_code=fixed_code,
                             success=True
                         )
-                except Exception:
-                    pass
+                except Exception as _e:
+                    logger.debug("[P2] self-healing fallback: %s", _e)
 
         except Exception as e:
             fix_result['error'] = str(e)

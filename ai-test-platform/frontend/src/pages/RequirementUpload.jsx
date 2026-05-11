@@ -105,7 +105,7 @@ export default function RequirementUpload() {
       setPreview(data);
       setSourceType('folder');
       setStep('preview');
-      message.success(`Axure 文件夹解析成功: ${stats.axure_notes || 0} 条注释, ${stats.features || 0} 个功能点`);
+      message.success(`Axure 文件夹解析成功: ${stats.annotations_total || stats.axure_notes || 0} 条注释, ${stats.features || 0} 个功能点`);
     } catch (e) {
       message.error('文件夹解析失败: ' + e.message);
     } finally {

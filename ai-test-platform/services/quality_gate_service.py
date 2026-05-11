@@ -62,8 +62,8 @@ class QualityGateService:
         try:
             raw = json.loads(test_run.summary or "{}") if isinstance(test_run.summary, str) else (test_run.summary or {})
             suite_summary = raw.get("suite_summary", {})
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.warning("[P1] summary json parse: %s", _e)
 
         # If no suite_summary, build minimal one from test_run fields
         if not suite_summary:

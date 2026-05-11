@@ -14,6 +14,9 @@ import time
 import json
 from typing import Dict, List, Any, Optional
 from pathlib import Path
+import logging
+
+logger = logging.getLogger(__name__)
 
 class PipelineOrchestrator:
     """流水线编排器"""
@@ -48,7 +51,7 @@ class PipelineOrchestrator:
             self.report_generator = ReportGenerator()
             
         except ImportError as e:
-            print(f"组件导入失败: {e}")
+            logger.info(f"组件导入失败: {e}")
             # 使用兼容性导入
             self._initialize_components_fallback()
     
@@ -146,8 +149,8 @@ class PipelineOrchestrator:
             'error': None
         }
         
-        print("🚀 开始执行AI测试自动化流水线")
-        print("=" * 60)
+        logger.info("🚀 开始执行AI测试自动化流水线")
+        logger.info("=" * 60)
         
         try:
             # 验证输入配置
@@ -176,17 +179,17 @@ class PipelineOrchestrator:
                     if step['name'] in ['requirement_analysis', 'swagger_parsing']:
                         raise Exception(f"关键步骤失败: {step['name']} - {step_result['error']}")
                     
-                    print(f"⚠️  步骤失败但继续执行: {step['name']}")
+                    logger.info(f"⚠️  步骤失败但继续执行: {step['name']}")
             
             # 收集最终输出
             pipeline_result['final_outputs'] = self._collect_final_outputs()
             pipeline_result['success'] = True
             
-            print("\n🎉 流水线执行完成！")
+            logger.info("\n🎉 流水线执行完成！")
             
         except Exception as e:
             pipeline_result['error'] = str(e)
-            print(f"\n❌ 流水线执行失败: {e}")
+            logger.info(f"\n❌ 流水线执行失败: {e}")
         
         finally:
             pipeline_result['end_time'] = time.time()

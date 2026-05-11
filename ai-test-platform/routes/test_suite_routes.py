@@ -18,12 +18,13 @@ import logging
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database.session import get_db
 from database.models import TestSuite, TestSuiteCase, TestCase, TestRun, RunCase, TestDataBinding
+from backend.danger_guard import check_confirm, ConfirmRequest
 
 logger = logging.getLogger("test_suite_routes")
 
@@ -188,7 +189,11 @@ def update_suite(suite_id: int, req: UpdateSuiteRequest, db: Session = Depends(g
 # ── 5. DELETE /api/v2/test-suites/{suite_id} ──
 
 @router.delete("/{suite_id}")
-def delete_suite(suite_id: int, db: Session = Depends(get_db)):
+def delete_suite(suite_id: int, db: Session = Depends(get_db),
+    body: Optional[ConfirmRequest] = Body(None),
+):
+    # Phase 10B: 危险操作守卫
+    check_confirm("DELETE_TEST_SUITE", (body or ConfirmRequest()).confirm, (body or ConfirmRequest()).confirm_text)
     suite = db.query(TestSuite).filter(TestSuite.id == suite_id, TestSuite.status != "deleted").first()
     if not suite:
         raise HTTPException(404, f"测试集不存在: {suite_id}")

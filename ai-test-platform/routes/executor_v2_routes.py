@@ -16,12 +16,13 @@ Executor V2 路由
 import uuid
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 import sys
 from pathlib import Path
+from backend.danger_guard import check_confirm, ConfirmRequest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.executor_v2.execution_engine import ExecutionEngineV2
@@ -406,8 +407,12 @@ async def clear_auth_token(env_key: str = "default"):
 
 
 @router.delete("/auth/clear-all", summary="清除所有认证Token")
-async def clear_all_auth_tokens():
+async def clear_all_auth_tokens(
+    body: Optional[ConfirmRequest] = Body(None),
+):
     """清除所有环境的 Token"""
+    # Phase 10B: 危险操作守卫
+    check_confirm("CLEAR_ALL_AUTH_TOKENS", (body or ConfirmRequest()).confirm, (body or ConfirmRequest()).confirm_text)
     AuthManager.clear_all()
     return {"success": True, "message": "已清除所有 Token"}
 

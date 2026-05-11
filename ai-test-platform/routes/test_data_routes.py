@@ -4,7 +4,7 @@ P3-2 测试数据管理路由
 10 个端点: 数据集 CRUD + 数据项 CRUD + 绑定 + 查询绑定 + 变量替换预览
 """
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from pydantic import BaseModel, Field
 from typing import Optional, List, Any
 from sqlalchemy.orm import Session
@@ -16,6 +16,7 @@ from services.test_data_service import (
     mask_sensitive, is_sensitive_key, resolve_variables, substitute,
     validate_dataset, execute_cleanup,
 )
+from backend.danger_guard import check_confirm, ConfirmRequest
 
 router = APIRouter(prefix="/api/v2/test-data", tags=["测试数据管理"])
 
@@ -186,7 +187,11 @@ def update_dataset(dataset_id: int, req: DatasetUpdate, db: Session = Depends(ge
 # ── 5. Soft-delete dataset ──────────────────────────────
 
 @router.delete("/datasets/{dataset_id}")
-def delete_dataset(dataset_id: int, db: Session = Depends(get_db)):
+def delete_dataset(dataset_id: int, db: Session = Depends(get_db),
+    body: Optional[ConfirmRequest] = Body(None),
+):
+    # Phase 10B: 危险操作守卫
+    check_confirm("DELETE_DATASET", (body or ConfirmRequest()).confirm, (body or ConfirmRequest()).confirm_text)
     ds = db.query(TestDataset).filter(TestDataset.id == dataset_id).first()
     if not ds:
         raise HTTPException(status_code=404, detail="Dataset not found")

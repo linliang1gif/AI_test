@@ -45,7 +45,14 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Trace-Id"],
     )
+
+    # 3.1 Phase 10A: trace_id middleware
+    # 注意: Starlette 中后注册的 middleware 在外层包裹，所以 TraceId 放在 CORS 之后
+    # 实际处理顺序为 CORS → TraceId → route，保证异常路径上 trace_id 已就绪
+    from backend.trace_middleware import TraceIdMiddleware
+    app.add_middleware(TraceIdMiddleware)
 
     # 4. 全局异常处理
     from backend.exception_handlers import register_exception_handlers
@@ -64,7 +71,7 @@ def create_app() -> FastAPI:
 
     # 8. P2-5: 视觉回归静态文件服务
     visual_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "artifacts", "visual")
-    for sub in ("baselines", "current", "diff"):
+    for sub in ("baselines", "current", "diff", "versions"):
         d = os.path.join(visual_dir, sub)
         os.makedirs(d, exist_ok=True)
     app.mount("/visual", StaticFiles(directory=visual_dir), name="visual")

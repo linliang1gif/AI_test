@@ -5,8 +5,12 @@ P3-5: 智能选测与风险推荐服务
 不依赖 AI Provider，纯规则引擎。
 """
 import json
+import logging
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
+
 from database.models import (
     TestCase, TestRun, RunCase, TestSuite, TestSuiteCase, Defect,
 )
@@ -140,8 +144,8 @@ def _build_case_risk_map(db: Session, project_id=None, days=14):
             s = _safe_json(r.summary)
             if s.get('gate_status') == 'failed':
                 gate_failed_runs.add(r.id)
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("silent error suppressed at %s: %s", __name__, _e)
     case_gate_fail = set()
     for rc in run_cases:
         if rc.run_id in gate_failed_runs and rc.status == 'failed':
@@ -155,8 +159,8 @@ def _build_case_risk_map(db: Session, project_id=None, days=14):
             ds = s.get('data_summary', {})
             if ds and (ds.get('data_validation_errors', 0) > 0 or ds.get('missing_variables', 0) > 0):
                 data_issue_runs.add(r.id)
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("silent error suppressed at %s: %s", __name__, _e)
 
     # ── pre-compute case_in_data_issue_run set ──
     case_in_data_issue_run = set()
@@ -343,8 +347,8 @@ def _build_suite_recommendations(db: Session, case_risk_map: dict,
                 suite_last_status[sid] = r.status
                 if s.get('gate_status') == 'failed':
                     suite_gate_failed.add(sid)
-        except Exception:
-            pass
+        except Exception as _e:
+            logger.debug("silent error suppressed at %s: %s", __name__, _e)
 
     type_priority = {'release': 3, 'smoke': 2, 'regression': 1}
 

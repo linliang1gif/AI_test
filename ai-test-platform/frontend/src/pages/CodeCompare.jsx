@@ -82,10 +82,18 @@ export default function CodeCompare() {
   const [uploading, setUploading] = useState(false);
   const [snapshot, setSnapshot] = useState(null);
   const [codeSource, setCodeSource] = useState('zip'); // 'zip' | 'git'
-  const [gitUrl, setGitUrl] = useState('');
-  const [gitBranch, setGitBranch] = useState('main');
-  const [gitToken, setGitToken] = useState('');
-  const [gitSubDir, setGitSubDir] = useState('');
+  // ── Git 表单字段：从 localStorage 恢复上一次填写 ──
+  const _loadGitForm = () => {
+    try {
+      const cached = localStorage.getItem('code_compare_git_form');
+      return cached ? JSON.parse(cached) : {};
+    } catch (e) { return {}; }
+  };
+  const _gitForm = _loadGitForm();
+  const [gitUrl, setGitUrl] = useState(_gitForm.repo_url || '');
+  const [gitBranch, setGitBranch] = useState(_gitForm.branch || 'main');
+  const [gitToken, setGitToken] = useState(_gitForm.token || '');
+  const [gitSubDir, setGitSubDir] = useState(_gitForm.sub_dir || '');
   const [cloning, setCloning] = useState(false);
 
   // Step 3 states
@@ -182,6 +190,15 @@ export default function CodeCompare() {
       if (data.success) {
         setSnapshot(data.snapshot);
         message.success(`仓库克隆成功: ${data.snapshot.name}`);
+        // 保存上一次的填写到 localStorage（含 Token，方便下次免重填）
+        try {
+          localStorage.setItem('code_compare_git_form', JSON.stringify({
+            repo_url: gitUrl.trim(),
+            branch: gitBranch.trim() || 'main',
+            sub_dir: gitSubDir.trim() || '',
+            token: gitToken.trim() || '',
+          }));
+        } catch (e) { /* localStorage 满 / 禁用时忽略 */ }
       } else {
         message.error(data.detail || '克隆失败');
       }
@@ -720,17 +737,38 @@ export default function CodeCompare() {
                         disabled={cloning}
                       />
                     </div>
-                    <Button
-                      type="primary"
-                      icon={<BranchesOutlined />}
-                      loading={cloning}
-                      onClick={handleCloneRepo}
-                      disabled={!gitUrl.trim()}
-                    >
-                      {cloning ? '正在克隆...' : '开始克隆'}
-                    </Button>
+                    <Space>
+                      <Button
+                        type="primary"
+                        icon={<BranchesOutlined />}
+                        loading={cloning}
+                        onClick={handleCloneRepo}
+                        disabled={!gitUrl.trim()}
+                      >
+                        {cloning ? '正在克隆...' : '开始克隆'}
+                      </Button>
+                      {(_gitForm.repo_url || _gitForm.token) && (
+                        <Button
+                          size="small"
+                          type="link"
+                          danger
+                          onClick={() => {
+                            try { localStorage.removeItem('code_compare_git_form'); } catch (e) {}
+                            setGitUrl(''); setGitBranch('main'); setGitSubDir(''); setGitToken('');
+                            message.success('已清除上次记忆的 Git 配置');
+                          }}
+                        >
+                          清除已记忆
+                        </Button>
+                      )}
+                    </Space>
                     <p style={{ color: '#999', fontSize: 12, marginTop: 8 }}>
                       支持 GitLab / GitHub / Gitee 等，使用 --depth 1 浅克隆，自动忽略 node_modules、.git 等目录。
+                      {(_gitForm.repo_url || _gitForm.token) && (
+                        <span style={{ color: '#52c41a', marginLeft: 8 }}>
+                          已自动填入上次的 Git 配置（含 Token）
+                        </span>
+                      )}
                     </p>
                   </div>
                 ),
