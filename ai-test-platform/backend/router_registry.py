@@ -76,6 +76,9 @@ def register_routers(app):
         ("routes.code_compare_routes",       "router", "需求-代码对比路由"),
         ("routes.test_case_extra_routes",    "router", "TestCase扩展路由(B1)"),
         ("routes.visual_routes",             "router", "视觉测试路由"),
+        ("routes.product_studio_routes",     "router", "AI Product Studio路由"),
+        ("routes.dev_studio_routes",         "router", "AI Dev Studio路由"),
+        ("routes.code_map_routes",           "router", "CodeMap代码扫描路由"),
     ]
     for mod_path, attr, label in _core_routes:
         router = _safe_import(mod_path, attr, label)

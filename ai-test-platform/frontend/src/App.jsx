@@ -29,6 +29,10 @@ import TestSelection from './pages/TestSelection'
 import RequirementUpload from './pages/RequirementUpload'
 import CodeCompare from './pages/CodeCompare'
 import VisualTesting from './pages/VisualTesting'
+import ProductStudio from './pages/ProductStudio'
+import ProductStudioDetail from './pages/ProductStudioDetail'
+import DevStudio from './pages/DevStudio'
+import DevStudioDetail from './pages/DevStudioDetail'
 
 // 健康检查轮询间隔（毫秒）
 const HEALTH_CHECK_INTERVAL = 30000
@@ -236,6 +240,8 @@ function App() {
                 { to: '/quality-dashboard', icon: '■', label: '质量驾驶舱' },
                 { to: '/visual-testing', icon: '■', label: '视觉测试' },
                 { to: '/test-selection', icon: '■', label: '智能选测' },
+                { to: '/product-studio', icon: '■', label: 'AI 产品工坊' },
+                { to: '/dev-studio', icon: '■', label: 'AI 研发工坊' },
               ].map(item => (
                 <NavLink 
                   key={item.to}
@@ -472,6 +478,10 @@ function App() {
               <Route path="/quality-dashboard" element={<QualityDashboard />} />
               <Route path="/visual-testing" element={<VisualTesting />} />
               <Route path="/test-selection" element={<TestSelection />} />
+              <Route path="/product-studio" element={<ProductStudio />} />
+              <Route path="/product-studio/:ideaId" element={<ProductStudioDetail />} />
+              <Route path="/dev-studio" element={<DevStudio />} />
+              <Route path="/dev-studio/:devTaskId" element={<DevStudioDetail />} />
               <Route path="/real-project-onboarding" element={<RealProjectOnboarding />} />
               
               {/* 旧版页面 - 重定向到V2或占位页 */}

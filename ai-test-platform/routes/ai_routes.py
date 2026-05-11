@@ -655,6 +655,16 @@ async def get_ai_config():
                 "id": "case_review",
                 "name": "AI 用例评审",
                 "description": "对测试用例进行质量评审、漏测分析和优化建议"
+            },
+            {
+                "id": "product_studio",
+                "name": "AI Product Studio",
+                "description": "产品方案/PRD/原型/测试策略/验收标准生成"
+            },
+            {
+                "id": "dev_studio",
+                "name": "AI Dev Studio",
+                "description": "开发计划/API设计/数据库设计/影响分析/测试计划生成"
             }
         ]
     }

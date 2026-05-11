@@ -26,6 +26,13 @@ from .models import (
     CodeCompareReport,
     CodeCompareFinding,
     RequirementConfirmQuestion,
+    ProductIdea,
+    ProductStudioRun,
+    ProductArtifact,
+    ProductArtifactTraceLink,
+    DevTask,
+    DevStudioRun,
+    DevArtifact,
 )
 from .repository import (
     BaseRepository,
@@ -73,6 +80,13 @@ __all__ = [
     'CodeCompareReport',
     'CodeCompareFinding',
     'RequirementConfirmQuestion',
+    'ProductIdea',
+    'ProductStudioRun',
+    'ProductArtifact',
+    'ProductArtifactTraceLink',
+    'DevTask',
+    'DevStudioRun',
+    'DevArtifact',
     # Repositories
     'BaseRepository',
     'ProjectRepository',

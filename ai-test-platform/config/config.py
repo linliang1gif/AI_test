@@ -33,6 +33,8 @@ class AIConfig:
     timeout: int = 60
     # Ollama支持的模型列表
     ollama_models: list = None
+    # DeepSeek可用模型列表
+    deepseek_models: list = None
     # 模块级别的 AI 配置
     module_configs: Dict[str, Dict[str, str]] = None
 
@@ -107,6 +109,7 @@ class Config:
             max_tokens=int(os.getenv("AI_MAX_TOKENS", "4000")),
             timeout=int(os.getenv("AI_TIMEOUT", "60")),
             ollama_models=os.getenv("OLLAMA_MODELS", "deepseek-coder,qwen2.5,llama3").split(","),
+            deepseek_models=os.getenv("DEEPSEEK_MODELS", "deepseek-v4-pro,deepseek-v4-flash,deepseek-chat,deepseek-reasoner").split(","),
             module_configs=module_configs
         )
     
@@ -219,11 +222,11 @@ class Config:
         if provider == "ollama":
             return self.ai.ollama_models
         elif provider == "deepseek":
-            return [
+            return self.ai.deepseek_models or [
+                "deepseek-v4-pro",      # V4 Pro: 更强能力, 适合复杂任务
+                "deepseek-v4-flash",    # V4 Flash: 快速高效, 推荐日常使用
                 "deepseek-chat",        # 别名 → deepseek-v4-flash (非思考模式), 将于2026/07/24弃用
                 "deepseek-reasoner",    # 别名 → deepseek-v4-flash (思考模式), 将于2026/07/24弃用
-                "deepseek-v4-flash",    # V4 Flash: 快速高效, 推荐日常使用
-                "deepseek-v4-pro",      # V4 Pro: 更强能力, 适合复杂任务
             ]
         elif provider == "openai":
             return ["glm-4-flash", "glm-4", "glm-3-turbo"]
@@ -245,7 +248,7 @@ class Config:
     
     def get_all_module_configs(self) -> Dict[str, Dict[str, str]]:
         """获取所有模块的 AI 配置"""
-        modules = ["testcase_generation", "script_generation", "swagger_analysis", "test_optimization"]
+        modules = ["testcase_generation", "script_generation", "swagger_analysis", "test_optimization", "product_studio", "dev_studio"]
         return {module: self.get_module_ai_config(module) for module in modules}
     
     def validate(self) -> bool:
