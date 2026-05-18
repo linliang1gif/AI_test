@@ -133,8 +133,12 @@ class TestCase(Base):
     last_run_status = Column(String(50))   # passed/failed/pending
     failure_category = Column(String(50))  # auth_error/env_error/request_error/response_error/assertion_error/dependency_error/timeout_error/unknown_error
     
+    # 迭代关联
+    iteration_id = Column(Integer, ForeignKey('iterations.id'), nullable=True)
+    
     # 关联关系
     run_cases = relationship("RunCase", back_populates="test_case")
+    iteration = relationship("Iteration", back_populates="test_cases")
 
 
 class TestRun(Base):
@@ -164,11 +168,15 @@ class TestRun(Base):
     created_at = Column(DateTime, default=datetime.now)
     created_by = Column(String(100), default='system')
     
+    # 迭代关联
+    iteration_id = Column(Integer, ForeignKey('iterations.id'), nullable=True)
+    
     # 关联关系
     project = relationship("Project", back_populates="test_runs")
     environment = relationship("Environment", back_populates="test_runs")
     run_cases = relationship("RunCase", back_populates="test_run", cascade="all, delete-orphan")
     report = relationship("Report", back_populates="test_run", uselist=False, cascade="all, delete-orphan")
+    iteration = relationship("Iteration", back_populates="test_runs")
 
 
 class RunCase(Base):
@@ -644,7 +652,7 @@ class ProductArtifact(Base):
     artifact_id = Column(String(100), unique=True, nullable=False)
     idea_id = Column(String(100), ForeignKey('product_ideas.idea_id'), nullable=False)
     run_id = Column(String(100), default=None)
-    artifact_type = Column(String(50), nullable=False)  # product_solution/prd/prototype/test_strategy/acceptance_criteria
+    artifact_type = Column(String(50), nullable=False)  # product_solution/prd/prototype/high_fidelity_prototype/test_strategy/acceptance_criteria
     title = Column(String(500), default='')
     content_markdown = Column(Text, default='')
     content_json = Column(JSON, default=None)
@@ -662,8 +670,8 @@ class ProductArtifactTraceLink(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     link_id = Column(String(100), unique=True, nullable=False)
     artifact_id = Column(String(100), ForeignKey('product_artifacts.artifact_id'), nullable=False)
-    source_artifact_type = Column(String(50), nullable=False)  # prd/product_solution/test_strategy/acceptance_criteria
-    target_type = Column(String(50), nullable=False)  # requirement_point/test_case/test_point
+    source_artifact_type = Column(String(50), nullable=False)  # prd/product_solution/requirement_point/test_strategy/acceptance_criteria
+    target_type = Column(String(50), nullable=False)  # requirement_point/test_case/test_point/high_fidelity_prototype
     target_id = Column(String(100), nullable=False)
     generation_run_id = Column(String(100), default=None)
     confidence_score = Column(Float, default=0.0)
@@ -786,3 +794,107 @@ class CodeMapFile(Base):
     created_at = Column(DateTime, default=datetime.now)
 
     snapshot = relationship("CodeMapSnapshot", back_populates="files")
+
+
+# ── Iteration Management (D2-3A) ─────────────────────────────
+
+class Iteration(Base):
+    """迭代/版本管理表"""
+    __tablename__ = 'iterations'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey('projects.id'), nullable=False)
+    name = Column(String(200), nullable=False)
+    code = Column(String(50))
+    version = Column(String(50), default='')
+    description = Column(Text, default='')
+    start_date = Column(String(20))
+    end_date = Column(String(20))
+    planned_start_time = Column(String(30), default='')
+    planned_release_time = Column(String(30), default='')
+    status = Column(String(20), default='planning')  # planning/in_progress/testing/completed/archived
+    owner = Column(String(100), default='')
+    test_owner = Column(String(100), default='')
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    project = relationship("Project")
+    test_cases = relationship("TestCase", back_populates="iteration")
+    test_runs = relationship("TestRun", back_populates="iteration")
+    requirements = relationship("IterationRequirement", back_populates="iteration", cascade="all, delete-orphan")
+    test_points = relationship("IterationTestPoint", back_populates="iteration", cascade="all, delete-orphan")
+    execution_sets = relationship("IterationExecutionSet", back_populates="iteration", cascade="all, delete-orphan")
+
+
+class IterationRequirement(Base):
+    """迭代需求表"""
+    __tablename__ = 'iteration_requirements'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    iteration_id = Column(Integer, ForeignKey('iterations.id'), nullable=False)
+    title = Column(String(500), nullable=False)
+    content = Column(Text, default='')
+    source_type = Column(String(50), default='manual')  # manual/jira/tapd/file
+    source_url = Column(String(1000), default='')
+    ai_summary = Column(Text, default='')
+    risk_level = Column(String(10), default='P1')  # P0/P1/P2
+    confirm_questions = Column(Text, default='')  # JSON array
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    iteration = relationship("Iteration", back_populates="requirements")
+    test_points = relationship("IterationTestPoint", back_populates="requirement")
+
+
+class IterationTestPoint(Base):
+    """迭代测试点表"""
+    __tablename__ = 'iteration_test_points'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    iteration_id = Column(Integer, ForeignKey('iterations.id'), nullable=False)
+    requirement_id = Column(Integer, ForeignKey('iteration_requirements.id'), nullable=True)
+    module_name = Column(String(200), default='')
+    test_point = Column(Text, nullable=False)
+    risk_level = Column(String(10), default='P1')  # P0/P1/P2
+    priority = Column(String(10), default='medium')  # high/medium/low
+    test_type = Column(String(50), default='functional')  # functional/api/performance/security
+    recommended_api = Column(JSON, nullable=True)
+    execution_config = Column(JSON, nullable=True)
+    ai_generated = Column(Boolean, default=False)
+    confirmed = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    iteration = relationship("Iteration", back_populates="test_points")
+    requirement = relationship("IterationRequirement", back_populates="test_points")
+
+
+class IterationExecutionSet(Base):
+    """迭代执行集表"""
+    __tablename__ = 'iteration_execution_sets'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    iteration_id = Column(Integer, ForeignKey('iterations.id'), nullable=False)
+    name = Column(String(200), nullable=False)
+    type = Column(String(50), default='iteration')  # smoke/iteration/regression
+    status = Column(String(50), default='created')  # created/running/completed/failed
+    case_count = Column(Integer, default=0)
+    run_id = Column(String(100), nullable=True)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    iteration = relationship("Iteration", back_populates="execution_sets")
+    set_cases = relationship("IterationExecutionSetCase", back_populates="execution_set", cascade="all, delete-orphan")
+
+
+class IterationExecutionSetCase(Base):
+    """执行集-用例关联表"""
+    __tablename__ = 'iteration_execution_set_cases'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    execution_set_id = Column(Integer, ForeignKey('iteration_execution_sets.id'), nullable=False)
+    test_case_id = Column(String(100), ForeignKey('test_cases.id'), nullable=False)
+    created_at = Column(DateTime, default=datetime.now)
+
+    execution_set = relationship("IterationExecutionSet", back_populates="set_cases")
+    test_case = relationship("TestCase")

@@ -2,8 +2,15 @@
 // 统一管理所有 API 调用
 
 // ==================== API Base URL 配置 ====================
-const API_BASE_URL = '/api'  // 使用代理路径，Vite会自动转发到 http://localhost:8000
-const PILOT_API_BASE_URL = '/api/v2'  // Pilot路由已禁用，统一使用v2路由
+const API_BASE_URL = '/api'  // 使用代理路径，Vite会自动转发到后端
+const PILOT_API_BASE_URL = '/api/v2'  // 统一使用v2路由
+
+// D2-2: 生成前端 trace_id，与后端 X-Trace-Id 全链路打通
+function generateTraceId() {
+  const ts = Date.now().toString(36)
+  const rand = Math.random().toString(36).substring(2, 10)
+  return `fe-${ts}-${rand}`
+}
 
 function getRoleHeader() {
   const role = localStorage.getItem('pilot_role') || 'admin'
@@ -15,6 +22,7 @@ async function request(url, config = {}) {
   const defaultConfig = {
     headers: {
       'Content-Type': 'application/json',
+      'X-Trace-Id': generateTraceId(),
       ...getRoleHeader(),
       ...config.headers,
     },
@@ -61,6 +69,16 @@ export const api = {
   // ==================== 健康检查 ====================
   health: {
     check: () => request('/health'),
+    full: () => request(`${API_BASE_URL}/v2/health/full`),
+  },
+
+  // ==================== Product Studio ====================
+  productStudio: {
+    generatePrototype: (ideaId, data = {}) => request(`${PILOT_API_BASE_URL}/product-studio/ideas/${ideaId}/generate-prototype`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+    getPrototype: (ideaId) => request(`${PILOT_API_BASE_URL}/product-studio/ideas/${ideaId}/prototype`),
   },
 
   // ==================== Dashboard ====================
@@ -185,9 +203,10 @@ export const api = {
       console.warn('[DEPRECATED] api.testCases.create -> use api.v2.testCases.create')
       return request(`${PILOT_API_BASE_URL}/test-cases`, { method: 'POST', body: JSON.stringify(data) })
     },
-    batchDelete: (ids) => request(`${API_BASE_URL}/v2/test-cases/batch-delete`, {
+    // Phase 10B: 后端要求 confirm_text=BULK_DELETE_TEST_CASES；调用方需用弹窗收集后传 extra
+    batchDelete: (ids, extra = {}) => request(`${API_BASE_URL}/v2/test-cases/batch-delete`, {
       method: 'POST',
-      body: JSON.stringify({ ids }),
+      body: JSON.stringify({ ids, ...extra }),
     }),
     generate: (file, options = {}) => {
       const formData = new FormData()
@@ -255,7 +274,8 @@ export const api = {
     }),
   },
 
-  // ==================== 测试数据 ====================
+  // ==================== 测试数据 [LEGACY] ====================
+  // D2-2: 以下接口为 legacy 路径，后续版本将迁移到 v2
   testData: {
     generate: (data) => request(`${API_BASE_URL}/test-data/generate`, {
       method: 'POST',
@@ -301,7 +321,8 @@ export const api = {
     }),
   },
 
-  // ==================== 自动化脚本 ====================
+  // ==================== 自动化脚本 [LEGACY] ====================
+  // D2-2: legacy 路径，功能暂未启用
   automation: {
     getScripts: () => request(`${API_BASE_URL}/automation/scripts`),
     generateScript: (testCaseId) => request(`${API_BASE_URL}/automation/scripts/generate`, {
@@ -350,7 +371,8 @@ export const api = {
     }),
   },
 
-  // ==================== AI 功能 ====================
+  // ==================== AI 功能 [LEGACY] ====================
+  // D2-2: 部分接口为 legacy 路径
   ai: {
     // [Phase A] REMOVED: 后端无 /api/ai/current 路由，无前端页面调用
     getCurrent: () => Promise.reject(new Error('[DEPRECATED] /api/ai/current does not exist')),
@@ -374,7 +396,7 @@ export const api = {
     }),
   },
 
-  // ==================== Agent ====================
+  // ==================== Agent [LEGACY] ====================
   agent: {
     analyze: (data) => request(`${API_BASE_URL}/agent/analyze`, {
       method: 'POST',
@@ -383,7 +405,7 @@ export const api = {
     getHistory: (limit = 10) => request(`${API_BASE_URL}/agent/history?limit=${limit}`),
   },
 
-  // ==================== Pipeline ====================
+  // ==================== Pipeline [LEGACY] ====================
   pipeline: {
     run: (data) => request(`${API_BASE_URL}/pipeline/run`, {
       method: 'POST',
@@ -396,7 +418,7 @@ export const api = {
     }),
   },
 
-  // ==================== 知识库 ====================
+  // ==================== 知识库 [LEGACY] ====================
   knowledge: {
     getStats: () => request(`${API_BASE_URL}/knowledge/stats`),
     searchTestCases: (data) => request(`${API_BASE_URL}/knowledge/testcases/search`, {
@@ -406,7 +428,7 @@ export const api = {
     getCoverage: () => request(`${API_BASE_URL}/knowledge/coverage`),
   },
 
-  // ==================== 任务管理 ====================
+  // ==================== 任务管理 [LEGACY] ====================
   tasks: {
     getStatus: (taskId) => request(`${API_BASE_URL}/tasks/${taskId}/status`),
   },
@@ -427,8 +449,10 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify(data),
       }),
-      delete: (id) => request(`${API_BASE_URL}/v2/projects/${id}`, {
+      // Phase 10B: 后端要求 confirm_text=DELETE_PROJECT
+      delete: (id, extra = {}) => request(`${API_BASE_URL}/v2/projects/${id}`, {
         method: 'DELETE',
+        body: JSON.stringify(extra),
       }),
       getEnvironments: (id) => request(`${API_BASE_URL}/v2/projects/${id}/environments`),
     },
@@ -443,8 +467,10 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify(data),
       }),
-      delete: (id) => request(`${API_BASE_URL}/v2/environments/${id}`, {
+      // Phase 10B: 后端要求 confirm_text=DELETE_ENVIRONMENT
+      delete: (id, extra = {}) => request(`${API_BASE_URL}/v2/environments/${id}`, {
         method: 'DELETE',
+        body: JSON.stringify(extra),
       }),
       getAuthProfile: (id) => request(`${API_BASE_URL}/v2/environments/${id}/auth-profile`),
     },
@@ -508,6 +534,83 @@ export const api = {
 
     dashboard: {
       getSummary: () => request(`${API_BASE_URL}/v2/dashboard/summary`),
+    },
+
+    // ==================== 迭代管理 (D2-3A 迭代中心) ====================
+    iterations: {
+      templates: () => request(`${API_BASE_URL}/v2/iteration-templates`),
+      list: (projectId, params = {}) => {
+        const query = new URLSearchParams(params).toString()
+        return request(`${API_BASE_URL}/v2/projects/${projectId}/iterations${query ? '?' + query : ''}`)
+      },
+      create: (data) => request(`${API_BASE_URL}/v2/iterations`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      createForProject: (projectId, data) => request(`${API_BASE_URL}/v2/projects/${projectId}/iterations`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      get: (iterationId) => request(`${API_BASE_URL}/v2/iterations/${iterationId}`),
+      update: (iterationId, data) => request(`${API_BASE_URL}/v2/iterations/${iterationId}`, {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      }),
+      patch: (iterationId, data) => request(`${API_BASE_URL}/v2/iterations/${iterationId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }),
+      delete: (iterationId, extra = {}) => request(`${API_BASE_URL}/v2/iterations/${iterationId}`, {
+        method: 'DELETE',
+        body: JSON.stringify(extra),
+      }),
+      assignCases: (iterationId, caseIds) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/assign-cases`, {
+        method: 'POST',
+        body: JSON.stringify({ case_ids: caseIds }),
+      }),
+      unassignCases: (iterationId, caseIds) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/unassign-cases`, {
+        method: 'POST',
+        body: JSON.stringify({ case_ids: caseIds }),
+      }),
+      // D2-3A: 需求
+      createRequirement: (iterationId, data) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/requirements`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      listRequirements: (iterationId) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/requirements`),
+      // D2-3A: AI 解析
+      analyzeRequirements: (iterationId) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/ai/analyze-requirements`, {
+        method: 'POST',
+      }),
+      // D2-3A: 测试点
+      generateTestPoints: (iterationId) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/test-points/generate`, {
+        method: 'POST',
+      }),
+      listTestPoints: (iterationId, params = {}) => {
+        const query = new URLSearchParams(params).toString()
+        return request(`${API_BASE_URL}/v2/iterations/${iterationId}/test-points${query ? '?' + query : ''}`)
+      },
+      confirmTestPoint: (testPointId, confirmed = true) => request(`${API_BASE_URL}/v2/iteration-test-points/${testPointId}/confirm`, {
+        method: 'PATCH',
+        body: JSON.stringify({ confirmed }),
+      }),
+      // D2-3A: 测试用例
+      generateTestCases: (iterationId) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/test-cases/generate`, {
+        method: 'POST',
+      }),
+      listTestCases: (iterationId) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/test-cases`),
+      // D2-3A: 执行集
+      createExecutionSet: (iterationId, data = {}) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/execution-sets`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      listExecutionSets: (iterationId) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/execution-sets`),
+      // D2-3A: 执行 + 报告
+      run: (iterationId, data = {}) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/run`, {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+      getReport: (iterationId) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/report`),
     },
 
     swagger: {
@@ -648,6 +751,11 @@ export const api = {
       getAuthStatus: () => request(`${API_BASE_URL}/v2/execute/auth/status`),
       clearToken: (envKey = 'default') => request(`${API_BASE_URL}/v2/execute/auth/clear?env_key=${envKey}`, {
         method: 'DELETE',
+      }),
+      // Phase 10B: 清除所有环境 token，后端要求 confirm_text=CLEAR_ALL_AUTH_TOKENS
+      clearAllAuthTokens: (extra = {}) => request(`${API_BASE_URL}/v2/execute/auth/clear-all`, {
+        method: 'DELETE',
+        body: JSON.stringify(extra),
       }),
       aiGenerateAssertions: (data) => request(`${API_BASE_URL}/v2/execute/ai/generate-assertions`, {
         method: 'POST',
@@ -862,6 +970,7 @@ export const automationAPI = api.automation
 export const testRunsAPI = api.testRuns
 export const reportsAPI = api.reports
 export const systemAPI = api.system
+export const productStudioAPI = api.productStudio
 export const aiAPI = api.ai
 export const agentAPI = api.agent
 export const pipelineAPI = api.pipeline
@@ -878,4 +987,15 @@ export const VISUAL_DANGER = Object.freeze({
   ROLLBACK_BASELINE: 'ROLLBACK_BASELINE',
   DELETE_DEAD_LETTER: 'DELETE_DEAD_LETTER',
   TEST_WEBHOOK: 'TEST_WEBHOOK',
+})
+
+// Phase 10B: 全局危险操作常量（非 visual 模块，与后端 check_confirm 严格一致）
+export const DANGER = Object.freeze({
+  DELETE_TEST_SUITE: 'DELETE_TEST_SUITE',
+  DELETE_PROJECT: 'DELETE_PROJECT',
+  DELETE_ENVIRONMENT: 'DELETE_ENVIRONMENT',
+  DELETE_DATASET: 'DELETE_DATASET',
+  BULK_DELETE_TEST_CASES: 'BULK_DELETE_TEST_CASES',
+  CLEAR_ALL_AUTH_TOKENS: 'CLEAR_ALL_AUTH_TOKENS',
+  DELETE_ITERATION: 'DELETE_ITERATION',
 })

@@ -79,6 +79,8 @@ def register_routers(app):
         ("routes.product_studio_routes",     "router", "AI Product Studio路由"),
         ("routes.dev_studio_routes",         "router", "AI Dev Studio路由"),
         ("routes.code_map_routes",           "router", "CodeMap代码扫描路由"),
+        ("routes.iteration_routes",          "router", "迭代管理路由"),
+        ("routes.iteration_center_routes",   "router", "迭代中心D2-3A路由"),
     ]
     for mod_path, attr, label in _core_routes:
         router = _safe_import(mod_path, attr, label)

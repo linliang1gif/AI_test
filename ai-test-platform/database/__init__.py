@@ -33,6 +33,11 @@ from .models import (
     DevTask,
     DevStudioRun,
     DevArtifact,
+    Iteration,
+    IterationRequirement,
+    IterationTestPoint,
+    IterationExecutionSet,
+    IterationExecutionSetCase,
 )
 from .repository import (
     BaseRepository,
@@ -43,13 +48,15 @@ from .repository import (
     RunCaseRepository,
     ReportRepository,
     HealingRecordRepository,
+    IterationRepository,
     get_project_repo,
     get_environment_repo,
     get_test_case_repo,
     get_test_run_repo,
     get_run_case_repo,
     get_report_repo,
-    get_healing_record_repo
+    get_healing_record_repo,
+    get_iteration_repo,
 )
 
 __all__ = [
@@ -87,6 +94,11 @@ __all__ = [
     'DevTask',
     'DevStudioRun',
     'DevArtifact',
+    'Iteration',
+    'IterationRequirement',
+    'IterationTestPoint',
+    'IterationExecutionSet',
+    'IterationExecutionSetCase',
     # Repositories
     'BaseRepository',
     'ProjectRepository',
@@ -102,5 +114,7 @@ __all__ = [
     'get_test_run_repo',
     'get_run_case_repo',
     'get_report_repo',
-    'get_healing_record_repo'
+    'get_healing_record_repo',
+    'IterationRepository',
+    'get_iteration_repo',
 ]

@@ -263,3 +263,25 @@ def get_report_repo(db: Session) -> ReportRepository:
 def get_healing_record_repo(db: Session) -> HealingRecordRepository:
     from .models import HealingRecord
     return HealingRecordRepository(HealingRecord, db)
+
+
+class IterationRepository(BaseRepository):
+    """迭代Repository"""
+
+    def get_by_project(self, project_id: int) -> List:
+        """获取项目的所有迭代"""
+        return self.db.query(self.model).filter(
+            self.model.project_id == project_id
+        ).order_by(self.model.created_at.desc()).all()
+
+    def get_by_project_and_status(self, project_id: int, status: str) -> List:
+        """获取项目指定状态的迭代"""
+        return self.db.query(self.model).filter(
+            self.model.project_id == project_id,
+            self.model.status == status,
+        ).order_by(self.model.created_at.desc()).all()
+
+
+def get_iteration_repo(db: Session) -> IterationRepository:
+    from .models import Iteration
+    return IterationRepository(Iteration, db)

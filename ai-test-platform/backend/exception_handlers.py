@@ -1,24 +1,24 @@
 """
-P2-2 / Phase 10A 统一异常处理
-- 全局 HTTPException handler（业务异常透传）
-- 通用 Exception handler（未知异常 → INTERNAL_ERROR 结构）
+P2-2 / Phase 10A / D2-2 统一异常处理
+- 全局 HTTPException handler → 标准化结构
+- 通用 Exception handler → INTERNAL_ERROR 结构
 - 全面使用 services.sanitize 做异常消息/路径/SQL/Traceback 脱敏
 - 接入 trace_id：响应体含 trace_id，日志含 trace_id
 
-错误结构（generic）：
+D2-2 标准错误结构（所有异常统一）：
 {
-  "code": "INTERNAL_ERROR",
-  "message": "系统内部错误，请查看后端日志",
-  "trace_id": "..."
+  "code": "ERROR_CODE",
+  "message": "用户可理解的错误说明",
+  "trace_id": "当前请求追踪ID",
+  "details": {},
+  "detail": "..."  // 向后兼容字段，值同 message
 }
-
-HTTPException 结构（保持向后兼容）：
-{ "detail": ... , "trace_id": "..." }
 """
 import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.exceptions import RequestValidationError
 
 from services.sanitize import (
     sanitize_exception_message,
@@ -32,6 +32,19 @@ logger = logging.getLogger("exception_handler")
 INTERNAL_ERROR_CODE = "INTERNAL_ERROR"
 INTERNAL_ERROR_MESSAGE = "系统内部错误，请查看后端日志"
 
+# HTTP 状态码 → 错误码映射
+_STATUS_CODE_MAP = {
+    400: "BAD_REQUEST",
+    401: "UNAUTHORIZED",
+    403: "FORBIDDEN",
+    404: "NOT_FOUND",
+    405: "METHOD_NOT_ALLOWED",
+    409: "CONFLICT",
+    422: "VALIDATION_ERROR",
+    429: "RATE_LIMITED",
+    503: "SERVICE_UNAVAILABLE",
+}
+
 
 def register_exception_handlers(app: FastAPI):
     """注册全局异常处理器"""
@@ -39,18 +52,62 @@ def register_exception_handlers(app: FastAPI):
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         tid = current_trace_id()
-        # 业务异常：保持原始 detail 结构以兼容前端 / 现有测试
-        # 同时添加 trace_id 让客户端能定位
-        detail = exc.detail
-        if isinstance(detail, (dict, list)):
-            content = {"detail": sanitize_value(detail), "trace_id": tid}
-        else:
+        detail_raw = exc.detail
+        error_code = _STATUS_CODE_MAP.get(exc.status_code, f"HTTP_{exc.status_code}")
+
+        if isinstance(detail_raw, dict):
+            # 已经是结构化 detail（如 danger_guard 返回的）
+            sanitized = sanitize_value(detail_raw)
+            message = sanitized.get("message") or sanitized.get("detail") or str(sanitized)
             content = {
-                "detail": sanitize_exception_message(str(detail)) if detail else "",
+                "code": sanitized.get("code", error_code),
+                "message": message,
                 "trace_id": tid,
+                "details": {k: v for k, v in sanitized.items() if k not in ("code", "message", "detail", "trace_id")},
+                "detail": message,  # 向后兼容
+            }
+        elif isinstance(detail_raw, list):
+            content = {
+                "code": error_code,
+                "message": str(detail_raw),
+                "trace_id": tid,
+                "details": {"items": sanitize_value(detail_raw)},
+                "detail": str(detail_raw),
+            }
+        else:
+            message = sanitize_exception_message(str(detail_raw)) if detail_raw else ""
+            content = {
+                "code": error_code,
+                "message": message,
+                "trace_id": tid,
+                "details": {},
+                "detail": message,  # 向后兼容
             }
         headers = {"X-Trace-Id": tid}
         return JSONResponse(status_code=exc.status_code, content=content, headers=headers)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        tid = current_trace_id()
+        errors = exc.errors()
+        # 构建用户友好的摘要消息
+        field_errors = []
+        for err in errors:
+            loc = " -> ".join(str(l) for l in err.get("loc", []))
+            msg = err.get("msg", "")
+            field_errors.append(f"{loc}: {msg}" if loc else msg)
+        message = "; ".join(field_errors[:5])  # 最多展示 5 个字段错误
+        if len(field_errors) > 5:
+            message += f" (及其他 {len(field_errors) - 5} 个错误)"
+        content = {
+            "code": "VALIDATION_ERROR",
+            "message": message or "请求参数验证失败",
+            "trace_id": tid,
+            "details": {"errors": sanitize_value(errors)},
+            "detail": message or "请求参数验证失败",
+        }
+        headers = {"X-Trace-Id": tid}
+        return JSONResponse(status_code=422, content=content, headers=headers)
 
     @app.exception_handler(Exception)
     async def generic_exception_handler(request: Request, exc: Exception):
@@ -69,6 +126,7 @@ def register_exception_handlers(app: FastAPI):
             "code": INTERNAL_ERROR_CODE,
             "message": INTERNAL_ERROR_MESSAGE,
             "trace_id": tid,
+            "details": {},
         }
         headers = {"X-Trace-Id": tid}
         return JSONResponse(status_code=500, content=content, headers=headers)

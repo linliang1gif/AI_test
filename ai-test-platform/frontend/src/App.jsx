@@ -33,6 +33,9 @@ import ProductStudio from './pages/ProductStudio'
 import ProductStudioDetail from './pages/ProductStudioDetail'
 import DevStudio from './pages/DevStudio'
 import DevStudioDetail from './pages/DevStudioDetail'
+import PlatformHealth from './pages/PlatformHealth'
+import IterationList from './pages/IterationList'
+import IterationDetail from './pages/IterationDetail'
 
 // 健康检查轮询间隔（毫秒）
 const HEALTH_CHECK_INTERVAL = 30000
@@ -231,17 +234,14 @@ function App() {
               {expandedSections.projects && [
                 { to: '/dashboard', icon: '■', label: '仪表盘' },
                 { to: '/projects-v2', icon: '■', label: '项目列表' },
+                { to: '/product-studio', icon: '■', label: 'AI需求生成' },
+                { to: '/dev-studio', icon: '■', label: 'AI研发工坊' },
                 { to: '/test-cases', icon: '■', label: '测试用例' },
-                { to: '/requirement-upload', icon: '■', label: '需求生成用例' },
-                { to: '/code-compare', icon: '■', label: '需求-代码对比' },
                 { to: '/test-suites', icon: '■', label: '测试集管理' },
                 { to: '/test-data', icon: '■', label: '测试数据' },
                 { to: '/defects', icon: '■', label: '缺陷管理' },
                 { to: '/quality-dashboard', icon: '■', label: '质量驾驶舱' },
-                { to: '/visual-testing', icon: '■', label: '视觉测试' },
-                { to: '/test-selection', icon: '■', label: '智能选测' },
-                { to: '/product-studio', icon: '■', label: 'AI 产品工坊' },
-                { to: '/dev-studio', icon: '■', label: 'AI 研发工坊' },
+                { to: '/iterations', icon: '■', label: '迭代中心' },
               ].map(item => (
                 <NavLink 
                   key={item.to}
@@ -272,6 +272,8 @@ function App() {
               {expandedSections.development && [
                 { to: '/swagger-workbench', icon: '■', label: 'Swagger接入' },
                 { to: '/api-specs', icon: '■', label: 'API规范' },
+                { to: '/requirement-upload', icon: '■', label: '需求生成用例' },
+                { to: '/code-compare', icon: '■', label: '需求-代码对比' },
               ].map(item => (
                 <NavLink 
                   key={item.to}
@@ -334,6 +336,7 @@ function App() {
               )}
               {expandedSections.config && [
                 { to: '/ai-config', icon: '■', label: 'AI 模型配置' },
+                { to: '/platform-health', icon: '■', label: '平台健康检查' },
               ].map(item => (
                 <NavLink 
                   key={item.to}
@@ -483,6 +486,9 @@ function App() {
               <Route path="/dev-studio" element={<DevStudio />} />
               <Route path="/dev-studio/:devTaskId" element={<DevStudioDetail />} />
               <Route path="/real-project-onboarding" element={<RealProjectOnboarding />} />
+              <Route path="/platform-health" element={<PlatformHealth />} />
+              <Route path="/iterations" element={<IterationList />} />
+              <Route path="/iterations/:id" element={<IterationDetail />} />
               
               {/* 旧版页面 - 重定向到V2或占位页 */}
               <Route path="/projects" element={<Navigate to="/projects-v2" replace />} />
