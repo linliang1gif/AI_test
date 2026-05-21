@@ -654,20 +654,29 @@ def run_iteration(
 ):
     """执行迭代测试集 — 复用现有 ExecutionEngineV2 真实执行"""
     it = _get_iter_or_404(db, iteration_id)
-    environment_id, base_url = _resolve_iteration_environment(db, it, body)
+    environment_id = None
+    base_url = None
+    if (body.base_url or "").strip():
+        environment_id, base_url = _resolve_iteration_environment(db, it, body)
 
     # Resolve execution set
     es = None
     if body.execution_set_id:
         es = db.query(IterationExecutionSet).filter(
             IterationExecutionSet.id == body.execution_set_id,
-            IterationExecutionSet.iteration_id == iteration_id,
         ).first()
         if not es:
             _raise_api_error(
                 404,
                 "EXECUTION_SET_NOT_FOUND",
-                "执行集不存在或不属于该迭代",
+                "执行集不存在",
+                {"execution_set_id": body.execution_set_id},
+            )
+        if es.iteration_id != iteration_id:
+            _raise_api_error(
+                400,
+                "EXECUTION_SET_ITERATION_MISMATCH",
+                "执行集不属于当前迭代",
                 {"iteration_id": iteration_id, "execution_set_id": body.execution_set_id},
             )
     else:
@@ -712,6 +721,8 @@ def run_iteration(
             {"execution_set_id": es.id, "missing_case_ids": missing_ids[:20]},
         )
     _validate_execution_cases(cases)
+    if base_url is None:
+        environment_id, base_url = _resolve_iteration_environment(db, it, body)
 
     from services.batch_execution_service import BatchExecutionService
 
@@ -848,6 +859,50 @@ def get_iteration_report(iteration_id: int, db: Session = Depends(get_db)):
         total_cases = 0
     pass_rate = round(passed_cases / executed_cases * 100, 1) if executed_cases > 0 else 0.0
 
+    if not latest_run_id or executed_cases == 0:
+        exec_sets = db.query(IterationExecutionSet).filter(
+            IterationExecutionSet.iteration_id == iteration_id
+        ).order_by(IterationExecutionSet.created_at.desc()).all()
+        reqs = db.query(IterationRequirement).filter(
+            IterationRequirement.iteration_id == iteration_id
+        ).all()
+        return {
+            "data_source": "real_run_case",
+            "empty": True,
+            "message": "暂无真实执行结果，请先创建执行集并执行测试",
+            "latest_run_id": latest_run_id,
+            "latest_execution_set_id": latest_execution_set_id,
+            "generated_at": datetime.now().isoformat(),
+            "has_real_result": False,
+            "total_cases": 0,
+            "executed_cases": 0,
+            "passed_cases": 0,
+            "failed_cases": 0,
+            "error_cases": 0,
+            "skipped_cases": 0,
+            "no_assertion_cases": 0,
+            "pass_rate": 0,
+            "failure_categories": {},
+            "risk_summary": {},
+            "release_recommendation": "block",
+            "release_reason": "暂无真实执行结果，请先创建执行集并执行测试",
+            "iteration": _iter_dict(it),
+            "stats": {
+                "total_cases": 0,
+                "executed_cases": 0,
+                "passed_cases": 0,
+                "failed_cases": 0,
+                "error_cases": 0,
+                "skipped_cases": 0,
+                "no_assertion_cases": 0,
+                "pass_rate": 0,
+            },
+            "runs": run_summaries,
+            "execution_sets": [_es_dict(es) for es in exec_sets],
+            "requirement_count": len(reqs),
+            "requirements": [{"id": r.id, "title": r.title, "risk_level": r.risk_level} for r in reqs],
+        }
+
     # Failure categories from RunCase
     failure_categories = {}
     for rc in run_cases:
@@ -879,9 +934,9 @@ def get_iteration_report(iteration_id: int, db: Session = Depends(get_db)):
     }
 
     # Release recommendation
-    if not latest_run_id or executed_cases == 0:
+    if latest_execution_set and latest_execution_set.status == "error":
         release_recommendation = "block"
-        rec_reason = "暂无真实执行结果"
+        rec_reason = "执行集状态为 error，请先修复执行环境或用例参数"
     elif error_cases > 0:
         release_recommendation = "block"
         rec_reason = f"存在 {error_cases} 个执行错误，请先配置测试环境或检查用例执行参数"
@@ -909,11 +964,12 @@ def get_iteration_report(iteration_id: int, db: Session = Depends(get_db)):
 
     return {
         "data_source": "real_run_case",
+        "empty": False,
+        "message": "",
         "latest_run_id": latest_run_id,
         "latest_execution_set_id": latest_execution_set_id,
         "generated_at": datetime.now().isoformat(),
         "has_real_result": bool(latest_run_id and executed_cases > 0),
-        "empty_message": "" if latest_run_id else "暂无真实执行结果",
         "total_cases": total_cases,
         "executed_cases": executed_cases,
         "passed_cases": passed_cases,

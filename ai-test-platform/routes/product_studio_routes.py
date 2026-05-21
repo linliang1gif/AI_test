@@ -93,7 +93,20 @@ def generate_prd(idea_id: str, req: GenerateRequest = GenerateRequest(), db: Ses
 
 @router.post("/ideas/{idea_id}/generate-prototype")
 def generate_prototype(idea_id: str, req: GenerateRequest = GenerateRequest(), db: Session = Depends(get_db)):
-    return _do_generate(db, idea_id, "prototype", req)
+    svc = ProductStudioService(db)
+    try:
+        return svc.generate_high_fidelity_prototype(idea_id, provider=req.provider, model=req.model)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/ideas/{idea_id}/prototype")
+def get_high_fidelity_prototype(idea_id: str, db: Session = Depends(get_db)):
+    svc = ProductStudioService(db)
+    try:
+        return svc.get_high_fidelity_prototype(idea_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.post("/ideas/{idea_id}/generate-test-strategy")

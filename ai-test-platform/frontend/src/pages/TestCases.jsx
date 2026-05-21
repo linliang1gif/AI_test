@@ -1,7 +1,8 @@
 ﻿import { useState, useEffect, useMemo } from 'react'
 import { CaseActionToolbar, CaseMetricsPanel, CaseTypeTabs, CaseListTable, CaseDetailDialog, PerfConfigDialog, PerfResultDialog, CaseImportDialog, AiReviewDialog } from '../components/testcases'
 import { useNavigate } from 'react-router-dom'
-import api from '../services/api'
+import api, { DANGER } from '../services/api'
+import DangerConfirmDialog from '../components/common/DangerConfirmDialog'
 import SVNInput from '../components/SVNInput'
 
 const EXECUTION_ENV_STORAGE_KEY = 'ai_test_selected_execution_environment_id'
@@ -65,6 +66,7 @@ export default function TestCases() {
   const [sourceFilter, setSourceFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
   const PAGE_SIZE = 20
+  const [serverTotal, setServerTotal] = useState(0)
   const [projects, setProjects] = useState([])
   const [selectedProjectId, setSelectedProjectId] = useState('')
   const [selectedTestCase, setSelectedTestCase] = useState(null)
@@ -125,6 +127,11 @@ export default function TestCases() {
   const [healPreviews, setHealPreviews] = useState({}) // { case_id: { before, after, changes, ... } }
   const [showHealDialog, setShowHealDialog] = useState(false)
   const [healDialogCase, setHealDialogCase] = useState(null) // 当前预览的 case result
+  // Iteration filter
+  const [iterationList, setIterationList] = useState([])
+  const [selectedIterationId, setSelectedIterationId] = useState('')
+  const [showAssignIterDialog, setShowAssignIterDialog] = useState(false)
+  const [assignIterTargetId, setAssignIterTargetId] = useState('')
 
   useEffect(() => {
     loadProjects()
@@ -145,12 +152,14 @@ export default function TestCases() {
     } catch { setCoverage(null) }
   }
 
-  const loadTestCases = async (projectId) => {
+  const loadTestCases = async (projectId, opts = {}) => {
     setLoading(true)
     try {
       const params = { limit: 5000 }
       const pid = projectId !== undefined ? projectId : selectedProjectId
       if (pid) params.project_id = pid
+      if (opts.keyword) params.keyword = opts.keyword
+      if (opts.iteration_id) params.iteration_id = opts.iteration_id
 
       const data = await api.v2.testCases.getAll(params)
       const cases = (data.test_cases || []).map(tc => ({
@@ -159,6 +168,7 @@ export default function TestCases() {
         type: tc.source === 'swagger' ? 'API测试' : tc.type || '功能测试'
       }))
       setTestCases(cases)
+      setServerTotal(data.total || cases.length)
     } catch (error) {
       console.error('加载测试用例失败:', error)
     } finally {
@@ -178,6 +188,7 @@ export default function TestCases() {
   const handleProjectChange = (pid) => {
     setSelectedProjectId(pid)
     loadTestCases(pid)
+    setSelectedIterationId('')
     // auto-select this project's first environment
     if (pid) {
       const projEnvs = environments.filter(e => String(e.project_id) === String(pid))
@@ -187,8 +198,28 @@ export default function TestCases() {
       }
       // check login session
       api.v2.ui.getLoginSession(pid).then(s => { setLoginSession(s); if (s?.has_session) setUseSession(true) }).catch(() => setLoginSession(null))
+      // load iterations for the project
+      api.v2.iterations.list(pid).then(d => setIterationList(d.iterations || [])).catch(() => setIterationList([]))
     } else {
       setLoginSession(null); setUseSession(false)
+      setIterationList([])
+    }
+  }
+
+  const handleIterationFilterChange = (iterId) => {
+    setSelectedIterationId(iterId)
+    setCurrentPage(1)
+  }
+
+  const handleBatchAssignIteration = async () => {
+    if (!assignIterTargetId || selectedIds.length === 0) return
+    try {
+      await api.v2.iterations.assignCases(assignIterTargetId, selectedIds)
+      setShowAssignIterDialog(false)
+      setAssignIterTargetId('')
+      loadTestCases()
+    } catch (err) {
+      alert(`分配失败: ${err.message}`)
     }
   }
 
@@ -744,6 +775,14 @@ export default function TestCases() {
     if (sourceFilter === 'functional' && (isApiSource || isWebUi)) return false
     if (sourceFilter === 'api' && !isApiSource) return false
     if (sourceFilter === 'web_ui' && !isWebUi) return false
+    // 迭代筛选
+    if (selectedIterationId) {
+      if (selectedIterationId === '__none__') {
+        if (tc.iteration_id) return false
+      } else {
+        if (String(tc.iteration_id) !== String(selectedIterationId)) return false
+      }
+    }
     // 搜索筛选
     if (searchQuery) {
       const q = searchQuery.toLowerCase()
@@ -757,11 +796,15 @@ export default function TestCases() {
     ? testCases.filter(isPetStoreSampleCase).length
     : 0
 
+  // 全选行为：仅操作"当前分页可见"的用例，跨页已选中的不会被丢弃
   const handleSelectAll = (e) => {
+    const pageIds = pagedCases.map(tc => tc.id)
     if (e.target.checked) {
-      setSelectedIds(filteredTestCases.map(tc => tc.id))
+      // 追加当前页 ID（去重）
+      setSelectedIds(prev => Array.from(new Set([...prev, ...pageIds])))
     } else {
-      setSelectedIds([])
+      // 仅移除当前页 ID，保留其他页已选
+      setSelectedIds(prev => prev.filter(id => !pageIds.includes(id)))
     }
   }
 
@@ -773,29 +816,32 @@ export default function TestCases() {
     )
   }
 
-  const handleBatchDelete = async () => {
+  // Phase 10B: 批量删除改为 DangerConfirmDialog
+  const [showBatchDeleteDialog, setShowBatchDeleteDialog] = useState(false)
+
+  const handleBatchDelete = () => {
     if (selectedIds.length === 0) {
       alert('请先选择要删除的测试用例')
       return
     }
+    setShowBatchDeleteDialog(true)
+  }
 
-    if (!window.confirm(`确定要删除选中的 ${selectedIds.length} 个测试用例吗?`)) {
-      return
-    }
-
+  const doBatchDelete = async () => {
     setIsDeleting(true)
     try {
-      const result = await api.testCases.batchDelete(selectedIds)
-      
+      const result = await api.testCases.batchDelete(selectedIds, {
+        confirm: true,
+        confirm_text: DANGER.BULK_DELETE_TEST_CASES,
+      })
       if (result.success) {
         alert(`成功删除 ${result.deleted_count} 个测试用例`)
         setTestCases(prev => prev.filter(tc => !selectedIds.includes(tc.id)))
         setSelectedIds([])
+        setShowBatchDeleteDialog(false)
       } else {
-        alert('删除失败: ' + result.error)
+        throw new Error(result.error || '删除失败')
       }
-    } catch (error) {
-      alert('删除失败: ' + error.message)
     } finally {
       setIsDeleting(false)
     }
@@ -1365,13 +1411,36 @@ export default function TestCases() {
             </div>
           )}
 
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1) }}
-            placeholder="搜索测试用例..."
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+          <div className="flex gap-2 items-center">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1) }}
+              placeholder="搜索测试用例..."
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            {iterationList.length > 0 && (
+              <select
+                value={selectedIterationId}
+                onChange={e => handleIterationFilterChange(e.target.value)}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">全部迭代</option>
+                <option value="__none__">未分配迭代</option>
+                {iterationList.map(it => (
+                  <option key={it.id} value={it.id}>{it.name}{it.code ? ` (${it.code})` : ''}</option>
+                ))}
+              </select>
+            )}
+            {selectedIds.length > 0 && iterationList.length > 0 && (
+              <button
+                onClick={() => { setAssignIterTargetId(''); setShowAssignIterDialog(true) }}
+                className="px-3 py-2 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-sm hover:bg-indigo-100 whitespace-nowrap"
+              >
+                分配迭代 ({selectedIds.length})
+              </button>
+            )}
+          </div>
 
           {/* Phase 16: 推荐测试集快捷按钮（仅接口测试 tab） */}
           {sourceFilter === 'api' && <div className="flex flex-wrap gap-2 items-center">
@@ -2536,6 +2605,44 @@ export default function TestCases() {
               <button onClick={() => setShowSuitePickerDialog(false)} className="px-4 py-2 border rounded-lg text-sm">取消</button>
               <button onClick={handleConfirmAddToSuite} disabled={!selectedSuiteId}
                 className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50">添加</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Phase 10B: 批量删除确认弹窗 */}
+      <DangerConfirmDialog
+        open={showBatchDeleteDialog}
+        title="批量删除测试用例"
+        description={`将永久删除选中的 ${selectedIds.length} 个测试用例，相关执行记录、步骤数据将被连带清理。此操作不可恢复。`}
+        confirmText={DANGER.BULK_DELETE_TEST_CASES}
+        confirmLabel="删除"
+        loading={isDeleting}
+        onConfirm={doBatchDelete}
+        onClose={() => setShowBatchDeleteDialog(false)}
+      />
+
+      {/* 分配迭代弹窗 */}
+      {showAssignIterDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 w-[420px] shadow-2xl">
+            <h2 className="text-lg font-bold mb-4">分配到迭代</h2>
+            <p className="text-sm text-slate-500 mb-3">将选中的 {selectedIds.length} 条用例分配到迭代</p>
+            {iterationList.length === 0 ? (
+              <p className="text-sm text-slate-400 py-4 text-center">当前项目没有迭代，请先在项目详情→迭代管理中创建</p>
+            ) : (
+              <select value={assignIterTargetId} onChange={e => setAssignIterTargetId(e.target.value)}
+                className="w-full border rounded-lg px-3 py-2 text-sm mb-4">
+                <option value="">-- 请选择迭代 --</option>
+                {iterationList.map(it => (
+                  <option key={it.id} value={it.id}>{it.name}{it.code ? ` (${it.code})` : ''} - {it.status === 'in_progress' ? '进行中' : it.status === 'planning' ? '规划中' : it.status}</option>
+                ))}
+              </select>
+            )}
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowAssignIterDialog(false)} className="px-4 py-2 border rounded-lg text-sm">取消</button>
+              <button onClick={handleBatchAssignIteration} disabled={!assignIterTargetId}
+                className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-50">分配</button>
             </div>
           </div>
         </div>

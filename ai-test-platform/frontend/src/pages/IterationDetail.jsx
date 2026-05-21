@@ -420,15 +420,15 @@ export default function IterationDetail() {
                   </div>
                 </div>
 
-                {report.has_real_result === false && (
+                {(report.empty === true || report.has_real_result === false) && (
                   <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm text-slate-600">
-                    暂无真实执行结果
+                    {report.message || '暂无真实执行结果，请先创建执行集并执行测试。'}
                   </div>
                 )}
 
                 {(report.error_cases || report.stats?.error_cases || 0) > 0 && (
                   <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
-                    请先配置测试环境或检查用例执行参数
+                    执行失败：请先配置测试环境或检查用例请求参数。
                   </div>
                 )}
 
@@ -464,7 +464,7 @@ export default function IterationDetail() {
                     <div className="bg-green-50 rounded p-3"><div className="text-xl font-bold text-green-600">{report.stats?.passed_cases ?? 0}</div><div className="text-xs text-slate-500">通过</div></div>
                     <div className="bg-red-50 rounded p-3"><div className="text-xl font-bold text-red-600">{report.stats?.failed_cases ?? 0}</div><div className="text-xs text-slate-500">失败</div></div>
                     <div className="bg-amber-50 rounded p-3"><div className="text-xl font-bold text-amber-600">{report.stats?.error_cases ?? 0}</div><div className="text-xs text-slate-500">错误</div></div>
-                    <div className="bg-indigo-50 rounded p-3"><div className="text-xl font-bold text-indigo-600">{report.stats?.pass_rate ?? 0}%</div><div className="text-xs text-slate-500">通过率</div></div>
+                    <div className="bg-indigo-50 rounded p-3"><div className="text-xl font-bold text-indigo-600">{report.stats?.pass_rate ?? report.pass_rate ?? 0}%</div><div className="text-xs text-slate-500">通过率</div></div>
                   </div>
                 </div>
 

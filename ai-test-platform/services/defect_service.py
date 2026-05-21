@@ -23,7 +23,11 @@ logger = logging.getLogger("defect_service")
 VALID_STATUSES = {"open", "confirmed", "fixed", "verified", "closed", "rejected", "reopened"}
 VALID_SEVERITIES = {"blocker", "critical", "major", "minor", "trivial"}
 VALID_PRIORITIES = {"P0", "P1", "P2", "P3"}
-VALID_SOURCES = {"manual", "run_failure", "failure_analysis", "quality_gate", "visual_diff", "performance_regression", "data_issue"}
+VALID_SOURCES = {
+    "manual", "product_review", "code_compare", "long_flow",
+    "run_failure", "failure_analysis", "quality_gate", "visual_diff",
+    "performance_regression", "data_issue",
+}
 
 ALLOWED_TRANSITIONS = {
     "open": {"confirmed", "rejected"},

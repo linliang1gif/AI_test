@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import EnvironmentForm from './EnvironmentForm'
 import AuthProfileForm from './AuthProfileForm'
-import api from '../services/api'
+import api, { DANGER } from '../services/api'
 import { useToast } from './ui/Toast'
+import DangerConfirmDialog from './common/DangerConfirmDialog'
 
 export default function EnvironmentManager({ projectId, environments, onUpdate }) {
   const toast = useToast()
@@ -14,6 +15,7 @@ export default function EnvironmentManager({ projectId, environments, onUpdate }
   const [tokenEnvId, setTokenEnvId] = useState(null)
   const [tokenInput, setTokenInput] = useState('')
   const [tokenLoading, setTokenLoading] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState(null)  // Phase 10B
 
   const handleQuickToken = (env) => {
     setTokenEnvId(env.id)
@@ -36,7 +38,11 @@ export default function EnvironmentManager({ projectId, environments, onUpdate }
         setShowTokenDialog(false)
         onUpdate()
       } else {
-        toast.error(data.detail || 'Token 更新失败')
+        const detail = data.detail
+        const msg = typeof detail === 'object'
+          ? (detail.message || JSON.stringify(detail))
+          : (detail || data.message || 'Token 更新失败')
+        toast.error(msg)
       }
     } catch (e) {
       toast.error('请求失败: ' + e.message)
@@ -55,15 +61,23 @@ export default function EnvironmentManager({ projectId, environments, onUpdate }
     setShowEnvForm(true)
   }
 
-  const handleDeleteEnv = async (envId) => {
-    if (!confirm('确定要删除此环境吗？相关的鉴权配置也将被删除。')) return
+  // Phase 10B: 删除改为 DangerConfirmDialog
+  const handleDeleteEnv = (env) => {
+    setDeleteTarget(env)
+  }
 
+  const doDeleteEnv = async () => {
+    if (!deleteTarget) return
     try {
-      await api.v2.environments.delete(envId)
+      await api.v2.environments.delete(deleteTarget.id, {
+        confirm: true,
+        confirm_text: DANGER.DELETE_ENVIRONMENT,
+      })
       toast.success('环境删除成功')
+      setDeleteTarget(null)
       onUpdate()
     } catch (error) {
-      toast.error('删除失败: ' + error.message)
+      throw error  // 由 DangerConfirmDialog 统一展示报错
     }
   }
 
@@ -186,7 +200,7 @@ export default function EnvironmentManager({ projectId, environments, onUpdate }
                     编辑
                   </button>
                   <button
-                    onClick={() => handleDeleteEnv(env.id)}
+                    onClick={() => handleDeleteEnv(env)}
                     className="px-3 py-1.5 text-sm border border-red-300 text-red-600 rounded-md hover:bg-red-50 transition-colors"
                   >
                     删除
@@ -254,6 +268,19 @@ export default function EnvironmentManager({ projectId, environments, onUpdate }
           </div>
         </div>
       )}
+
+      {/* Phase 10B: 删除环境确认弹窗 */}
+      <DangerConfirmDialog
+        open={!!deleteTarget}
+        title="删除环境"
+        description={deleteTarget
+          ? `将永久删除环境「${deleteTarget.name || deleteTarget.env_name}」(ID: ${deleteTarget.id})，相关鉴权配置将被连带删除。此操作不可恢复。`
+          : ''}
+        confirmText={DANGER.DELETE_ENVIRONMENT}
+        confirmLabel="删除"
+        onConfirm={doDeleteEnv}
+        onClose={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

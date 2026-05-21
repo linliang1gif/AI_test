@@ -3,11 +3,16 @@ P2-2 Health / Readiness / Admin 端点
 - /health 保持兼容
 - /readiness K8s 就绪探针
 - /admin/app-mode 仅 mock/test 模式可用
+- D2-2: /api/v2/health/full 全量健康检查
 """
 import os
+import logging
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request
 
+from backend.trace_middleware import current_trace_id
+
+logger = logging.getLogger("health")
 router = APIRouter()
 
 
@@ -30,7 +35,7 @@ async def root():
 @router.get("/health")
 async def health_check():
     app_mode = os.getenv("APP_MODE", "mock")
-    ai_provider = os.getenv("AI_PROVIDER", "none")
+    ai_provider = os.getenv("AI_PROVIDER") or os.getenv("DEFAULT_AI_PROVIDER") or "none"
     health_status = {
         "status": "healthy",
         "app_mode": app_mode,
@@ -65,6 +70,108 @@ async def health_check():
         health_status["database"]["error"] = str(e)
 
     return health_status
+
+
+@router.get("/api/v2/health/full")
+async def health_full(request: Request):
+    """D2-2: 全量平台健康检查，返回 backend / db / ai / env / latest_run 综合状态"""
+    tid = current_trace_id()
+    now = datetime.now()
+
+    result = {
+        "backend_status": "ok",
+        "database_status": "unknown",
+        "ai_config_status": "unknown",
+        "environment_status": "unknown",
+        "latest_run_status": "unknown",
+        "trace_id": tid,
+        "timestamp": now.isoformat(),
+        "modules": _module_flags(),
+    }
+
+    # ── database ──
+    try:
+        from database import get_db_session
+        from sqlalchemy import inspect, text
+
+        with get_db_session() as db:
+            db.execute(text("SELECT 1"))
+            inspector = inspect(db.bind)
+            existing = set(inspector.get_table_names())
+            required = {"projects", "test_cases", "test_runs", "run_cases", "run_steps", "iterations"}
+            missing = required - existing
+            if missing:
+                result["database_status"] = "degraded"
+                result["database_missing_tables"] = sorted(missing)
+            else:
+                result["database_status"] = "ok"
+                # 统计
+                proj_count = db.execute(text("SELECT count(*) FROM projects")).scalar()
+                tc_count = db.execute(text("SELECT count(*) FROM test_cases")).scalar()
+                tr_count = db.execute(text("SELECT count(*) FROM test_runs")).scalar()
+                result["database_counts"] = {
+                    "projects": proj_count,
+                    "test_cases": tc_count,
+                    "test_runs": tr_count,
+                }
+    except Exception as e:
+        result["database_status"] = "error"
+        result["database_error"] = str(type(e).__name__)
+        logger.warning("health/full db check failed: %s", e)
+
+    # ── ai_config ──
+    try:
+        ai_provider = os.getenv("AI_PROVIDER", "")
+        ai_api_key = os.getenv("AI_API_KEY") or os.getenv("OPENAI_API_KEY") or os.getenv("DASHSCOPE_API_KEY") or ""
+        if ai_provider and ai_api_key:
+            result["ai_config_status"] = "configured"
+            result["ai_provider"] = ai_provider
+        elif ai_provider:
+            result["ai_config_status"] = "partial"
+            result["ai_provider"] = ai_provider
+            result["ai_config_hint"] = "provider已配置但未检测到API Key环境变量"
+        else:
+            result["ai_config_status"] = "not_configured"
+            result["ai_config_hint"] = "未设置AI_PROVIDER环境变量"
+    except Exception:
+        result["ai_config_status"] = "error"
+
+    # ── environment ──
+    try:
+        app_mode = os.getenv("APP_MODE", "mock")
+        result["environment_status"] = "ok"
+        result["environment"] = {
+            "app_mode": app_mode,
+            "python_version": __import__("sys").version.split()[0],
+            "backend_port": os.getenv("BACKEND_PORT", "8000"),
+        }
+    except Exception:
+        result["environment_status"] = "error"
+
+    # ── latest_run ──
+    try:
+        from database import get_db_session
+        from sqlalchemy import text as sa_text
+
+        with get_db_session() as db:
+            row = db.execute(sa_text(
+                "SELECT id, status, started_at, finished_at FROM test_runs ORDER BY id DESC LIMIT 1"
+            )).first()
+            if row:
+                result["latest_run_status"] = "found"
+                result["latest_run"] = {
+                    "run_id": row[0],
+                    "status": row[1],
+                    "started_at": str(row[2]) if row[2] else None,
+                    "finished_at": str(row[3]) if row[3] else None,
+                }
+            else:
+                result["latest_run_status"] = "no_runs"
+    except Exception as e:
+        result["latest_run_status"] = "error"
+        logger.warning("health/full latest_run check failed: %s", e)
+
+    return result
 
 
 @router.get("/readiness")

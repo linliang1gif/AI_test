@@ -6,8 +6,264 @@ const STATUS_COLORS = { open: 'bg-red-100 text-red-700', confirmed: 'bg-amber-10
 const TRANSITIONS = { open: ['confirmed', 'rejected'], confirmed: ['fixed'], fixed: ['verified'], verified: ['closed'], closed: ['reopened'], rejected: [], reopened: ['confirmed', 'rejected'] }
 const SEVERITIES = ['blocker', 'critical', 'major', 'minor', 'trivial']
 const PRIORITIES = ['P0', 'P1', 'P2', 'P3']
-const SOURCES = ['manual', 'run_failure', 'failure_analysis', 'quality_gate', 'visual_diff', 'performance_regression', 'data_issue']
-const SOURCE_LABELS = { manual: '人工', run_failure: '执行失败', failure_analysis: '失败归因', quality_gate: '质量门禁', visual_diff: '视觉差异', performance_regression: '性能退化', data_issue: '数据问题' }
+const SOURCES = ['manual', 'product_review', 'code_compare', 'long_flow', 'run_failure', 'failure_analysis', 'quality_gate', 'visual_diff', 'performance_regression', 'data_issue']
+const SOURCE_LABELS = { manual: '人工', product_review: '产品走查', code_compare: '代码对比', long_flow: '长流程', run_failure: '执行失败', failure_analysis: '失败归因', quality_gate: '质量门禁', visual_diff: '视觉差异', performance_regression: '性能退化', data_issue: '数据问题' }
+const ISSUE_TYPES = ['前端', '后端', '联调', '接口契约', '数据同步', '产品体验', '需求不清', '环境配置']
+const DEFAULT_FORM = {
+  title: '',
+  description: '',
+  module: '',
+  severity: 'major',
+  priority: 'P2',
+  source: 'manual',
+  failure_category: '',
+  assigned_to: '',
+  iteration: 'v1.2.5',
+  requirement_source: '',
+  issue_type: '联调',
+  repro_steps: '',
+  actual_result: '',
+  expected_result: '',
+  evidence_text: '',
+  code_refs: '',
+  api_refs: '',
+  suggested_fix: '',
+}
+
+const BUG_TEMPLATES = [
+  {
+    key: 'unload_video_sync',
+    name: '卸货录像展示/ERP不一致',
+    data: {
+      title: '【磅称管理】当前过磅页卸货录像展示与ERP附件同步不一致',
+      module: '磅称管理-卸货录像',
+      severity: 'critical',
+      priority: 'P0',
+      source: 'product_review',
+      failure_category: '数据同步/页面展示不一致',
+      issue_type: '联调',
+      repro_steps: '1. 进入磅称页面并选择入库/出库单\n2. 点击“卸货录像”并等待录像完成\n3. 再次点击“卸货录像”并等待完成\n4. 查看当前过磅页照片/视频区域\n5. 查看过磅记录和ERP对应单据附件',
+      actual_result: '当前过磅页只展示一个卸货视频；ERP对应单据附件可能显示多个视频，页面展示与同步结果不一致。',
+      expected_result: '每次成功录制的视频都应在当前过磅页、过磅记录、ERP附件中保持一致；若产品只允许保留一个视频，也应同步覆盖并给出明确规则。',
+      evidence_text: '用户实测：磅秤点击两次卸货录像，磅秤页面只会显示一个视频，同步到ERP显示多个。',
+      code_refs: '前端：recycle-pound-feature-1.2.5/src/views/poundHome/index.vue\n后端：recycle-server-feature-1.2.5 中录像保存/ERP同步逻辑',
+      api_refs: '详情接口返回需确认 contractAttachments / attachmentFiles / boundInfoDetailsList[].contractAttachments 的一致性。',
+      suggested_fix: '统一录像附件的追加/覆盖规则；前端轮询详情接口时兼容后端实际返回字段；后端本地附件与ERP同步使用同一份附件集合。',
+    },
+  },
+  {
+    key: 'current_page_video_missing',
+    name: '当前页拿不到卸货视频',
+    data: {
+      title: '【磅称管理】卸货录像完成后当前过磅页未展示视频',
+      module: '磅称管理-当前过磅页',
+      severity: 'critical',
+      priority: 'P0',
+      source: 'product_review',
+      failure_category: '接口字段兼容/页面展示缺失',
+      issue_type: '前端',
+      repro_steps: '1. 进入磅称页面并选择入库/出库单\n2. 点击“卸货录像”\n3. 等待录像完成及前端轮询\n4. 查看当前过磅页照片/视频区域\n5. 再进入过磅记录查看同一单据影像',
+      actual_result: '过磅记录可以看到卸货视频，但当前过磅页未展示视频。',
+      expected_result: '录像生成后，当前过磅页应在轮询到详情接口附件数据后展示卸货视频。',
+      evidence_text: '详情接口需确认主表 contractAttachments、attachmentFiles、明细 boundInfoDetailsList[].contractAttachments 的返回情况。',
+      code_refs: '前端轮询展示逻辑：recycle-pound-feature-1.2.5/src/views/poundHome/index.vue',
+      api_refs: 'GET details 接口：检查是否返回 attachmentFiles 或 contractAttachments。',
+      suggested_fix: '当前过磅页展示逻辑兼容后端实际附件字段；后端详情接口与列表/记录接口返回结构保持一致。',
+    },
+  },
+  {
+    key: 'clear_state_residue',
+    name: '清理/切单后残留影像',
+    data: {
+      title: '【磅称管理】清理或切换单据后旧卸货影像状态未清空',
+      module: '磅称管理-页面状态',
+      severity: 'major',
+      priority: 'P1',
+      source: 'long_flow',
+      failure_category: '页面状态残留',
+      issue_type: '前端',
+      repro_steps: '1. 选择单据并完成一次卸货录像\n2. 当前页面出现影像或进入轮询状态\n3. 点击“清理”或切换入库/出库类型\n4. 查看照片/视频区域和轮询状态\n5. 选择下一单继续操作',
+      actual_result: '旧单据的视频、轮询状态或当前记录标识可能残留到新流程。',
+      expected_result: '清理或切单后应清空当前影像、当前记录标识，并停止录像轮询。',
+      evidence_text: '重点观察 mainAttachment、currentRecordUuid、轮询 timer 是否被清理。',
+      code_refs: '前端 handleClear / handlePoundTypeChange / stopRecordCheckTimer',
+      api_refs: '',
+      suggested_fix: '清理入口统一重置附件状态和轮询状态；切单时停止旧轮询并清空旧影像。',
+    },
+  },
+  {
+    key: 'recording_double_click',
+    name: '录像按钮重复点击',
+    data: {
+      title: '【磅称管理】卸货录像过程中重复点击按钮可触发多次录制',
+      module: '磅称管理-卸货录像',
+      severity: 'major',
+      priority: 'P1',
+      source: 'long_flow',
+      failure_category: '重复提交/并发控制',
+      issue_type: '前后端',
+      repro_steps: '1. 进入磅称页面并选择单据\n2. 连续快速点击“卸货录像”两次或多次\n3. 观察前端按钮状态、接口请求次数、后端录像任务数量\n4. 查看当前页、过磅记录和ERP附件',
+      actual_result: '可能重复触发录像任务，造成页面展示、记录附件、ERP附件数量不一致。',
+      expected_result: '录像进行中按钮应禁用或显示录制中；后端应对同一单据/摄像头/时间段做并发保护。',
+      evidence_text: '抓包确认 /record 请求次数；后端日志确认异步录像任务数量。',
+      code_refs: '前端卸货录像按钮状态；后端录像 Redis lock / async task',
+      api_refs: 'POST /recycle/basic/basicDevice/record',
+      suggested_fix: '前端增加 recording/loading 状态；后端锁应在任务提交前生效，并返回明确的重复录制提示。',
+    },
+  },
+  {
+    key: 'erp_attachment_sync',
+    name: 'ERP附件同步异常',
+    data: {
+      title: '【ERP同步】过磅影像同步到ERP附件结果与本地记录不一致',
+      module: '磅称管理-ERP附件同步',
+      severity: 'critical',
+      priority: 'P0',
+      source: 'product_review',
+      failure_category: 'ERP同步',
+      issue_type: '后端',
+      repro_steps: '1. 完成过磅拍照或卸货录像\n2. 保存/继续过磅触发同步\n3. 查看本地过磅记录附件\n4. 查看ERP对应入库/物流附件\n5. 对比附件数量、类型和顺序',
+      actual_result: 'ERP附件与本地附件可能出现缺失、重复、覆盖或字段写错。',
+      expected_result: '本地过磅记录与ERP对应单据附件应一致，且入库/出库字段写入规则明确。',
+      evidence_text: '提供本地接口返回、ERP截图、同步日志。',
+      code_refs: '后端 ERP sync：入库/出库 saveStockProductDetail / saveOutProductDetail / modifyFile 等逻辑',
+      api_refs: '本地详情接口、ERP附件查询接口',
+      suggested_fix: '统一附件集合来源；同步前合并去重；入库/出库分别确认目标字段，不混用 attachment/field1。',
+    },
+  },
+  {
+    key: 'monitor_double_click',
+    name: '监控双击放大缺失',
+    data: {
+      title: '【磅称管理】监控画面不支持双击放大预览',
+      module: '磅称管理-监控',
+      severity: 'major',
+      priority: 'P1',
+      source: 'product_review',
+      failure_category: '需求未实现',
+      issue_type: '前端',
+      repro_steps: '1. 进入磅称页面\n2. 点击“监控”打开监控区域\n3. 双击任一摄像头画面\n4. 观察是否放大预览并可恢复',
+      actual_result: '双击画面无放大预览效果或交互不完整。',
+      expected_result: '支持双击放大预览指定摄像头画面，再次操作可退出放大。',
+      evidence_text: '对照需求：支持“双击”放大预览对应摄像头监控画面。',
+      code_refs: '前端 MonitorPanel.vue / 监控弹窗相关组件',
+      api_refs: '',
+      suggested_fix: '恢复并完善 dblclick 事件、放大状态、布局尺寸和退出交互。',
+    },
+  },
+  {
+    key: 'monitor_idle_close',
+    name: '监控5分钟关闭逻辑',
+    data: {
+      title: '【磅称管理】监控持续播放5分钟关闭提醒逻辑不符合需求',
+      module: '磅称管理-监控',
+      severity: 'major',
+      priority: 'P1',
+      source: 'product_review',
+      failure_category: '交互逻辑不一致',
+      issue_type: '前端',
+      repro_steps: '1. 进入磅称页面并打开监控\n2. 保持无人操作超过5分钟\n3. 或切换离开磅称页面后保持监控播放\n4. 观察关闭提醒、倒计时和用户操作后的重置行为',
+      actual_result: '可能只按打开时间计时，未准确识别页面停留、用户空闲和操作重置。',
+      expected_result: '未停留在磅称界面，或停留但无人操作且监控播放达5分钟时，弹出即将关闭监控提示，并按原型处理倒计时。',
+      evidence_text: '对照需求 1.2：页面停留状态、无人操作、播放时长均参与判断。',
+      code_refs: '前端监控打开/关闭定时器、visibilitychange、用户操作监听',
+      api_refs: '',
+      suggested_fix: '引入用户 idle 监听和页面可见性判断；用户操作后重置计时；弹窗倒计时可取消/确认。',
+    },
+  },
+  {
+    key: 'duration_validation',
+    name: '录像时长校验',
+    data: {
+      title: '【磅称管理】卸货拍摄时长校验未完整限制5-600秒',
+      module: '磅称管理-设置',
+      severity: 'major',
+      priority: 'P1',
+      source: 'product_review',
+      failure_category: '表单校验',
+      issue_type: '前后端',
+      repro_steps: '1. 打开磅称设置\n2. 将卸货拍摄时长分别输入空值、0、4、5、600、601、小数、非数字\n3. 保存设置\n4. 点击卸货录像观察实际拍摄时长',
+      actual_result: '表单或后端可能未严格按5-600秒限制，异常值仍可保存或生效。',
+      expected_result: '仅允许正整数5-600秒；非法值保存失败或自动修正，并有明确提示。',
+      evidence_text: '记录每个输入值的保存结果、接口入参和后端返回。',
+      code_refs: '前端 SettingDialog.vue rules；后端 record 请求 recordingTime 校验',
+      api_refs: '设置保存接口、录像接口',
+      suggested_fix: '前端 form rule 与字段名保持一致；后端补充5-600范围校验，避免绕过前端。',
+    },
+  },
+  {
+    key: 'api_contract_mismatch',
+    name: '接口字段契约不一致',
+    data: {
+      title: '【接口契约】前后端附件字段定义不一致导致页面展示异常',
+      module: '接口契约-附件字段',
+      severity: 'critical',
+      priority: 'P0',
+      source: 'code_compare',
+      failure_category: '接口契约',
+      issue_type: '接口契约',
+      repro_steps: '1. 调用详情/列表/记录相关接口\n2. 对比 contractAttachments、attachmentFiles、明细附件字段\n3. 打开当前过磅页和过磅记录页\n4. 对比页面展示结果',
+      actual_result: '不同接口返回字段结构不一致，前端页面读取字段不统一，导致部分页面不展示影像。',
+      expected_result: '同一业务附件在详情、列表、记录接口中应有稳定字段契约；前端读取逻辑和接口文档一致。',
+      evidence_text: '贴出接口响应样例和前端读取字段。',
+      code_refs: '前端附件展示逻辑；后端 DTO/VO 转换逻辑',
+      api_refs: 'GET detail / list / record page',
+      suggested_fix: '后端统一输出 attachmentFiles 或明确主表/明细字段；前端兼容历史字段并逐步收敛。',
+    },
+  },
+  {
+    key: 'environment_proxy',
+    name: '本地环境代理异常',
+    data: {
+      title: '【测试平台】前端代理端口与后端启动端口不一致导致API 500',
+      module: 'AI测试平台-本地环境',
+      severity: 'major',
+      priority: 'P1',
+      source: 'manual',
+      failure_category: '环境配置',
+      issue_type: '环境配置',
+      repro_steps: '1. 启动前端 dev server\n2. 后端未启动或启动端口与 vite proxy 不一致\n3. 打开任意页面\n4. 观察 /health 或 /api/v2/* 请求',
+      actual_result: '前端页面显示 API调用失败: 500 或 后端状态连接异常。',
+      expected_result: '启动脚本应统一端口并在后端健康检查失败时明确提示。',
+      evidence_text: '浏览器控制台出现 /health 500；netstat 无 8001 LISTENING。',
+      code_refs: 'frontend/vite.config.js；start_all.ps1',
+      api_refs: 'GET /health',
+      suggested_fix: '启动脚本只认 LISTENING 端口，并增加 /health 检查；前端代理、.env、README端口统一。',
+    },
+  },
+]
+
+function buildBugMarkdown(defect) {
+  const ev = defect.evidence_json || {}
+  const lines = [
+    `【标题】${defect.title || ''}`,
+    `【优先级】${defect.priority || ''}`,
+    `【严重级别】${defect.severity || ''}`,
+    `【模块】${defect.module || ''}`,
+    `【问题类型】${ev.issue_type || defect.failure_category || ''}`,
+    `【所属迭代】${ev.iteration || ''}`,
+    `【需求来源】${ev.requirement_source || ''}`,
+    '',
+    '【复现步骤】',
+    ev.repro_steps || '',
+    '',
+    '【实际结果】',
+    ev.actual_result || defect.description || '',
+    '',
+    '【期望结果】',
+    ev.expected_result || '',
+    '',
+    '【证据】',
+    ev.evidence_text || '',
+    '',
+    '【代码/接口线索】',
+    [ev.code_refs, ev.api_refs].filter(Boolean).join('\n'),
+    '',
+    '【建议修复方向】',
+    ev.suggested_fix || '',
+  ]
+  return lines.join('\n').trim()
+}
 
 export default function DefectManagement() {
   const [defects, setDefects] = useState([])
@@ -22,7 +278,7 @@ export default function DefectManagement() {
   const [showTransition, setShowTransition] = useState(null)
   const [transitionComment, setTransitionComment] = useState('')
 
-  const [form, setForm] = useState({ title: '', description: '', module: '', severity: 'major', priority: 'P2', source: 'manual', failure_category: '', assigned_to: '' })
+  const [form, setForm] = useState(DEFAULT_FORM)
 
   const fetchDefects = useCallback(async () => {
     setLoading(true)
@@ -43,8 +299,46 @@ export default function DefectManagement() {
   useEffect(() => { fetchDefects() }, [fetchDefects])
 
   const handleCreate = async () => {
-    const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) })
-    if (r.ok) { setShowCreate(false); setForm({ title: '', description: '', module: '', severity: 'major', priority: 'P2', source: 'manual', failure_category: '', assigned_to: '' }); fetchDefects() }
+    const {
+      iteration, requirement_source, issue_type, repro_steps, actual_result,
+      expected_result, evidence_text, code_refs, api_refs, suggested_fix,
+      ...base
+    } = form
+    const description = base.description || actual_result || expected_result
+    const payload = {
+      ...base,
+      description,
+      evidence_json: {
+        iteration,
+        requirement_source,
+        issue_type,
+        repro_steps,
+        actual_result,
+        expected_result,
+        evidence_text,
+        code_refs,
+        api_refs,
+        suggested_fix,
+      },
+    }
+    const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+    if (r.ok) { setShowCreate(false); setForm(DEFAULT_FORM); fetchDefects() }
+  }
+
+  const applyBugTemplate = (key) => {
+    const template = BUG_TEMPLATES.find(t => t.key === key)
+    if (!template) return
+    setForm({ ...DEFAULT_FORM, ...template.data })
+  }
+
+  const copyBugMarkdown = async (defect) => {
+    const text = buildBugMarkdown(defect)
+    try {
+      await navigator.clipboard.writeText(text)
+      alert('已复制 bug 单模板')
+    } catch (e) {
+      window.prompt('复制下面的 bug 单内容', text)
+    }
   }
 
   const openDetail = async (id) => {
@@ -111,7 +405,7 @@ export default function DefectManagement() {
         </div>
         <div className="flex gap-2">
           <button onClick={handleBatchSyncTapd} title="从 TAPD 拉取所有已推送缺陷的最新状态并推动本地状态机" className="px-3 py-2 border border-cyan-500 text-cyan-700 rounded-lg hover:bg-cyan-50 text-sm font-medium">⥂ 同步 TAPD</button>
-          <button onClick={() => setShowCreate(true)} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm font-medium">+ 新建缺陷</button>
+          <button onClick={() => { setForm(DEFAULT_FORM); setShowCreate(true) }} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm font-medium">+ 新建缺陷</button>
         </div>
       </div>
 
@@ -201,10 +495,16 @@ export default function DefectManagement() {
       {showCreate && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-6 w-[600px] max-h-[80vh] overflow-y-auto shadow-2xl">
-            <h2 className="text-lg font-bold mb-4">新建缺陷</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold">新建缺陷</h2>
+              <select onChange={e => applyBugTemplate(e.target.value)} defaultValue="" className="border rounded-lg px-3 py-1.5 text-xs text-amber-700 bg-amber-50">
+                <option value="">选择 bug 模板</option>
+                {BUG_TEMPLATES.map(t => <option key={t.key} value={t.key}>{t.name}</option>)}
+              </select>
+            </div>
             <div className="space-y-3">
               <input value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="缺陷标题 *" className="w-full border rounded-lg px-3 py-2 text-sm" />
-              <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="描述" rows={3} className="w-full border rounded-lg px-3 py-2 text-sm" />
+              <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="摘要描述" rows={2} className="w-full border rounded-lg px-3 py-2 text-sm" />
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-slate-500">严重级别</label>
@@ -228,9 +528,27 @@ export default function DefectManagement() {
                   <label className="text-xs text-slate-500">模块</label>
                   <input value={form.module} onChange={e => setForm({ ...form, module: e.target.value })} placeholder="模块" className="w-full border rounded-lg px-3 py-2 text-sm" />
                 </div>
+                <div>
+                  <label className="text-xs text-slate-500">所属迭代</label>
+                  <input value={form.iteration} onChange={e => setForm({ ...form, iteration: e.target.value })} placeholder="如 v1.2.5" className="w-full border rounded-lg px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500">问题类型</label>
+                  <select value={form.issue_type} onChange={e => setForm({ ...form, issue_type: e.target.value })} className="w-full border rounded-lg px-3 py-2 text-sm">
+                    {ISSUE_TYPES.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
               </div>
               <input value={form.failure_category} onChange={e => setForm({ ...form, failure_category: e.target.value })} placeholder="失败分类" className="w-full border rounded-lg px-3 py-2 text-sm" />
               <input value={form.assigned_to} onChange={e => setForm({ ...form, assigned_to: e.target.value })} placeholder="分配给" className="w-full border rounded-lg px-3 py-2 text-sm" />
+              <input value={form.requirement_source} onChange={e => setForm({ ...form, requirement_source: e.target.value })} placeholder="需求来源 / TAPD 链接" className="w-full border rounded-lg px-3 py-2 text-sm" />
+              <textarea value={form.repro_steps} onChange={e => setForm({ ...form, repro_steps: e.target.value })} placeholder="复现步骤" rows={4} className="w-full border rounded-lg px-3 py-2 text-sm" />
+              <textarea value={form.actual_result} onChange={e => setForm({ ...form, actual_result: e.target.value })} placeholder="实际结果" rows={3} className="w-full border rounded-lg px-3 py-2 text-sm" />
+              <textarea value={form.expected_result} onChange={e => setForm({ ...form, expected_result: e.target.value })} placeholder="期望结果" rows={3} className="w-full border rounded-lg px-3 py-2 text-sm" />
+              <textarea value={form.evidence_text} onChange={e => setForm({ ...form, evidence_text: e.target.value })} placeholder="证据：接口响应、截图说明、日志等" rows={3} className="w-full border rounded-lg px-3 py-2 text-sm" />
+              <textarea value={form.code_refs} onChange={e => setForm({ ...form, code_refs: e.target.value })} placeholder="代码线索：文件路径 / 方法名" rows={2} className="w-full border rounded-lg px-3 py-2 text-sm" />
+              <textarea value={form.api_refs} onChange={e => setForm({ ...form, api_refs: e.target.value })} placeholder="接口线索：URL / 字段 / 返回样例" rows={2} className="w-full border rounded-lg px-3 py-2 text-sm" />
+              <textarea value={form.suggested_fix} onChange={e => setForm({ ...form, suggested_fix: e.target.value })} placeholder="建议修复方向" rows={2} className="w-full border rounded-lg px-3 py-2 text-sm" />
             </div>
             <div className="flex justify-end gap-2 mt-5">
               <button onClick={() => setShowCreate(false)} className="px-4 py-2 border rounded-lg text-sm">取消</button>
@@ -258,6 +576,14 @@ export default function DefectManagement() {
             </div>
 
             {showDetail.description && <p className="text-sm text-slate-600 mb-4 whitespace-pre-wrap">{showDetail.description}</p>}
+            {showDetail.evidence_json && (
+              <div className="mb-4 grid gap-3 text-sm">
+                {showDetail.evidence_json.repro_steps && <section><h3 className="font-semibold text-slate-800 mb-1">复现步骤</h3><p className="whitespace-pre-wrap text-slate-600">{showDetail.evidence_json.repro_steps}</p></section>}
+                {showDetail.evidence_json.actual_result && <section><h3 className="font-semibold text-slate-800 mb-1">实际结果</h3><p className="whitespace-pre-wrap text-slate-600">{showDetail.evidence_json.actual_result}</p></section>}
+                {showDetail.evidence_json.expected_result && <section><h3 className="font-semibold text-slate-800 mb-1">期望结果</h3><p className="whitespace-pre-wrap text-slate-600">{showDetail.evidence_json.expected_result}</p></section>}
+                {showDetail.evidence_json.suggested_fix && <section><h3 className="font-semibold text-slate-800 mb-1">建议修复方向</h3><p className="whitespace-pre-wrap text-slate-600">{showDetail.evidence_json.suggested_fix}</p></section>}
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-2 text-xs mb-4">
               {showDetail.module && <div><span className="text-slate-400">模块:</span> {showDetail.module}</div>}
@@ -265,6 +591,9 @@ export default function DefectManagement() {
               {showDetail.run_id && <div><span className="text-slate-400">执行ID:</span> {showDetail.run_id}</div>}
               {showDetail.assigned_to && <div><span className="text-slate-400">分配给:</span> {showDetail.assigned_to}</div>}
               {showDetail.failure_category && <div><span className="text-slate-400">失败分类:</span> {showDetail.failure_category}</div>}
+              {showDetail.evidence_json?.iteration && <div><span className="text-slate-400">所属迭代:</span> {showDetail.evidence_json.iteration}</div>}
+              {showDetail.evidence_json?.issue_type && <div><span className="text-slate-400">问题类型:</span> {showDetail.evidence_json.issue_type}</div>}
+              {showDetail.evidence_json?.requirement_source && <div className="col-span-2"><span className="text-slate-400">需求来源:</span> {showDetail.evidence_json.requirement_source}</div>}
               {showDetail.created_by && <div><span className="text-slate-400">创建人:</span> {showDetail.created_by}</div>}
               {showDetail.created_at && <div><span className="text-slate-400">创建时间:</span> {showDetail.created_at.slice(0, 16).replace('T', ' ')}</div>}
               {showDetail.updated_at && <div><span className="text-slate-400">更新时间:</span> {showDetail.updated_at.slice(0, 16).replace('T', ' ')}</div>}
@@ -284,6 +613,7 @@ export default function DefectManagement() {
 
             {/* Transitions */}
             <div className="flex gap-2 mb-4 flex-wrap">
+              <button onClick={() => copyBugMarkdown(showDetail)} className="px-3 py-1.5 text-xs bg-slate-100 text-slate-700 rounded hover:bg-slate-200">复制 bug 单</button>
               {showDetail.evidence_json?.tapd_bug_id ? (
                 <>
                   <a href={showDetail.evidence_json.tapd_url} target="_blank" rel="noreferrer" className="px-3 py-1.5 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100">

@@ -1,0 +1,50 @@
+﻿# Cursor / IDE 索引忽略
+# 与 .gitignore 中"非代码"部分保持一致，减少索引体积
+
+# 被测系统源码副本
+recycle-*/
+蓝点/
+
+# 历史归档
+archive/
+docs/archive/
+tests/legacy/
+
+# 误复制的自嵌套仓库
+ai测试/
+
+# 依赖与构建产物
+node_modules/
+dist/
+build/
+coverage/
+.vite/
+frontend/dist/
+frontend/build/
+frontend/.vite/
+
+# 数据/日志/产物
+data/
+uploads/
+output/
+logs/
+reports/
+chroma_db/
+
+# Python 缓存
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+*.pyc
+
+# 大型二进制
+*.zip
+*.tar.gz
+*.7z
+*.rar
+*.xlsx
+*.docx
+
+# IDE
+.idea/
+.vscode/

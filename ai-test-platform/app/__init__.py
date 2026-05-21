@@ -5,6 +5,10 @@
 应用模块 - 主流程和API服务器
 """
 
-from .main import AITestPlatform
-
 __all__ = ['AITestPlatform']
+
+def __getattr__(name):
+    if name == 'AITestPlatform':
+        from .main import AITestPlatform
+        return AITestPlatform
+    raise AttributeError(name)

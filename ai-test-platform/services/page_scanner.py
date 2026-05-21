@@ -27,6 +27,38 @@ def _session_path(project_id: str) -> str:
     return os.path.join(SESSION_DIR, f"session_{project_id}.json")
 
 
+def _chrome_executable_candidates() -> List[str]:
+    candidates = [
+        os.getenv("PLAYWRIGHT_CHROME_EXECUTABLE", ""),
+        r"D:\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+    ]
+    seen = set()
+    existing = []
+    for path in candidates:
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        if os.path.exists(path):
+            existing.append(path)
+    return existing
+
+
+def _launch_chromium(pw, headless: bool = True):
+    try:
+        return pw.chromium.launch(headless=headless)
+    except Exception as default_error:
+        logger.warning("Default Playwright Chromium launch failed, trying local Chrome: %s", default_error)
+        for executable_path in _chrome_executable_candidates():
+            try:
+                return pw.chromium.launch(executable_path=executable_path, headless=headless)
+            except Exception as fallback_error:
+                logger.debug("Chrome fallback launch failed (%s): %s", executable_path, fallback_error)
+        raise default_error
+
+
 def scan_page(url: str, cookies: Optional[List[Dict]] = None,
               viewport: Dict = None) -> Dict[str, Any]:
     """
@@ -47,7 +79,7 @@ def scan_page(url: str, cookies: Optional[List[Dict]] = None,
 
     try:
         pw = sync_playwright().start()
-        browser = pw.chromium.launch(headless=True)
+        browser = _launch_chromium(pw, headless=True)
         context = browser.new_context(viewport=vp)
         context.set_default_timeout(15000)
 
@@ -238,7 +270,7 @@ def save_login_session(
 
     try:
         pw = sync_playwright().start()
-        browser = pw.chromium.launch(headless=True)
+        browser = _launch_chromium(pw, headless=True)
         context = browser.new_context(viewport=vp)
         context.set_default_timeout(15000)
         page = context.new_page()
@@ -264,12 +296,16 @@ def save_login_session(
                 else:
                     page.wait_for_selector(target, timeout=10000)
 
-        # Save cookies
+        # Save cookies and localStorage
         cookies = context.cookies()
+        local_storage = page.evaluate(
+            "() => Object.fromEntries(Object.entries(window.localStorage))"
+        )
         session_data = {
             "project_id": project_id,
             "base_url": base_url,
             "cookies": cookies,
+            "local_storage": local_storage,
             "saved_at": datetime.now().isoformat(),
             "page_url": page.url,
             "page_title": page.title(),

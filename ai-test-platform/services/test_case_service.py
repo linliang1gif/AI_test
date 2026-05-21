@@ -25,6 +25,8 @@ class TestCaseService:
         source: Optional[str] = None,
         status: Optional[str] = None,
         case_type: Optional[str] = None,
+        keyword: Optional[str] = None,
+        iteration_id: Optional[int] = None,
         skip: int = 0,
         limit: int = 100
     ) -> Tuple[List[TestCase], int]:
@@ -36,12 +38,15 @@ class TestCaseService:
             source: 来源过滤
             status: 状态过滤
             case_type: 用例类型过滤 (api/functional/web_ui)
+            keyword: 关键词搜索(标题/模块)
+            iteration_id: 迭代ID过滤
             skip: 跳过数量
             limit: 限制数量
             
         Returns:
             (测试用例列表, 总数)
         """
+        from sqlalchemy import or_
         query = self.db.query(TestCase).filter(TestCase.status != 'deleted')
         
         # 应用过滤条件
@@ -55,6 +60,11 @@ class TestCaseService:
             filters.append(TestCase.status == status)
         if case_type:
             filters.append(TestCase.case_type == case_type)
+        if keyword:
+            kw = f'%{keyword}%'
+            filters.append(or_(TestCase.title.ilike(kw), TestCase.module.ilike(kw)))
+        if iteration_id:
+            filters.append(TestCase.iteration_id == iteration_id)
         
         if filters:
             query = query.filter(and_(*filters))
@@ -63,7 +73,7 @@ class TestCaseService:
         total = query.count()
         
         # 分页
-        test_cases = query.offset(skip).limit(limit).all()
+        test_cases = query.order_by(TestCase.created_at.desc()).offset(skip).limit(limit).all()
         
         return test_cases, total
     

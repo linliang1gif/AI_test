@@ -1,10 +1,12 @@
-"""
+﻿"""
 测试用例一键执行路由 (Phase 11 + 12 + 13)
 
 POST /api/v2/test-cases/{case_id}/execute
 
 从数据库读取TestCase → 变量替换 → 真实HTTP请求 → 断言校验 → 写入RunCase
 """
+
+from __future__ import annotations
 
 import os
 import uuid
@@ -23,7 +25,10 @@ from sqlalchemy.orm import Session
 
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if PROJECT_ROOT in sys.path:
+    sys.path.remove(PROJECT_ROOT)
+sys.path.insert(0, PROJECT_ROOT)
 
 from database.session import get_db
 from database.models import TestCase, TestRun, RunCase, Environment
@@ -32,12 +37,6 @@ from services.variable_resolver import (
     resolve_variables, extract_variables, has_unresolved_variables,
     sanitize_sensitive_data,
 )
-from app.executor_v2.execution_engine import ExecutionEngineV2
-from app.executor_v2.auth_manager import AuthManager
-from app.executor_v2.models import (
-    AssertionDef, AssertionResult, AssertionType, TestCaseV2, ExecutionResult, ExecutionStatus,
-)
-
 router = APIRouter(prefix="/api/v2/test-cases", tags=["TestCase-Execute"])
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -184,406 +183,20 @@ def batch_execute_test_cases(
 
     多个用例共用一个 TestRun，每个用例写入一条 RunCase。
     """
-    # Phase 16: 支持 preset 加载推荐测试集
-    if req.preset and not req.case_ids:
-        from services.case_governance_service import CaseGovernanceService
-        gov_svc = CaseGovernanceService(db)
-        preset_map = {
-            'smoke': gov_svc.recommend_smoke,
-            'regression': gov_svc.recommend_regression,
-            'query-safe': gov_svc.recommend_query_safe,
-            'failed-rerun': gov_svc.recommend_failed_rerun,
-            'p0': gov_svc.recommend_p0,
-        }
-        loader = preset_map.get(req.preset)
-        if not loader:
-            raise HTTPException(status_code=400, detail=f"未知推荐集: {req.preset}，可选: {', '.join(preset_map.keys())}")
-        preset_cases = loader(limit=2000)
-        req.case_ids = [tc.id for tc in preset_cases]
-
-    if not req.case_ids:
-        raise HTTPException(status_code=400, detail="请选择要执行的测试用例或指定 preset")
-
-    # 确定 base_url
-    base_url = req.base_url or ""
-    env_id = req.environment_id
-    if not base_url and env_id:
-        env = db.query(Environment).filter(Environment.id == env_id).first()
-        if env:
-            base_url = env.base_url
-    if not base_url:
-        envs = db.query(Environment).all()
-        if envs:
-            base_url = envs[0].base_url
-            env_id = envs[0].id
-    if not base_url:
-        raise HTTPException(
-            status_code=400,
-            detail="未配置测试环境地址。请在请求中传入 base_url 或先在项目中创建环境。"
-        )
-
-    auth_context = _prepare_environment_auth(db, env_id)
-    cases = db.query(TestCase).filter(TestCase.id.in_(req.case_ids)).all()
-    found_ids = {tc.id for tc in cases}
-    missing_ids = [cid for cid in req.case_ids if cid not in found_ids]
-    if not cases:
-        raise HTTPException(status_code=404, detail="未找到可执行的测试用例")
-
-    # P2-3: 过滤掉 web_ui 用例
-    web_ui_cases = [tc for tc in cases if getattr(tc, 'case_type', None) == 'web_ui']
-    if web_ui_cases:
-        cases = [tc for tc in cases if getattr(tc, 'case_type', None) != 'web_ui']
-        if not cases:
-            raise HTTPException(status_code=400, detail="所选用例均为 Web UI 用例，暂不支持执行。Playwright 执行引擎将在 P2-4 支持。")
-
-    # 真实项目安全执行保护 — 批量
-    app_mode = _get_app_mode()
-    if app_mode == "real" and not req.allow_unsafe_methods:
-        unsafe_cases = []
-        for tc in cases:
-            cfg = tc.execution_config or {}
-            m = (cfg.get('method') or 'GET').upper()
-            if m in UNSAFE_METHODS:
-                unsafe_cases.append({"case_id": tc.id, "title": tc.title, "method": m, "url": cfg.get('url', '')})
-        if unsafe_cases:
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "code": "REAL_MODE_UNSAFE_METHOD_BLOCKED",
-                    "message": f"真实项目模式下默认禁止执行写操作，批量中包含 {len(unsafe_cases)} 个危险方法用例，请手动确认后再执行",
-                    "unsafe_count": len(unsafe_cases),
-                    "unsafe_cases": unsafe_cases[:20],
-                    "app_mode": app_mode,
-                }
-            )
-
-    skipped_write_cases = []
-    skipped_destructive_cases = []    # list of tc.id
-    skipped_destructive_info = []     # Phase 18: full info dicts
-    # Phase 16+18: 跳过 destructive 用例
-    if req.skip_destructive:
-        safe = []
-        for tc in cases:
-            if getattr(tc, 'destructive', False):
-                skipped_destructive_cases.append(tc.id)
-                skipped_destructive_info.append({
-                    "case_id": tc.id,
-                    "case_name": tc.title,
-                    "module_name": getattr(tc, 'module_name', '') or tc.module or '',
-                    "risk_level": getattr(tc, 'risk_level', '') or '',
-                })
-            else:
-                safe.append(tc)
-        cases = safe
-
-    if not req.allow_write_operations:
-        safe_cases = []
-        for tc in cases:
-            exec_config = tc.execution_config or {}
-            if _detect_write_api(exec_config.get("method"), exec_config.get("url")):
-                skipped_write_cases.append(tc.id)
-            else:
-                safe_cases.append(tc)
-        cases = safe_cases
-
-    if not cases:
-        raise HTTPException(
-            status_code=400,
-            detail=f"无可执行用例。跳过写操作: {len(skipped_write_cases)}，跳过破坏性: {len(skipped_destructive_cases)}"
-        )
-
-    # ---- 智能排序：查询类先执行，写操作类后执行 ----
-    _PATTERN_ORDER = {"page": 0, "list": 1, "detail": 2, "other": 3, "save": 4, "update": 5, "delete": 6}
-    def _sort_key(tc):
-        cfg = tc.execution_config or {}
-        p = _detect_api_pattern_from_url(cfg.get("url", ""))
-        return _PATTERN_ORDER.get(p, 3)
-    cases.sort(key=_sort_key)
-
-    # uuid_pool: 按模块前缀存储从 list/page 接口提取的真实 uuid
-    # key = 模块前缀 (如 "/basic/basicWarehouse"), value = uuid
-    uuid_pool: Dict[str, str] = {}
-
-    run_id = f"RUN_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
-    trace_id = f"TRACE_{uuid.uuid4().hex}"
-    start_time = datetime.now()
-    engine = ExecutionEngineV2(base_url=base_url, auth_env_key=auth_context["env_key"], default_timeout=5.0)
-    results = []
-    counters = {"passed": 0, "failed": 0, "no_assertion": 0, "error": 0}
-
-    # 从环境关联的项目获取 project_id，如果没有则用第一个项目
-    _proj_id = None
-    if env_id:
-        _env_obj = db.query(Environment).filter(Environment.id == env_id).first()
-        _proj_id = getattr(_env_obj, 'project_id', None) if _env_obj else None
-    if not _proj_id:
-        from database.models import Project
-        _first_proj = db.query(Project).first()
-        _proj_id = _first_proj.id if _first_proj else None
-
-    test_run = TestRun(
-        id=run_id,
-        project_id=_proj_id,
-        environment_id=env_id,
-        trigger_type='manual_batch',
-        status='running',
-        trace_id=trace_id,
-        start_time=start_time,
-        total_cases=len(cases) + len(skipped_write_cases) + len(skipped_destructive_cases),
-        passed_cases=0,
-        failed_cases=0,
-        skipped_cases=len(skipped_write_cases) + len(skipped_destructive_cases),
+    from services.batch_execution_service import BatchExecutionService
+    result = BatchExecutionService(db).execute(
+        case_ids=req.case_ids,
+        preset=req.preset,
+        environment_id=req.environment_id,
+        base_url=req.base_url,
+        dataset_id=req.dataset_id,
+        variables=req.variables,
+        allow_unsafe_methods=req.allow_unsafe_methods,
+        allow_write_operations=req.allow_write_operations,
+        skip_destructive=req.skip_destructive,
+        trigger_type="manual_batch",
     )
-    db.add(test_run)
-    db.commit()
-    db.refresh(test_run)
-
-    for skipped_case_id in skipped_write_cases:
-        db.add(RunCase(
-            run_id=run_id,
-            test_case_id=skipped_case_id,
-            status="skipped",
-            start_time=start_time,
-            end_time=start_time,
-            duration=0,
-            error_message="写操作接口默认阻止执行",
-            error_type="write_blocked",
-            assertion_details=[],
-        ))
-
-    # Phase 18: 为 skipped destructive 用例写入 RunCase
-    for skipped_case_id in skipped_destructive_cases:
-        db.add(RunCase(
-            run_id=run_id,
-            test_case_id=skipped_case_id,
-            status="skipped",
-            start_time=start_time,
-            end_time=start_time,
-            duration=0,
-            error_message="已跳过破坏性接口，避免修改或删除数据",
-            error_type="destructive",
-            assertion_details=[],
-        ))
-
-    variables = req.variables or (_load_dataset_variables(req.dataset_id, db) if req.dataset_id else {})
-
-    for tc in cases:
-        case_start = datetime.now()
-        final_status = "error"
-        error_message = ""
-        req_snapshot = {}
-        resp_snapshot = {}
-        assertion_detail_list = []
-        assertion_summary = {"total": 0, "passed": 0, "failed": 0}
-        duration_ms = 0
-
-        try:
-            exec_config = tc.execution_config or {}
-            if not exec_config.get('method') or not exec_config.get('url'):
-                raise ValueError(f"用例 {tc.id} 缺少执行配置(method/url)")
-
-            method = exec_config.get('method', 'GET').upper()
-            url_path = exec_config.get('url', '/')
-            headers = _merge_headers(auth_context["default_headers"], exec_config.get('headers', {}))
-            query_params = exec_config.get('query_params', {})
-            body = exec_config.get('body')
-            if isinstance(body, dict):
-                body = body.copy()
-            timeout = exec_config.get('timeout', 30)
-
-            cur_pattern = _detect_api_pattern_from_url(url_path)
-
-            # ---- 数据关联：为写操作/详情接口注入真实 uuid ----
-            if cur_pattern in ("update", "delete", "detail") and isinstance(body, dict):
-                module_prefix = _extract_module_prefix(url_path)
-                real_uuid = uuid_pool.get(module_prefix)
-                if real_uuid:
-                    if "uuid" in body or not body:
-                        body["uuid"] = real_uuid
-
-            if variables:
-                url_path, m1 = resolve_variables(url_path, variables)
-                headers, m2 = resolve_variables(headers, variables)
-                query_params, m3 = resolve_variables(query_params, variables)
-                body, m4 = resolve_variables(body, variables) if body else (body, [])
-                missing_vars = list(dict.fromkeys(m1 + m2 + m3 + m4))
-                if missing_vars:
-                    raise ValueError(f"缺少变量: {', '.join(missing_vars)}")
-
-            assertions = _convert_assertions(tc.assertions or [])
-            has_assertions = len(assertions) > 0
-
-            case_v2 = TestCaseV2(
-                id=tc.id,
-                title=tc.title,
-                method=method,
-                path=url_path,
-                base_url=base_url,
-                headers=headers if isinstance(headers, dict) else {},
-                query_params=query_params if isinstance(query_params, dict) else {},
-                body=body,
-                timeout=timeout,
-                assertions=assertions,
-            )
-
-            result = engine.execute_case(case_v2, run_id=run_id)
-            _apply_business_code_assertion(result, url_path=url_path)
-            final_status = result.status
-            if not has_assertions and result.status == ExecutionStatus.PASSED.value:
-                final_status = "no_assertion"
-
-            duration_ms = result.duration_ms
-            error_message = result.error_message or ""
-            resp_snapshot = result.response.to_dict() if result.response else {}
-            assertion_detail_list = [a.to_dict() for a in result.assertions] if result.assertions else []
-            assertion_summary = result.assertion_summary if result.assertions else assertion_summary
-
-            # ---- 数据关联：从 list/page 响应提取 uuid 存入池 ----
-            if cur_pattern in ("page", "list") and result.response and isinstance(result.response.body, dict):
-                module_prefix = _extract_module_prefix(url_path)
-                extracted = _extract_uuid_from_response(result.response.body)
-                if extracted and module_prefix:
-                    uuid_pool[module_prefix] = extracted
-
-            req_snapshot = result.request.to_dict() if result.request else {
-                "method": method,
-                "url": f"{base_url.rstrip('/')}/{url_path.lstrip('/')}",
-                "headers": sanitize_sensitive_data(headers) if isinstance(headers, dict) else {},
-                "query_params": query_params,
-                "body": sanitize_sensitive_data(body) if isinstance(body, dict) else body,
-            }
-        except Exception as e:
-            final_status = "error"
-            error_message = str(e)
-            duration_ms = (datetime.now() - case_start).total_seconds() * 1000
-
-        counters[final_status if final_status in counters else "error"] += 1
-        case_end = datetime.now()
-
-        db.add(RunCase(
-            run_id=run_id,
-            test_case_id=tc.id,
-            status=final_status,
-            start_time=case_start,
-            end_time=case_end,
-            duration=duration_ms / 1000,
-            error_message=error_message or None,
-            request_snapshot=_json_safe(req_snapshot),
-            response_snapshot=_json_safe(resp_snapshot),
-            assertions_passed=assertion_summary.get("passed", 0),
-            assertions_failed=assertion_summary.get("failed", 0),
-            assertion_details=_json_safe(assertion_detail_list),
-        ))
-
-        tc.status = final_status
-        tc.updated_at = datetime.now()
-        # Phase 16: 写回治理字段
-        tc.last_run_status = final_status
-        if final_status in ('failed', 'error'):
-            tc.failure_category = _classify_failure_category(
-                final_status, error_message,
-                resp_snapshot if isinstance(resp_snapshot, dict) else {}
-            )
-        else:
-            tc.failure_category = None
-
-        results.append({
-            "case_id": tc.id,
-            "case_name": tc.title,
-            "status": final_status,
-            "duration_ms": round(duration_ms, 2),
-            "assertion_summary": assertion_summary,
-            "error_message": error_message,
-            "failure_category": tc.failure_category,
-        })
-
-    end_time = datetime.now()
-    total_duration = (end_time - start_time).total_seconds()
-    overall_status = "passed"
-    if counters["error"] > 0:
-        overall_status = "error"
-    elif counters["failed"] > 0:
-        overall_status = "failed"
-    elif counters["no_assertion"] > 0 and counters["passed"] == 0:
-        overall_status = "no_assertion"
-    elif counters["no_assertion"] > 0:
-        overall_status = "passed"
-
-    # Phase 18: 聚合 failure_categories + skipped_reasons
-    fc_agg = {}
-    for r in results:
-        cat = r.get("failure_category")
-        if cat:
-            fc_agg[cat] = fc_agg.get(cat, 0) + 1
-    sk_reasons = {}
-    if skipped_destructive_cases:
-        sk_reasons["destructive"] = len(skipped_destructive_cases)
-    if skipped_write_cases:
-        sk_reasons["write_blocked"] = len(skipped_write_cases)
-
-    total_all = len(cases) + len(skipped_write_cases) + len(skipped_destructive_cases)
-    total_skipped = len(skipped_write_cases) + len(skipped_destructive_cases)
-    executed_count = counters["passed"] + counters["failed"] + counters["error"] + counters["no_assertion"]
-    pass_rate_val = round(counters["passed"] / max(executed_count, 1) * 100, 1)
-
-    test_run.status = overall_status
-    test_run.end_time = end_time
-    test_run.duration = total_duration
-    test_run.total_cases = total_all
-    test_run.passed_cases = counters["passed"]
-    test_run.failed_cases = counters["failed"] + counters["error"]
-    test_run.skipped_cases = total_skipped
-    test_run.summary = json.dumps({
-        "app_mode": app_mode,
-        "allow_unsafe_methods": req.allow_unsafe_methods,
-        "missing_case_ids": missing_ids,
-        "skipped_write_case_ids": skipped_write_cases,
-        "skipped_destructive_case_ids": skipped_destructive_cases,
-        "no_assertion_cases": counters["no_assertion"],
-        "error_cases": counters["error"],
-        "preset": req.preset or None,
-        "failure_categories": fc_agg,
-        "skipped_reasons": sk_reasons,
-        "pass_rate": pass_rate_val,
-    }, ensure_ascii=False)
-
-    try:
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"批量执行结果入库失败: {str(e)}")
-
-    # Phase 18: 在 results 中追加 skipped 条目
-    for info in skipped_destructive_info:
-        results.append({
-            "case_id": info["case_id"],
-            "case_name": info["case_name"],
-            "status": "skipped",
-            "duration_ms": 0,
-            "assertion_summary": {"total": 0, "passed": 0, "failed": 0},
-            "error_message": "已跳过破坏性接口，避免修改或删除数据",
-            "failure_category": None,
-            "skipped_reason": "destructive",
-            "skipped_message": "已跳过破坏性接口，避免修改或删除数据",
-        })
-
-    return BatchExecuteResponse(
-        success=overall_status in ("passed", "no_assertion"),
-        run_id=run_id,
-        status=overall_status,
-        message=f"批量执行完成：通过 {counters['passed']}，失败 {counters['failed']}，跳过 {total_skipped}，通过率 {pass_rate_val}%",
-        total_cases=total_all,
-        passed_cases=counters["passed"],
-        failed_cases=counters["failed"] + counters["error"],
-        skipped_cases=total_skipped,
-        no_assertion_cases=counters["no_assertion"],
-        error_cases=counters["error"],
-        duration_ms=round(total_duration * 1000, 2),
-        pass_rate=pass_rate_val,
-        failure_categories=fc_agg,
-        skipped_reasons=sk_reasons,
-        results=results,
-    )
+    return BatchExecuteResponse(**result)
 
 def _execute_web_ui_case(tc, req, db):
     """P2-4: 执行 Web UI 用例并写入结果"""
@@ -604,6 +217,7 @@ def _execute_web_ui_case(tc, req, db):
     exec_config = tc.execution_config or {}
     steps = tc.steps or []
     assertions = tc.assertions or []
+    _sync_web_ui_session_from_auth_profile(db, exec_config)
 
     # P2-9B: preflight check
     pf = preflight_check(getattr(tc, 'case_type', 'web_ui'), steps, assertions, exec_config)
@@ -939,6 +553,9 @@ def execute_test_case(
     has_assertions = len(assertions) > 0
 
     # 6. 构建 TestCaseV2 并执行
+    from app.executor_v2.execution_engine import ExecutionEngineV2
+    from app.executor_v2.models import ExecutionStatus, TestCaseV2
+
     case_v2 = TestCaseV2(
         id=tc.id,
         title=tc.title,
@@ -1122,6 +739,169 @@ def _json_safe(value):
     return json.loads(json.dumps(value, ensure_ascii=False, default=str))
 
 
+def _load_auth_manager():
+    import importlib
+
+    app_mod = sys.modules.get("app")
+    app_file = str(getattr(app_mod, "__file__", "")) if app_mod else ""
+    local_app_dir = str(Path(PROJECT_ROOT) / "app")
+    if app_mod and app_file and not app_file.startswith(local_app_dir):
+        for name in list(sys.modules):
+            if name == "app" or name.startswith("app."):
+                del sys.modules[name]
+
+    if PROJECT_ROOT in sys.path:
+        sys.path.remove(PROJECT_ROOT)
+    sys.path.insert(0, PROJECT_ROOT)
+    return importlib.import_module("app.executor_v2.auth_manager").AuthManager
+
+
+def _sync_web_ui_session_token(project_id: Optional[int], token: str) -> bool:
+    """同步 API 快捷 Token 到 Web UI 登录会话的 staticToken cookie。"""
+    if not project_id or not token:
+        return False
+
+    session_path = Path("data") / "sessions" / f"session_{project_id}.json"
+
+    try:
+        if session_path.exists():
+            with open(session_path, "r", encoding="utf-8") as f:
+                session = json.load(f)
+        else:
+            session_path.parent.mkdir(parents=True, exist_ok=True)
+            session = {
+                "project_id": str(project_id),
+                "base_url": "",
+                "cookies": [],
+                "local_storage": {},
+                "page_url": "",
+                "page_title": "",
+            }
+
+        cookies = session.get("cookies") or []
+        has_static = False
+        for cookie in cookies:
+            name = cookie.get("name")
+            if name == "staticToken":
+                cookie["value"] = token
+                has_static = True
+            elif name == "token":
+                cookie["value"] = "access_token"
+
+        if not has_static:
+            cookies.append({
+                "name": "staticToken",
+                "value": token,
+                "domain": ".szhibu.com",
+                "path": "/",
+                "expires": -1,
+                "httpOnly": False,
+                "secure": False,
+                "sameSite": "Lax",
+            })
+
+        session["cookies"] = cookies
+        local_storage = session.get("local_storage") or session.get("storage") or {}
+        if isinstance(local_storage, str):
+            try:
+                local_storage = json.loads(local_storage)
+            except Exception:
+                local_storage = {}
+        local_storage["token"] = token
+        session["local_storage"] = local_storage
+        session["saved_at"] = datetime.now().isoformat()
+        with open(session_path, "w", encoding="utf-8") as f:
+            json.dump(session, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        logger.warning("同步 Web UI 登录会话 Token 失败: %s", e)
+        return False
+
+
+def _sync_web_ui_session_from_auth_profile(db: Session, execution_config: Dict[str, Any]) -> bool:
+    """执行 Web UI 前，把项目环境里的最新 access token 同步到登录会话。"""
+    project_id = execution_config.get("session_project_id")
+
+    base_url = (execution_config.get("base_url") or "").strip()
+    project_id_int = None
+    envs = []
+
+    if project_id:
+        try:
+            project_id_int = int(project_id)
+            envs = db.query(Environment).filter(Environment.project_id == project_id_int).all()
+        except (TypeError, ValueError):
+            return False
+
+    if not envs and base_url:
+        try:
+            from urllib.parse import urlparse
+            target_host = urlparse(base_url).netloc
+            envs = [
+                env for env in db.query(Environment).all()
+                if urlparse(env.base_url or "").netloc == target_host
+            ]
+            if envs:
+                project_id_int = envs[0].project_id
+        except Exception:
+            envs = []
+
+    if not envs or not project_id_int:
+        return False
+
+    if base_url:
+        try:
+            from urllib.parse import urlparse
+            target_host = urlparse(base_url).netloc
+            matched = [env for env in envs if urlparse(env.base_url or "").netloc == target_host]
+            if matched:
+                envs = matched
+        except Exception:
+            pass
+
+    service = AuthService(db)
+    for env in envs:
+        auth_profile = service.get_by_environment(env.id)
+        if not auth_profile:
+            continue
+
+        try:
+            auth_config = service.get_decrypted_config(auth_profile) or {}
+            if isinstance(auth_config, str):
+                auth_config = json.loads(auth_config)
+        except Exception as e:
+            logger.warning("读取环境鉴权配置失败 env=%s: %s", env.id, e)
+            continue
+
+        token = ""
+        if auth_profile.auth_type in ("bearer", "custom", "cookie"):
+            token = auth_config.get("token") or auth_config.get("value") or auth_config.get("cookie_value") or ""
+        elif auth_profile.auth_type == "oauth2":
+            token = auth_config.get("access_token") or auth_config.get("token") or ""
+
+        if not token:
+            continue
+
+        synced = _sync_web_ui_session_token(project_id_int, token)
+        if synced:
+            AuthManager = _load_auth_manager()
+
+            env_key = f"env_{env.id}"
+            if auth_profile.auth_type == "bearer":
+                AuthManager.set_token(token=token, auth_type="bearer", env_key=env_key)
+            else:
+                AuthManager.set_token(
+                    token=token,
+                    auth_type="custom",
+                    env_key=env_key,
+                    extra={"header_name": "Authorization", "prefix": "Bearer "},
+                )
+            logger.info("已同步 Web UI 会话 Token project=%s env=%s", project_id_int, env.id)
+            return True
+
+    return False
+
+
 def _merge_headers(default_headers: Optional[Dict[str, str]], case_headers: Any) -> Dict[str, str]:
     headers = {}
     if isinstance(default_headers, dict):
@@ -1132,6 +912,8 @@ def _merge_headers(default_headers: Optional[Dict[str, str]], case_headers: Any)
 
 
 def _prepare_environment_auth(db: Session, env_id: Optional[int]) -> Dict[str, Any]:
+    AuthManager = _load_auth_manager()
+
     env_key = f"env_{env_id}" if env_id else "default"
     context = {"env_key": env_key, "default_headers": {}}
     if not env_id:
@@ -1231,6 +1013,8 @@ _WRITE_ACCEPTABLE_CODES = {
 
 
 def _apply_business_code_assertion(result: ExecutionResult, url_path: str = "") -> None:
+    from app.executor_v2.models import AssertionResult, ExecutionStatus
+
     if not result.response or not isinstance(result.response.body, dict):
         return
     body = result.response.body
@@ -1268,6 +1052,8 @@ def _apply_business_code_assertion(result: ExecutionResult, url_path: str = "") 
 
 
 def _convert_assertions(raw_assertions: list) -> list:
+    from app.executor_v2.models import AssertionDef, AssertionType
+
     """
     将数据库中的断言格式转换为 AssertionDef 列表。
     兼容 Swagger 生成的格式和标准格式。
@@ -1372,6 +1158,8 @@ async def update_quick_token(request: dict, db: Session = Depends(get_db)):
     请求体: {"token": "eyJ...", "environment_id": 1}
     """
     token = (request.get("token") or "").strip()
+    if token.lower().startswith("bearer "):
+        token = token.split(None, 1)[1].strip()
     env_id = request.get("environment_id", 1)
     if not token:
         raise HTTPException(status_code=400, detail="请提供 token")
@@ -1381,6 +1169,28 @@ async def update_quick_token(request: dict, db: Session = Depends(get_db)):
     auth_profile = service.get_by_environment(env_id)
     if not auth_profile:
         raise HTTPException(status_code=404, detail=f"未找到环境 {env_id} 的认证配置")
+
+    env = db.query(Environment).filter(Environment.id == env_id).first()
+    token_validation = None
+    if env and getattr(env, "base_url", ""):
+        try:
+            from routes.page_scanner_routes import _validate_business_token
+
+            token_validation = _validate_business_token(env.base_url, token)
+            if token_validation and not token_validation.get("valid"):
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "TOKEN_VALIDATION_FAILED",
+                        "message": token_validation.get("message") or "Token 校验失败",
+                        "status": token_validation.get("status"),
+                        "business_code": token_validation.get("business_code"),
+                    },
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning("Token 业务校验失败，继续更新: %s", e)
 
     # 解析 JWT 提取 pin（如有）
     pin = ""
@@ -1417,13 +1227,18 @@ async def update_quick_token(request: dict, db: Session = Depends(get_db)):
     db.commit()
 
     # 立即刷新内存中的 token
+    AuthManager = _load_auth_manager()
+
     env_key = f"env_{env_id}"
     AuthManager.set_token(token=token, auth_type="custom", env_key=env_key,
                           extra={"header_name": "Authorization", "prefix": "Bearer "})
+    session_synced = _sync_web_ui_session_token(getattr(env, "project_id", None), token)
 
     return {
         "success": True,
-        "message": f"Token 已更新 (pin={pin or '未检测到'})",
+        "message": f"Token 已更新 (pin={pin or '未检测到'}, Web会话={'已同步' if session_synced else '未同步'})",
         "environment_id": env_id,
         "pin": pin,
+        "web_session_synced": session_synced,
+        "token_validation": token_validation,
     }

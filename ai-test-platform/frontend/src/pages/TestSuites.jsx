@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
+import DangerConfirmDialog from '../components/common/DangerConfirmDialog'
 
 const API = '/api/v2/test-suites'
+// Phase 10B: 后端 check_confirm 要求的 confirm_text（与 backend/routes/test_suite_routes.py 对齐）
+const DELETE_TEST_SUITE = 'DELETE_TEST_SUITE'
 const SUITE_TYPES = ['smoke', 'regression', 'release', 'api', 'web_ui', 'visual', 'performance', 'mixed']
 const PRIORITIES = ['critical', 'high', 'medium', 'low']
 const TYPE_LABELS = { smoke: '冒烟', regression: '回归', release: '发布前', api: 'API', web_ui: 'Web UI', visual: '视觉', performance: '性能', mixed: '混合' }
@@ -18,6 +21,7 @@ export default function TestSuites() {
   const [showDetail, setShowDetail] = useState(null)
   const [showAddCases, setShowAddCases] = useState(null)
   const [editSuite, setEditSuite] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)  // Phase 10B: 危险操作确认
 
   // form
   const [form, setForm] = useState({ name: '', description: '', suite_type: 'mixed', priority: 'medium' })
@@ -56,9 +60,23 @@ export default function TestSuites() {
     if (r.ok) { setEditSuite(null); fetchSuites() }
   }
 
-  const handleDelete = async (id) => {
-    if (!confirm('确认删除此测试集？')) return
-    await fetch(`${API}/${id}`, { method: 'DELETE' })
+  // Phase 10B: 删除改为通过 DangerConfirmDialog 携带 confirm_text
+  const handleDelete = (suite) => {
+    setDeleteTarget(suite)
+  }
+
+  const doDelete = async () => {
+    if (!deleteTarget) return
+    const r = await fetch(`${API}/${deleteTarget.id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: true, confirm_text: DELETE_TEST_SUITE }),
+    })
+    if (!r.ok) {
+      const err = await r.text().catch(() => '')
+      throw new Error(err || `删除失败 (${r.status})`)
+    }
+    setDeleteTarget(null)
     fetchSuites()
   }
 
@@ -157,7 +175,7 @@ export default function TestSuites() {
                     <button onClick={() => openAddCases(s)} className="px-2 py-1 text-xs bg-green-50 text-green-700 rounded hover:bg-green-100">添加用例</button>
                     <button onClick={() => handleRun(s.id)} className="px-2 py-1 text-xs bg-blue-50 text-blue-700 rounded hover:bg-blue-100">执行</button>
                     <button onClick={() => openEdit(s)} className="px-2 py-1 text-xs bg-slate-50 text-slate-600 rounded hover:bg-slate-100">编辑</button>
-                    <button onClick={() => handleDelete(s.id)} className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100">删除</button>
+                    <button onClick={() => handleDelete(s)} className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100">删除</button>
                   </div>
                 </td>
               </tr>
@@ -307,6 +325,19 @@ export default function TestSuites() {
           </div>
         </div>
       )}
+
+      {/* Phase 10B: 删除确认弹窗（要求输入 DELETE_TEST_SUITE） */}
+      <DangerConfirmDialog
+        open={!!deleteTarget}
+        title="删除测试集"
+        description={deleteTarget
+          ? `将永久删除测试集「${deleteTarget.name}」(ID: ${deleteTarget.id})，包含的用例关联会一并移除，此操作不可恢复。`
+          : ''}
+        confirmText={DELETE_TEST_SUITE}
+        confirmLabel="删除"
+        onConfirm={doDelete}
+        onClose={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

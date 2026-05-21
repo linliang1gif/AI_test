@@ -82,7 +82,18 @@ export default function AuthProfileForm({ environment, onClose, onSaved }) {
       }
       onSaved()
     } catch (error) {
-      toast.error(`操作失败: ${error.message}`)
+      let message = error.message || String(error)
+      const jsonStart = message.indexOf('{')
+      if (jsonStart >= 0) {
+        try {
+          const body = JSON.parse(message.slice(jsonStart))
+          const detail = body.detail
+          message = typeof detail === 'object'
+            ? (detail.message || JSON.stringify(detail))
+            : (detail || body.message || message)
+        } catch {}
+      }
+      toast.error(`操作失败: ${message}`)
     } finally {
       setLoading(false)
     }

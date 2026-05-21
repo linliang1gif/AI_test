@@ -27,6 +27,7 @@ function ScoreLabel(score) {
 export default function Dashboard() {
   const navigate = useNavigate()
   const [data, setData] = useState(null)
+  const [sessionHealth, setSessionHealth] = useState(null)
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState('')
   const [actionMsg, setActionMsg] = useState('')
@@ -38,6 +39,12 @@ export default function Dashboard() {
       setData(res.data || res)
     } catch (e) {
       setData(null)
+    }
+    try {
+      const res = await api.v2.ui.getLoginSessionsHealth()
+      setSessionHealth(res)
+    } catch (e) {
+      setSessionHealth({ success: false, sessions: [], summary: { total: 0, valid: 0, invalid: 0 }, error: e.message })
     }
     setLoading(false)
   }
@@ -77,6 +84,22 @@ export default function Dashboard() {
       await loadDashboard()
     } catch (e) { setActionMsg('❌ AI 分析失败: ' + e.message) }
     setActionLoading('')
+  }
+
+  const handleClearLoginSession = async (projectId) => {
+    if (!projectId) return
+    if (!window.confirm(`确定清除项目 ${projectId} 的 Web UI 登录会话？`)) return
+    setActionLoading(`clear-session-${projectId}`)
+    setActionMsg('')
+    try {
+      await api.v2.ui.deleteLoginSession(projectId)
+      setActionMsg(`已清除项目 ${projectId} 的失效登录会话`)
+      await loadDashboard()
+    } catch (e) {
+      setActionMsg('清除登录会话失败: ' + (e.message || e))
+    } finally {
+      setActionLoading('')
+    }
   }
 
   if (loading) return (
@@ -145,6 +168,25 @@ export default function Dashboard() {
           </div>
         </div>
         {actionMsg && <p className="text-sm mt-2">{actionMsg}</p>}
+      </div>
+
+      {/* 登录态状态 */}
+      <div className="bg-white rounded-lg shadow-sm border p-5 mb-6">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <h2 className="text-base font-bold text-gray-800">Web UI 登录态</h2>
+            <p className="text-xs text-gray-500 mt-0.5">执行 Web UI 用例前自动校验 access_token、会话文件和业务用户接口</p>
+          </div>
+          <button onClick={loadDashboard}
+            className="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 rounded">
+            重新检测
+          </button>
+        </div>
+        <SessionHealthPanel
+          data={sessionHealth}
+          onOpenCases={() => navigate('/test-cases')}
+          onClearSession={handleClearLoginSession}
+        />
       </div>
 
       {/* 核心指标卡片 */}
@@ -368,6 +410,83 @@ function MiniStat({ label, value, cls = '' }) {
     <div className="text-center bg-gray-50 rounded p-2">
       <div className={`text-lg font-bold ${cls}`}>{value}</div>
       <div className="text-xs text-gray-500">{label}</div>
+    </div>
+  )
+}
+
+function SessionHealthPanel({ data, onOpenCases, onClearSession }) {
+  const sessions = data?.sessions || []
+  const summary = data?.summary || { total: 0, valid: 0, invalid: 0 }
+
+  if (!data) {
+    return <p className="text-sm text-gray-400">登录态检测中...</p>
+  }
+
+  if (!data.success && data.error) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
+        登录态检测失败：{data.error}
+      </div>
+    )
+  }
+
+  if (sessions.length === 0) {
+    return (
+      <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded p-3">
+        <span className="text-sm text-amber-800">暂无 Web UI 登录会话，请先在测试用例页保存登录会话。</span>
+        <button onClick={onOpenCases} className="px-3 py-1.5 text-xs bg-amber-600 text-white rounded hover:bg-amber-700">
+          去保存
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-3 gap-3">
+        <MiniStat label="会话数" value={summary.total} />
+        <MiniStat label="有效" value={summary.valid} cls="text-green-600" />
+        <MiniStat label="异常" value={summary.invalid} cls={summary.invalid ? 'text-red-600' : 'text-gray-500'} />
+      </div>
+      <div className="space-y-2">
+        {sessions.map((item, idx) => {
+          const validation = item.validation || {}
+          const ok = !!validation.valid
+          const statusText = ok ? '可用' : validation.status || '异常'
+          return (
+            <div key={`${item.project_id}-${idx}`} className={`border rounded p-3 ${ok ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${ok ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                      {statusText}
+                    </span>
+                    <span className="text-sm font-semibold text-gray-800">项目 {item.project_id}</span>
+                    {item.environment_id && <span className="text-xs text-gray-500">环境 {item.environment_id} · {item.environment_name}</span>}
+                    {item.pin && <span className="text-xs text-gray-500">pin={item.pin}</span>}
+                  </div>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {item.token_source || '未检测到 token'} · 过期时间 {item.token_expires_at || '-'} · 保存时间 {item.saved_at || '-'}
+                  </p>
+                  {!ok && <p className="text-xs text-red-700 mt-1">{validation.message || '登录态不可用'}</p>}
+                </div>
+                {!ok && (
+                  <div className="flex gap-2">
+                    <button onClick={() => onClearSession?.(item.project_id)}
+                      className="px-3 py-1.5 text-xs bg-white border border-red-200 text-red-700 rounded hover:bg-red-100 whitespace-nowrap">
+                      清除会话
+                    </button>
+                    <button onClick={onOpenCases}
+                      className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 whitespace-nowrap">
+                      修复登录态
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

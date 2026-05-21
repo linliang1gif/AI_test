@@ -4,7 +4,7 @@ P3-3B: 缺陷闭环 MVP 路由
 9 个 API 端点: CRUD + 状态流转 + 从 run_case/failure_analysis 创建 + 重复检测 + 关联 run
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import Optional, List
 from datetime import datetime
 from sqlalchemy.orm import Session
@@ -39,6 +39,11 @@ class DefectCreateRequest(BaseModel):
     created_by: Optional[str] = "system"
     assigned_to: Optional[str] = None
 
+    @field_validator("run_case_id", mode="before")
+    @classmethod
+    def normalize_run_case_id(cls, v):
+        return None if v is None else str(v)
+
 
 class DefectUpdateRequest(BaseModel):
     title: Optional[str] = None
@@ -67,6 +72,11 @@ class FromRunCaseRequest(BaseModel):
     project_id: Optional[int] = None
     created_by: Optional[str] = "system"
 
+    @field_validator("run_case_id", mode="before")
+    @classmethod
+    def normalize_run_case_id(cls, v):
+        return "" if v is None else str(v)
+
 
 class FromFailureAnalysisRequest(BaseModel):
     title: Optional[str] = None
@@ -86,6 +96,11 @@ class FromFailureAnalysisRequest(BaseModel):
     module: Optional[str] = ""
     project_id: Optional[int] = None
     created_by: Optional[str] = "system"
+
+    @field_validator("run_case_id", mode="before")
+    @classmethod
+    def normalize_run_case_id(cls, v):
+        return None if v is None else str(v)
 
 
 class LinkRunRequest(BaseModel):

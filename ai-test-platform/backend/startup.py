@@ -113,6 +113,31 @@ def _run_migrations():
         logger.warning(f"Phase 19 迁移失败: {e}")
 
 
+    try:
+        from database import get_db_session
+        from sqlalchemy import inspect as sa_inspect, text as sa_text
+        with get_db_session() as db:
+            inspector = sa_inspect(db.bind)
+            if "iteration_test_points" in inspector.get_table_names():
+                cols = [c["name"] for c in inspector.get_columns("iteration_test_points")]
+                added = []
+                new_cols = {
+                    "recommended_api": "JSON",
+                    "execution_config": "JSON",
+                }
+                for col_name, col_type in new_cols.items():
+                    if col_name not in cols:
+                        db.execute(sa_text(f"ALTER TABLE iteration_test_points ADD COLUMN {col_name} {col_type}"))
+                        added.append(col_name)
+                if added:
+                    db.commit()
+                    logger.info(f"D2-3A.2 迁移: iteration_test_points 添加字段 {added}")
+                else:
+                    logger.info("D2-3A.2 iteration_test_points RAG 字段已存在")
+    except Exception as e:
+        logger.warning(f"D2-3A.2 迁移失败: {e}")
+
+
     # P2-10 test_suites + test_suite_cases 表
     try:
         from database import get_db_session

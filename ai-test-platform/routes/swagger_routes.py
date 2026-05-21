@@ -1040,6 +1040,8 @@ async def get_test_cases(
     source: str = Query(None, description="来源: swagger/manual/ai_generated"),
     status: str = Query(None, description="状态: pending/passed/failed/skipped"),
     case_type: str = Query(None, description="用例类型: api/functional/web_ui"),
+    keyword: str = Query(None, description="关键词搜索(标题/模块)"),
+    iteration_id: int = Query(None, description="迭代ID"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=5000),
     db: Session = Depends(get_db)
@@ -1047,7 +1049,7 @@ async def get_test_cases(
     """
     获取测试用例列表
     
-    支持按项目、来源、状态、用例类型过滤
+    支持按项目、来源、状态、用例类型、关键词、迭代过滤
     """
     try:
         service = TestCaseService(db)
@@ -1056,6 +1058,8 @@ async def get_test_cases(
             source=source,
             status=status,
             case_type=case_type,
+            keyword=keyword,
+            iteration_id=iteration_id,
             skip=skip,
             limit=limit
         )
@@ -1135,7 +1139,6 @@ async def get_test_case(
 def batch_delete_test_cases(
     request: dict,
     db: Session = Depends(get_db),
-    body: Optional[ConfirmRequest] = Body(None),
 ):
     """
     批量删除测试用例（V2 数据库版 — 软删除）
@@ -1143,11 +1146,13 @@ def batch_delete_test_cases(
     软删除策略：将 status 设为 'deleted'，保留数据库记录和 run_cases FK 完整性。
     正常查询自动排除 status='deleted' 的用例。
 
-    Body:
-      ids: list[str]  — 要删除的测试用例 ID 列表
+    Body (flat JSON):
+      ids: list[str]      — 要删除的测试用例 ID 列表
+      confirm: bool       — Phase 10B 确认标志
+      confirm_text: str   — 必须为 "BULK_DELETE_TEST_CASES"
     """
-    # Phase 10B: 危险操作守卫
-    check_confirm("BULK_DELETE_TEST_CASES", (body or ConfirmRequest()).confirm, (body or ConfirmRequest()).confirm_text)
+    # Phase 10B: 危险操作守卫（confirm 字段与 ids 同处一个平铺 body，避免 FastAPI 多 body 参数强制 embed）
+    check_confirm("BULK_DELETE_TEST_CASES", request.get("confirm"), request.get("confirm_text"))
     ids = request.get("ids", [])
     if not ids:
         raise HTTPException(status_code=400, detail="缺少 ids")

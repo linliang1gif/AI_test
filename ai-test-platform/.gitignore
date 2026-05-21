@@ -147,3 +147,20 @@ dmypy.json
 # 本地诊断脚本与输出（一次性）
 scripts/_*.py
 scripts/_e2e_*_out/
+
+# 被测系统源码副本（不要混入平台仓库）
+recycle-*/
+蓝点/
+
+# 历史归档目录（不进入 git 跟踪）
+archive/
+docs/archive/
+tests/legacy/
+
+# 误复制的自嵌套仓库
+ai测试/
+
+# 前端构建产物
+node_modules/
+dist/
+coverage/

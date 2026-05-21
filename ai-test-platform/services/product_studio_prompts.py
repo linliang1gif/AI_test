@@ -356,7 +356,13 @@ def build_requirement_points_from_artifact_prompt(artifact_content: str, artifac
 """
 
 
-def build_test_cases_from_artifact_prompt(artifact_content: str, artifact_type: str) -> str:
+def build_test_cases_from_artifact_prompt(artifact_content: str, artifact_type: str, requirement_points: list = None) -> str:
+    rp_lines = []
+    for rp in requirement_points or []:
+        rp_lines.append(
+            f"- {rp.get('id', '')}: {rp.get('title', '')} | priority={rp.get('priority', '')} | risk={rp.get('risk_level', '')} | {rp.get('description', '')[:160]}"
+        )
+    rp_context = "\n".join(rp_lines) if rp_lines else "（未提供需求点，请不要编造 requirement_id）"
     return f"""你是一位资深测试架构师，擅长从产品文档中生成结构化测试用例。
 
 ## 输入信息
@@ -364,6 +370,12 @@ def build_test_cases_from_artifact_prompt(artifact_content: str, artifact_type: 
 以下是一份 {artifact_type} 产物的内容：
 
 {artifact_content[:8000]}
+
+## 已提取需求点
+
+生成的每条测试用例必须关联下面某一个需求点的 id，填写到 related_requirement_id。
+
+{rp_context}
 
 ## 输出要求
 
@@ -375,13 +387,20 @@ def build_test_cases_from_artifact_prompt(artifact_content: str, artifact_type: 
 [
   {{
     "case_title": "测试用例标题",
+    "related_requirement_id": "关联需求点 id，例如 RP_PS_xxx",
+    "related_requirement_hint": "关联需求点标题或说明",
     "preconditions": "前置条件",
-    "test_steps": "测试步骤（文本描述）",
+    "test_steps": ["步骤1", "步骤2", "步骤3"],
+    "test_data": "测试数据，包含正常值、边界值或异常值",
     "expected_result": "预期结果",
     "priority": "critical/high/medium/low",
+    "risk_level": "P0/P1/P2",
+    "test_type": "functional/api/ui/abnormal/boundary/security",
     "case_type": "functional/api/ui/abnormal/ai_quality",
     "source_artifact_section": "来源章节/段落标识",
-    "related_requirement_hint": "关联需求点提示"
+    "automation_suggestion": "建议自动化/建议人工验证及原因",
+    "negative_scenario": "异常场景说明",
+    "boundary_scenario": "边界场景说明"
   }}
 ]
 ```
@@ -394,6 +413,8 @@ def build_test_cases_from_artifact_prompt(artifact_content: str, artifact_type: 
 3. 覆盖正常流程、异常流程、边界条件。
 4. 至少生成 5 条测试用例，最多 30 条。
 5. case_type 必须是以下之一：functional / api / ui / abnormal / ai_quality。
+6. 测试用例不能只生成一句话描述，test_steps 至少 3 步。
+7. 每条用例必须包含：标题、关联需求点、前置条件、操作步骤、测试数据、预期结果、优先级、风险等级、测试类型、自动化建议、异常场景、边界场景。
 """
 
 

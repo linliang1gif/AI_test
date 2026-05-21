@@ -6,7 +6,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from database import get_db
 from database.models import Environment
@@ -25,6 +25,86 @@ from schemas.project_schemas import (
 from backend.danger_guard import check_confirm, ConfirmRequest
 
 router = APIRouter(prefix="/api/v2", tags=["项目配置"])
+
+
+def _auth_type_value(auth_type: Any) -> str:
+    return getattr(auth_type, "value", auth_type) or ""
+
+
+def _normalize_token_value(token: str) -> str:
+    token = (token or "").strip()
+    if token.lower().startswith("bearer "):
+        return token.split(None, 1)[1].strip()
+    return token
+
+
+def _extract_auth_token(auth_type: Any, auth_config: Optional[Dict[str, Any]]) -> str:
+    auth_type = _auth_type_value(auth_type)
+    auth_config = auth_config or {}
+    if auth_type == "bearer":
+        return _normalize_token_value(auth_config.get("token", ""))
+    if auth_type == "custom":
+        header_name = str(auth_config.get("header_name") or "Authorization").lower()
+        if header_name == "authorization":
+            return _normalize_token_value(auth_config.get("token") or auth_config.get("value") or "")
+    if auth_type == "oauth2":
+        return _normalize_token_value(auth_config.get("access_token") or auth_config.get("token") or "")
+    return ""
+
+
+def _write_normalized_token(auth_type: Any, auth_config: Optional[Dict[str, Any]], token: str) -> None:
+    if not auth_config:
+        return
+    auth_type = _auth_type_value(auth_type)
+    if auth_type in ("bearer", "oauth2") and "token" in auth_config:
+        auth_config["token"] = token
+    elif auth_type == "custom":
+        if "token" in auth_config:
+            auth_config["token"] = token
+        elif "value" in auth_config:
+            auth_config["value"] = token
+
+
+def _validate_auth_token_or_raise(db: Session, environment_id: int, auth_type: Any, auth_config: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    token = _extract_auth_token(auth_type, auth_config)
+    if not token:
+        return None
+
+    env = db.query(Environment).filter(Environment.id == environment_id).first()
+    if not env:
+        return None
+
+    from routes.page_scanner_routes import _validate_business_token
+
+    result = _validate_business_token(env.base_url, token)
+    if not result.get("valid"):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "TOKEN_VALIDATION_FAILED",
+                "message": result.get("message") or "Token 校验失败",
+                "status": result.get("status"),
+                "business_code": result.get("business_code"),
+            },
+        )
+
+    _write_normalized_token(auth_type, auth_config, token)
+    return result
+
+
+def _sync_auth_token_to_web_session(db: Session, environment_id: int, auth_type: Any, auth_config: Optional[Dict[str, Any]]) -> None:
+    token = _extract_auth_token(auth_type, auth_config)
+    if not token:
+        return
+    env = db.query(Environment).filter(Environment.id == environment_id).first()
+    if not env:
+        return
+    try:
+        from routes.case_execute_routes import _sync_web_ui_session_token
+
+        _sync_web_ui_session_token(env.project_id, token)
+    except Exception:
+        pass
 
 
 # ==================== Project APIs ====================
@@ -250,8 +330,16 @@ async def create_auth_profile(
 ):
     """创建鉴权配置"""
     try:
+        token_validation = _validate_auth_token_or_raise(
+            db,
+            auth_profile.environment_id,
+            auth_profile.auth_type,
+            auth_profile.auth_config,
+        )
         service = AuthService(db)
         new_auth = service.create_auth_profile(auth_profile)
+        if token_validation:
+            _sync_auth_token_to_web_session(db, new_auth.environment_id, new_auth.auth_type, auth_profile.auth_config)
         
         # 返回脱敏数据
         return AuthProfileResponse(
@@ -306,9 +394,23 @@ async def update_auth_profile(
     """更新鉴权配置"""
     try:
         service = AuthService(db)
+        existing = service.get_auth_profile(auth_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail=f"鉴权配置ID {auth_id} 不存在")
+        effective_auth_type = auth_profile.auth_type if auth_profile.auth_type is not None else existing.auth_type
+        token_validation = None
+        if auth_profile.auth_config is not None:
+            token_validation = _validate_auth_token_or_raise(
+                db,
+                existing.environment_id,
+                effective_auth_type,
+                auth_profile.auth_config,
+            )
         updated_auth = service.update_auth_profile(auth_id, auth_profile)
         if not updated_auth:
             raise HTTPException(status_code=404, detail=f"鉴权配置ID {auth_id} 不存在")
+        if token_validation:
+            _sync_auth_token_to_web_session(db, updated_auth.environment_id, effective_auth_type, auth_profile.auth_config)
         
         # 返回脱敏数据
         return AuthProfileResponse(

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import api from '../services/api'
+import api, { DANGER } from '../services/api'
+import DangerConfirmDialog from '../components/common/DangerConfirmDialog'
 
 export default function ProjectsV2() {
   const navigate = useNavigate()
@@ -16,6 +17,7 @@ export default function ProjectsV2() {
     team: ''
   })
   const menuRef = useRef(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)  // Phase 10B
 
   useEffect(() => {
     loadProjects()
@@ -63,16 +65,20 @@ export default function ProjectsV2() {
     }
   }
 
-  const handleDelete = async (id) => {
-    if (!confirm('确定要删除这个项目吗?')) return
-    
-    try {
-      await api.v2.projects.delete(id)
-      setProjects(prev => prev.filter(project => project.id !== id))
-      loadProjects()
-    } catch (err) {
-      alert(`删除失败: ${err.message}`)
-    }
+  // Phase 10B: 删除改为 DangerConfirmDialog
+  const handleDelete = (project) => {
+    setDeleteTarget(project)
+  }
+
+  const doDelete = async () => {
+    if (!deleteTarget) return
+    await api.v2.projects.delete(deleteTarget.id, {
+      confirm: true,
+      confirm_text: DANGER.DELETE_PROJECT,
+    })
+    setDeleteTarget(null)
+    setProjects(prev => prev.filter(p => p.id !== deleteTarget.id))
+    loadProjects()
   }
 
   const filteredProjects = projects.filter(p =>
@@ -200,7 +206,7 @@ export default function ProjectsV2() {
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
-                    handleDelete(project.id)
+                    handleDelete(project)
                   }}
                   className="text-slate-400 hover:text-red-600 transition-colors ml-2"
                   title="删除项目"
@@ -313,6 +319,19 @@ export default function ProjectsV2() {
           </div>
         </div>
       )}
+
+      {/* Phase 10B: 删除确认弹窗 */}
+      <DangerConfirmDialog
+        open={!!deleteTarget}
+        title="删除项目"
+        description={deleteTarget
+          ? `将永久删除项目「${deleteTarget.name}」(ID: ${deleteTarget.id})。相关环境、鉴权配置及关联用例将被连带删除，此操作不可恢复。`
+          : ''}
+        confirmText={DANGER.DELETE_PROJECT}
+        confirmLabel="删除"
+        onConfirm={doDelete}
+        onClose={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

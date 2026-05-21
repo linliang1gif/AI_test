@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
 from database.models import (
-    ProductArtifactTraceLink, RequirementPoint, TestCase,
+    ProductArtifact, ProductArtifactTraceLink, RequirementPoint, TestCase,
 )
 
 logger = logging.getLogger("product_studio_quality")
@@ -103,69 +103,47 @@ def score_requirement_point(rp: RequirementPoint) -> Dict[str, Any]:
 def score_test_case(tc: TestCase, duplicate_penalty: float = 0.0) -> Dict[str, Any]:
     """对 TestCase 进行规则评分"""
     reasons = []
-    score = 0.0
+    score = 1.0
 
-    # 1. clear_precondition (0.15) — not directly stored; check steps structure
     steps = tc.steps or []
     has_steps = len(steps) > 0 and any(s.get("action", "") for s in steps if isinstance(s, dict))
-    # We check expected for precondition hints
     expected = (tc.expected or "").strip()
 
-    # 2. executable_steps (0.25)
-    if has_steps:
-        first_action = steps[0].get("action", "") if isinstance(steps[0], dict) else ""
-        if len(first_action) >= 10:
-            score += 0.25
-        elif len(first_action) >= 3:
-            score += 0.15
-            reasons.append("测试步骤较简略")
-        else:
-            reasons.append("测试步骤缺乏可执行细节")
-    else:
-        reasons.append("缺少测试步骤")
+    if not has_steps:
+        score -= 0.10
+        reasons.append("缺少测试步骤，扣 0.10")
+    elif len(_extract_steps_text(tc)) < 10:
+        score -= 0.05
+        reasons.append("测试步骤较简略，扣 0.05")
 
-    # 3. expected_result_clear (0.20)
-    if len(expected) >= 10:
-        score += 0.20
-    elif len(expected) >= 3:
-        score += 0.10
-        reasons.append("预期结果较简短")
-    else:
-        reasons.append("缺少明确预期结果")
+    if not expected:
+        score -= 0.10
+        reasons.append("缺少明确预期结果，扣 0.10")
+    elif len(expected) < 10:
+        score -= 0.05
+        reasons.append("预期结果较简短，扣 0.05")
 
-    # 4. clear_title (0.15)
     title = (tc.title or "").strip()
-    if len(title) >= 5:
-        score += 0.15
-    elif len(title) >= 2:
-        score += 0.08
-        reasons.append("用例标题较短")
-    else:
-        reasons.append("用例标题缺失")
+    if len(title) < 5:
+        score -= 0.05
+        reasons.append("用例标题不够明确，扣 0.05")
 
-    # 5. source_traceable (0.10) — module field holds source_artifact_section
-    module = (tc.module or "").strip()
-    if module and len(module) >= 2:
-        score += 0.10
-    else:
-        reasons.append("缺少来源章节追溯")
-
-    # 6. assertion_value (0.15) — has expected + priority
     priority = (tc.priority or "").strip()
-    if expected and priority in ("critical", "high", "medium", "low"):
-        score += 0.15
-    elif expected:
-        score += 0.08
-        reasons.append("优先级标注不规范")
-    else:
-        reasons.append("缺少断言价值")
+    risk_level = (getattr(tc, "risk_level", "") or "").strip()
+    if priority not in ("critical", "high", "medium", "low") or risk_level not in ("P0", "P1", "P2"):
+        score -= 0.05
+        reasons.append("缺少优先级或风险等级，扣 0.05")
+
+    if not (tc.test_point_id or "").strip():
+        score -= 0.25
+        reasons.append("未关联需求点，扣 0.25")
 
     # Apply duplicate penalty
     if duplicate_penalty > 0:
         score = max(0, score - duplicate_penalty)
         reasons.append(f"疑似重复，降分 {duplicate_penalty}")
 
-    score = round(min(score, 1.0), 2)
+    score = round(max(0.0, min(score, 1.0)), 2)
     reason = "；".join(reasons) if reasons else "各维度均达标"
     return {"quality_score": score, "quality_reason": reason}
 
@@ -210,6 +188,99 @@ def _extract_steps_text(tc: TestCase) -> str:
         elif isinstance(s, str):
             parts.append(s)
     return " ".join(parts)
+
+
+def score_artifact_quality(db: Session, artifact_id: str) -> Dict[str, Any]:
+    """按产物维度计算质量分，覆盖 TraceLink / RP / TC 完整链路。"""
+    artifact = db.query(ProductArtifact).filter(ProductArtifact.artifact_id == artifact_id).first()
+    if not artifact:
+        return {"quality_score": 0.0, "deduction_reasons": [{"code": "ARTIFACT_NOT_FOUND", "message": "产物不存在", "deduction": 1.0}]}
+
+    links = db.query(ProductArtifactTraceLink).filter(
+        ProductArtifactTraceLink.artifact_id == artifact_id
+    ).all()
+    rp_link_ids = [l.target_id for l in links if l.target_type == "requirement_point"]
+    tc_link_ids = [l.target_id for l in links if l.target_type == "test_case"]
+
+    rp_query = db.query(RequirementPoint).filter(RequirementPoint.source_id == artifact_id)
+    if rp_link_ids:
+        rp_query = rp_query.union(db.query(RequirementPoint).filter(RequirementPoint.id.in_(rp_link_ids)))
+    rps = rp_query.all()
+    rp_ids = [rp.id for rp in rps]
+
+    tcs = []
+    if tc_link_ids:
+        tcs.extend(db.query(TestCase).filter(TestCase.id.in_(tc_link_ids)).all())
+    if rp_ids:
+        linked_by_rp = db.query(TestCase).filter(TestCase.test_point_id.in_(rp_ids)).all()
+        known = {tc.id for tc in tcs}
+        tcs.extend([tc for tc in linked_by_rp if tc.id not in known])
+
+    score = 1.0
+    deductions = []
+
+    def deduct(code: str, message: str, value: float):
+        nonlocal score
+        score -= value
+        deductions.append({"code": code, "message": message, "deduction": value})
+
+    if not links:
+        deduct("TRACE_LINK_MISSING", "缺少 TraceLink", 0.25)
+    if not tcs:
+        deduct("TEST_CASE_MISSING", "缺少测试用例", 0.20)
+    if not rps:
+        deduct("REQUIREMENT_POINT_MISSING", "缺少需求点", 0.20)
+
+    if tcs:
+        no_steps = [tc for tc in tcs if not (tc.steps and _extract_steps_text(tc).strip())]
+        if no_steps:
+            deduct("TEST_CASE_STEPS_MISSING", f"{len(no_steps)} 条用例没有步骤", 0.10)
+
+        no_expected = [tc for tc in tcs if not (tc.expected or "").strip()]
+        if no_expected:
+            deduct("TEST_CASE_EXPECTED_MISSING", f"{len(no_expected)} 条用例没有预期结果", 0.10)
+
+        no_priority_or_risk = [
+            tc for tc in tcs
+            if (tc.priority or "") not in ("critical", "high", "medium", "low")
+            or (getattr(tc, "risk_level", "") or "") not in ("P0", "P1", "P2")
+        ]
+        if no_priority_or_risk:
+            deduct("TEST_CASE_PRIORITY_RISK_MISSING", f"{len(no_priority_or_risk)} 条用例缺少优先级或风险等级", 0.05)
+
+        has_abnormal = any(
+            (tc.case_type or "") == "abnormal"
+            or "异常" in (tc.title or "")
+            or "失败" in (tc.title or "")
+            or "错误" in (tc.title or "")
+            for tc in tcs
+        )
+        if not has_abnormal:
+            deduct("ABNORMAL_SCENARIO_MISSING", "缺少异常场景", 0.10)
+
+        duplicate_count = 0
+        for tc in tcs:
+            others = [other for other in tcs if other.id != tc.id]
+            if detect_duplicates(tc, others):
+                duplicate_count += 1
+        if duplicate_count >= max(2, len(tcs) // 3 + 1):
+            deduct("DUPLICATE_CASES_TOO_MANY", f"重复用例过多，疑似 {duplicate_count} 条", 0.10)
+
+    quality_score = round(max(0.0, score), 2)
+    warnings = []
+    if not links:
+        warnings.append("当前产物未建立需求-用例追踪关系，请先生成需求点和测试用例。")
+
+    return {
+        "artifact_id": artifact_id,
+        "quality_score": quality_score,
+        "deduction_reasons": deductions,
+        "warnings": warnings,
+        "requirement_point_count": len(rps),
+        "test_case_count": len(tcs),
+        "trace_link_count": len(links),
+        "duplicate_candidate_count": duplicate_count if tcs else 0,
+    }
 
 
 # ══════════════════════════════════════════════════════════════════

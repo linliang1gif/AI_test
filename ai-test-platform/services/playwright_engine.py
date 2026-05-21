@@ -9,6 +9,7 @@ P2-4 Playwright 执行引擎 MVP + P2-5 视觉回归 + P2-6 能力增强
 import os
 import time
 import logging
+import json
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
@@ -143,7 +144,8 @@ def execute_web_ui(
     browser = None
     try:
         pw = sync_playwright().start()
-        browser = pw.chromium.launch(headless=headless)
+        from services.page_scanner import _launch_chromium
+        browser = _launch_chromium(pw, headless=headless)
         context = browser.new_context(
             viewport={"width": viewport.get("width", 1366), "height": viewport.get("height", 768)},
         )
@@ -165,6 +167,20 @@ def execute_web_ui(
                 if session and session.get("cookies"):
                     context.add_cookies(session["cookies"])
                     logger.info(f"Loaded {len(session['cookies'])} cookies from session {session_project_id}")
+                local_storage = (session or {}).get("local_storage") or (session or {}).get("storage") or {}
+                if local_storage:
+                    storage_json = json.dumps(local_storage, ensure_ascii=False)
+                    context.add_init_script(
+                        script=(
+                            "(() => {"
+                            f"const storage = {storage_json};"
+                            "for (const [key, value] of Object.entries(storage)) {"
+                            "window.localStorage.setItem(key, String(value));"
+                            "}"
+                            "})();"
+                        )
+                    )
+                    logger.info(f"Loaded {len(local_storage)} localStorage items from session {session_project_id}")
             except Exception as e:
                 logger.warning(f"Failed to load session cookies: {e}")
 
@@ -428,8 +444,13 @@ def _execute_step(engine_ctx: dict, step, idx: int, base_url: str, case_id: str,
             final_url_lower = page.url.lower()
             if intended_path and intended_path not in page.url:
                 if any(k in final_url_lower for k in ("/login", "/sso", "/auth", "/signin", "/cas")):
-                    # 登录跳转：保留 warning 不 fail（兼容"测试未登录跳登录页"的场景）
-                    sr.error_message = f"[登录跳转] 已重定向到登录页 {page.url}"
+                    sr.status = "failed"
+                    sr.error_message = (
+                        f"[登录态失效] 目标 {target} 被重定向到登录页 {page.url}。"
+                        "请更新有效 access_token 或重新保存 Web UI 登录会话。"
+                    )
+                    sr.duration_ms = (time.time() - t0) * 1000
+                    return sr
                 elif any(k in final_url_lower for k in ("/403", "/401", "/forbidden", "/unauthorized")):
                     # P2-6B.1: 权限拒绝必须 fail-fast，避免后续步骤连环假失败误导排查
                     sr.status = "failed"

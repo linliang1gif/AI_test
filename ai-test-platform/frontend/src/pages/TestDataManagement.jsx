@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
+import DangerConfirmDialog from '../components/common/DangerConfirmDialog'
+import { DANGER } from '../services/api'
 
 const API = '/api/v2/test-data'
 const DATASET_TYPES = ['account', 'api_payload', 'ui_form', 'performance_pool', 'common_fixture', 'cleanup_rule']
@@ -20,6 +22,7 @@ export default function TestDataManagement() {
   const [showAddItem, setShowAddItem] = useState(null)
   const [showBind, setShowBind] = useState(null)
   const [healthResult, setHealthResult] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)  // Phase 10B
 
   const [form, setForm] = useState({ name: '', description: '', dataset_type: 'common_fixture', case_type: 'api', tags: [] })
   const [itemForm, setItemForm] = useState({ key: '', value_json: '', is_sensitive: false })
@@ -53,9 +56,23 @@ export default function TestDataManagement() {
     if (r.ok) { setEditDs(null); fetchDatasets() }
   }
 
-  const handleDelete = async (id) => {
-    if (!confirm('确认删除此数据集？')) return
-    await fetch(`${API}/datasets/${id}`, { method: 'DELETE' })
+  // Phase 10B: 删除改为 DangerConfirmDialog
+  const handleDelete = (ds) => {
+    setDeleteTarget(ds)
+  }
+
+  const doDelete = async () => {
+    if (!deleteTarget) return
+    const r = await fetch(`${API}/datasets/${deleteTarget.id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirm: true, confirm_text: DANGER.DELETE_DATASET }),
+    })
+    if (!r.ok) {
+      const err = await r.text().catch(() => '')
+      throw new Error(err || `删除失败 (${r.status})`)
+    }
+    setDeleteTarget(null)
     fetchDatasets()
   }
 
@@ -181,7 +198,7 @@ export default function TestDataManagement() {
                     <button onClick={() => handleValidate(ds.id)} className="px-2 py-1 text-xs bg-amber-50 text-amber-700 rounded hover:bg-amber-100">健康检查</button>
                     <button onClick={() => handleClone(ds.id)} className="px-2 py-1 text-xs bg-purple-50 text-purple-700 rounded hover:bg-purple-100">复制</button>
                     <button onClick={() => openEdit(ds)} className="px-2 py-1 text-xs bg-slate-50 text-slate-600 rounded hover:bg-slate-100">编辑</button>
-                    <button onClick={() => handleDelete(ds.id)} className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100">删除</button>
+                    <button onClick={() => handleDelete(ds)} className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded hover:bg-red-100">删除</button>
                   </div>
                 </td>
               </tr>
@@ -398,6 +415,19 @@ export default function TestDataManagement() {
           </div>
         </div>
       )}
+
+      {/* Phase 10B: 删除数据集确认弹窗 */}
+      <DangerConfirmDialog
+        open={!!deleteTarget}
+        title="删除数据集"
+        description={deleteTarget
+          ? `将永久删除数据集「${deleteTarget.name}」(ID: ${deleteTarget.id})，包含的数据项与绑定将被连带清除。此操作不可恢复。`
+          : ''}
+        confirmText={DANGER.DELETE_DATASET}
+        confirmLabel="删除"
+        onConfirm={doDelete}
+        onClose={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

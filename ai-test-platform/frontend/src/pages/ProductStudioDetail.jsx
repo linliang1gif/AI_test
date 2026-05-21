@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import api from '../services/api';
 
 const TYPE_LABELS = {
   product_solution: '产品方案',
   prd: 'PRD 文档',
   prototype: '原型说明',
+  high_fidelity_prototype: '高保真原型',
   test_strategy: '测试策略',
   acceptance_criteria: '验收标准',
   quality_report: '质量报告',
@@ -80,6 +82,9 @@ export default function ProductStudioDetail() {
   const [dashboard, setDashboard] = useState(null);
   const [generatingReport, setGeneratingReport] = useState(false);
   const [batchPromoting, setBatchPromoting] = useState(false);
+  const [prototype, setPrototype] = useState(null);
+  const [loadingPrototype, setLoadingPrototype] = useState(false);
+  const [generatingPrototype, setGeneratingPrototype] = useState(false);
 
   // ── 加载详情 ──
   const fetchDetail = useCallback(async () => {
@@ -109,6 +114,21 @@ export default function ProductStudioDetail() {
   }, [ideaId, isNew]);
 
   useEffect(() => { fetchDetail(); }, [fetchDetail]);
+
+  const fetchPrototype = useCallback(async () => {
+    if (isNew || !ideaId) return;
+    setLoadingPrototype(true);
+    try {
+      const data = await api.productStudio.getPrototype(ideaId);
+      setPrototype(data);
+    } catch (e) {
+      setPrototype({ exists: false, message: '暂无高保真原型，请先生成' });
+    } finally {
+      setLoadingPrototype(false);
+    }
+  }, [ideaId, isNew]);
+
+  useEffect(() => { fetchPrototype(); }, [fetchPrototype]);
 
   // ── 创建想法 ──
   const handleCreate = async () => {
@@ -243,6 +263,8 @@ export default function ProductStudioDetail() {
       const data = JSON.parse(text);
       if (data.error_message) setError(`需求点生成失败: ${data.error_message}`);
       await fetchTraceLinks(selectedArtifact.artifact_id);
+      await fetchQualitySummary(selectedArtifact.artifact_id);
+      await fetchDashboard();
     } catch (e) {
       setError(`需求点生成失败: ${e.message}`);
     } finally {
@@ -264,6 +286,8 @@ export default function ProductStudioDetail() {
       const data = JSON.parse(text);
       if (data.error_message) setError(`测试用例生成失败: ${data.error_message}`);
       await fetchTraceLinks(selectedArtifact.artifact_id);
+      await fetchQualitySummary(selectedArtifact.artifact_id);
+      await fetchDashboard();
     } catch (e) {
       setError(`测试用例生成失败: ${e.message}`);
     } finally {
@@ -404,6 +428,54 @@ export default function ProductStudioDetail() {
     }
   };
 
+  const handleGenerateHighFidelityPrototype = async () => {
+    if (generatingPrototype) return;
+    setGeneratingPrototype(true);
+    setError('');
+    try {
+      const data = await api.productStudio.generatePrototype(ideaId);
+      setPrototype({ exists: true, ...data });
+      await fetchDetail();
+      await fetchDashboard();
+    } catch (e) {
+      setError(`高保真原型生成失败: ${e.message}`);
+    } finally {
+      setGeneratingPrototype(false);
+    }
+  };
+
+  const handleCopyPrototypeHtml = async () => {
+    const html = prototype?.content?.html || '';
+    if (!html) return;
+    try {
+      await navigator.clipboard.writeText(html);
+    } catch (e) {
+      setError('复制 HTML 失败');
+    }
+  };
+
+  const handleDownloadPrototypeHtml = () => {
+    const html = prototype?.content?.html || '';
+    if (!html) return;
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${prototype.artifact_id || 'high_fidelity_prototype'}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const requirementPointCount = traceLinks?.requirement_points?.length || 0;
+  const testCaseCount = traceLinks?.test_cases?.length || 0;
+  const traceLinkCount = traceLinks?.trace_links?.length || 0;
+  const supportsRequirementPoints = selectedArtifact && ['prd', 'product_solution'].includes(selectedArtifact.artifact_type);
+  const supportsTestCases = selectedArtifact && ['prd', 'test_strategy', 'acceptance_criteria'].includes(selectedArtifact.artifact_type);
+  const shouldShowGenerateRP = supportsRequirementPoints && requirementPointCount === 0;
+  const shouldShowGenerateTC = supportsTestCases && requirementPointCount > 0 && testCaseCount === 0;
+  const traceLinkMissing = selectedArtifact && traceLinks && traceLinkCount === 0;
+  const qualityDeductions = qualitySummary?.deduction_reasons || [];
+
   // ══════════ 新建表单 ══════════
   if (isNew) {
     return (
@@ -498,7 +570,7 @@ export default function ProductStudioDetail() {
 
       {/* 生成按钮组 */}
       <div className="flex gap-3 mb-6 flex-wrap">
-        {Object.entries(TYPE_LABELS).filter(([t]) => t !== 'quality_report').map(([type, label]) => (
+        {Object.entries(TYPE_LABELS).filter(([t]) => !['quality_report', 'prototype', 'high_fidelity_prototype'].includes(t)).map(([type, label]) => (
           <button
             key={type}
             onClick={() => handleGenerate(type)}
@@ -558,6 +630,19 @@ export default function ProductStudioDetail() {
               ))}
             </div>
           )}
+          {dashboard.summary.average_quality_score < 0.7 && dashboard.quality_deduction_reasons?.length > 0 && (
+            <div className="mb-2 rounded-md bg-red-50 border border-red-100 p-2">
+              <div className="text-xs font-medium text-red-700 mb-1">质量分扣分原因</div>
+              <div className="grid sm:grid-cols-2 gap-1">
+                {dashboard.quality_deduction_reasons.slice(0, 6).map((item, i) => (
+                  <div key={`${item.artifact_id}-${item.code}-${i}`} className="text-xs text-red-700 flex justify-between gap-2">
+                    <span className="truncate">{item.message}</span>
+                    <span className="font-mono">-{item.deduction}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {dashboard.recommendations?.length > 0 && (
             <div className="text-xs text-slate-600 space-y-0.5">
               {dashboard.recommendations.map((r, i) => <div key={i}>• {r}</div>)}
@@ -570,6 +655,7 @@ export default function ProductStudioDetail() {
       <div className="flex gap-1 mb-4 border-b border-slate-200">
         {[
           { key: 'artifacts', label: `产物 (${artifacts.length})` },
+          { key: 'prototype', label: '高保真原型' },
           { key: 'runs', label: `执行记录 (${runs.length})` },
         ].map(t => (
           <button
@@ -586,6 +672,116 @@ export default function ProductStudioDetail() {
         ))}
       </div>
 
+      {tab === 'prototype' ? (
+        <div className="bg-white border border-slate-200 rounded-xl p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">高保真原型</h2>
+              <p className="text-sm text-slate-500 mt-1">
+                {prototype?.exists ? `${prototype.title || '高保真 HTML 原型'} · ${prototype.artifact_id || ''}` : '暂无高保真原型，请先生成'}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={handleGenerateHighFidelityPrototype}
+                disabled={generatingPrototype}
+                className="px-3 py-1.5 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
+              >
+                {generatingPrototype ? '生成中...' : prototype?.exists ? '重新生成' : '生成高保真原型'}
+              </button>
+              <button
+                onClick={handleCopyPrototypeHtml}
+                disabled={!prototype?.content?.html}
+                className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-md text-sm hover:bg-slate-200 disabled:opacity-50"
+              >
+                复制 HTML
+              </button>
+              <button
+                onClick={handleDownloadPrototypeHtml}
+                disabled={!prototype?.content?.html}
+                className="px-3 py-1.5 bg-slate-100 text-slate-700 rounded-md text-sm hover:bg-slate-200 disabled:opacity-50"
+              >
+                下载 HTML
+              </button>
+            </div>
+          </div>
+
+          {loadingPrototype ? (
+            <div className="py-16 text-center text-slate-400 text-sm">加载中...</div>
+          ) : !prototype?.exists ? (
+            <div className="py-16 text-center bg-slate-50 border border-dashed border-slate-200 rounded-lg text-slate-500">
+              暂无高保真原型，请先生成
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 text-sm">
+                <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                  <div className="text-xs text-slate-500 mb-1">页面名称</div>
+                  <div className="font-medium text-slate-800 truncate">{prototype.content?.page_name || '-'}</div>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                  <div className="text-xs text-slate-500 mb-1">页面类型</div>
+                  <div className="font-medium text-slate-800">{prototype.content?.page_type || '-'}</div>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-lg border border-slate-100 lg:col-span-2">
+                  <div className="text-xs text-slate-500 mb-1">设计目标</div>
+                  <div className="font-medium text-slate-800 truncate">{prototype.content?.design_goal || '-'}</div>
+                </div>
+                <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                  <div className="text-xs text-slate-500 mb-1">TraceLink</div>
+                  <div className="font-medium text-slate-800">{prototype.trace_links?.length || 0} 条</div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-4">
+                <div className="border border-slate-200 rounded-lg overflow-hidden bg-slate-100">
+                  <div className="px-3 py-2 bg-white border-b border-slate-200 text-xs text-slate-500 flex justify-between">
+                    <span>HTML 预览</span>
+                    <span>覆盖需求点 {prototype.content?.covered_requirement_points?.length || 0} 个</span>
+                  </div>
+                  <iframe
+                    title="高保真原型预览"
+                    sandbox=""
+                    srcDoc={prototype.content?.html || ''}
+                    className="w-full h-[620px] bg-white"
+                  />
+                </div>
+
+                <div className="space-y-3">
+                  <section className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                    <h3 className="text-sm font-semibold text-slate-800 mb-2">组件清单</h3>
+                    <div className="space-y-1 text-sm text-slate-600">
+                      {(prototype.content?.components || []).map((item, idx) => (
+                        <div key={idx} className="border-b border-slate-100 pb-1 last:border-0">
+                          {typeof item === 'string' ? item : `${item.name || '-'}：${item.purpose || ''}`}
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                  <section className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                    <h3 className="text-sm font-semibold text-slate-800 mb-2">交互说明</h3>
+                    <ul className="space-y-1 text-sm text-slate-600">
+                      {(prototype.content?.interactions || []).map((item, idx) => <li key={idx}>{item}</li>)}
+                    </ul>
+                  </section>
+                  <section className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                    <h3 className="text-sm font-semibold text-slate-800 mb-2">空态说明</h3>
+                    <ul className="space-y-1 text-sm text-slate-600">
+                      {(prototype.content?.empty_states || []).map((item, idx) => <li key={idx}>{item}</li>)}
+                    </ul>
+                  </section>
+                  <section className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                    <h3 className="text-sm font-semibold text-slate-800 mb-2">错误态说明</h3>
+                    <ul className="space-y-1 text-sm text-slate-600">
+                      {(prototype.content?.error_states || []).map((item, idx) => <li key={idx}>{item}</li>)}
+                    </ul>
+                  </section>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : (
       <div className="flex gap-6">
         {/* 左侧列表 */}
         <div className="w-80 flex-shrink-0">
@@ -718,7 +914,7 @@ export default function ProductStudioDetail() {
               {/* Phase 2: 转测试资产按钮 */}
               {!editMode && (
                 <div className="flex gap-2 mb-4">
-                  {['prd', 'product_solution'].includes(selectedArtifact.artifact_type) && (
+                  {shouldShowGenerateRP && (
                     <button
                       onClick={handleGenerateRP}
                       disabled={generatingTrace.rp}
@@ -727,35 +923,61 @@ export default function ProductStudioDetail() {
                       {generatingTrace.rp ? '生成中...' : '生成需求点'}
                     </button>
                   )}
-                  {['prd', 'test_strategy', 'acceptance_criteria'].includes(selectedArtifact.artifact_type) && (
+                  {shouldShowGenerateTC && (
                     <button
                       onClick={handleGenerateTC}
                       disabled={generatingTrace.tc}
                       className="px-3 py-1.5 bg-teal-600 text-white rounded-md text-sm hover:bg-teal-700 disabled:opacity-50"
                     >
-                      {generatingTrace.tc ? '生成中...' : '生成测试用例草稿'}
+                      {generatingTrace.tc ? '生成中...' : '生成测试用例'}
                     </button>
                   )}
                 </div>
               )}
+              {traceLinkMissing && (
+                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                  当前产物未建立需求-用例追踪关系，请先生成需求点和测试用例。
+                </div>
+              )}
+              {traceLinks && requirementPointCount > 0 && testCaseCount === 0 && supportsTestCases && (
+                <div className="mb-4 p-3 bg-teal-50 border border-teal-200 rounded-lg text-sm text-teal-800">
+                  已生成需求点，下一步请生成测试用例以建立需求-用例追踪关系。
+                </div>
+              )}
               {/* Phase 3: 质量统计面板 */}
-              {qualitySummary && qualitySummary.total_links > 0 && (
+              {qualitySummary && (
                 <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                   <div className="flex items-center justify-between mb-1">
                     <h3 className="text-xs font-semibold text-blue-800">📊 质量统计</h3>
-                    <button onClick={handleScoreAll} className="px-2 py-0.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">批量评分</button>
+                    {qualitySummary.total_links > 0 && (
+                      <button onClick={handleScoreAll} className="px-2 py-0.5 bg-blue-600 text-white rounded text-xs hover:bg-blue-700">批量评分</button>
+                    )}
                   </div>
                   <div className="grid grid-cols-4 gap-2 text-xs text-center">
                     <div><span className="block font-medium text-slate-700">{qualitySummary.total_links}</span>总数</div>
+                    <div><span className="block font-medium text-purple-700">{qualitySummary.requirement_point_count ?? 0}</span>需求点</div>
+                    <div><span className="block font-medium text-teal-700">{qualitySummary.test_case_count ?? 0}</span>测试用例</div>
+                    <div><span className={`block font-medium ${(qualitySummary.quality_score ?? qualitySummary.average_quality_score) >= 0.7 ? 'text-green-700' : 'text-red-600'}`}>{qualitySummary.quality_score ?? qualitySummary.average_quality_score}</span>质量分</div>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2 text-xs text-center mt-2">
                     <div><span className="block font-medium text-green-700">{qualitySummary.confirmed_count}</span>已确认</div>
                     <div><span className="block font-medium text-red-600">{qualitySummary.rejected_count}</span>已驳回</div>
                     <div><span className="block font-medium text-yellow-700">{qualitySummary.draft_count}</span>草稿</div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 text-xs text-center mt-2">
-                    <div><span className={`block font-medium ${qualitySummary.average_quality_score >= 0.8 ? 'text-green-700' : qualitySummary.average_quality_score >= 0.6 ? 'text-yellow-700' : 'text-red-600'}`}>{qualitySummary.average_quality_score}</span>平均质量分</div>
                     <div><span className="block font-medium text-blue-700">{qualitySummary.promotion_count}</span>已转正式</div>
-                    <div><span className="block font-medium text-slate-600">{(qualitySummary.acceptance_rate * 100).toFixed(0)}%</span>采纳率</div>
                   </div>
+                  {(qualitySummary.quality_score ?? qualitySummary.average_quality_score) < 0.7 && qualityDeductions.length > 0 && (
+                    <div className="mt-3 rounded-md bg-white/70 border border-blue-100 p-2">
+                      <div className="text-xs font-medium text-blue-800 mb-1">扣分原因</div>
+                      <div className="space-y-1">
+                        {qualityDeductions.map((item, idx) => (
+                          <div key={`${item.code}-${idx}`} className="text-xs text-slate-700 flex justify-between gap-3">
+                            <span>{item.message}</span>
+                            <span className="font-mono text-red-600">-{item.deduction}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               {/* 追溯链路 */}
@@ -791,6 +1013,7 @@ export default function ProductStudioDetail() {
                           return (
                             <div key={tc.id} className="flex items-center justify-between text-xs bg-white p-2 rounded border border-slate-100">
                               <span className="flex-1 text-slate-700 truncate mr-1">{tc.title}</span>
+                              {tc.requirement_point_id && <span className="text-slate-400 mr-1" title={`关联需求点 ${tc.requirement_point_id}`}>RP</span>}
                               <span className="text-slate-400 mr-1">{tc.case_type}</span>
                               {qs != null && <span className={`px-1 py-0.5 rounded mr-1 ${qs >= 0.8 ? 'bg-green-50 text-green-700' : qs >= 0.6 ? 'bg-yellow-50 text-yellow-700' : 'bg-red-50 text-red-600'}`}>{qs}</span>}
                               {qs != null && qs < 0.6 && <span className="text-red-500 mr-1" title="低质量">⚠️</span>}
@@ -836,6 +1059,7 @@ export default function ProductStudioDetail() {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

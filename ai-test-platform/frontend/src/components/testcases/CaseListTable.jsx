@@ -62,11 +62,19 @@ export default function CaseListTable({
           <thead>
             <tr className="border-b">
               <th className="py-3 px-4 text-gray-600 font-medium w-10">
+                {/* 仅针对"当前页"做全选/半选判定 */}
                 <input
                   type="checkbox"
-                  checked={govFilteredCases.length > 0 && selectedIds.length === govFilteredCases.length}
+                  checked={pagedCases.length > 0 && pagedCases.every(tc => selectedIds.includes(tc.id))}
+                  ref={el => {
+                    if (el) {
+                      const selectedOnPage = pagedCases.filter(tc => selectedIds.includes(tc.id)).length
+                      el.indeterminate = selectedOnPage > 0 && selectedOnPage < pagedCases.length
+                    }
+                  }}
                   onChange={onSelectAll}
                   className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500"
+                  title="全选当前页"
                 />
               </th>
               <th className="text-left py-3 px-4 text-gray-600 font-medium w-[30%]">用例名称</th>

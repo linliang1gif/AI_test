@@ -801,6 +801,7 @@ export const api = {
         body: JSON.stringify(data),
       }),
       getLoginSession: (projectId) => request(`${API_BASE_URL}/v2/ui/login-session/${projectId}`),
+      getLoginSessionsHealth: () => request(`${API_BASE_URL}/v2/ui/login-sessions/health`),
       deleteLoginSession: (projectId) => request(`${API_BASE_URL}/v2/ui/login-session/${projectId}`, {
         method: 'DELETE',
       }),

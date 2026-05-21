@@ -74,6 +74,8 @@ class TestCaseResponse(BaseModel):
     assertion_status: Optional[str] = None
     last_run_status: Optional[str] = None
     failure_category: Optional[str] = None
+    # Iteration
+    iteration_id: Optional[int] = None
     
     class Config:
         from_attributes = True

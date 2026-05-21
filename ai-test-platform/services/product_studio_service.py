@@ -50,6 +50,7 @@ def _build_artifact_summary(db: Session, idea_id: str) -> Dict[str, Any]:
         "has_solution": "product_solution" in types_present,
         "has_prd": "prd" in types_present,
         "has_prototype": "prototype" in types_present,
+        "has_high_fidelity_prototype": "high_fidelity_prototype" in types_present,
         "has_test_strategy": "test_strategy" in types_present,
         "has_acceptance_criteria": "acceptance_criteria" in types_present,
         "latest_artifact_at": latest_at.isoformat() if latest_at else None,
@@ -103,6 +104,96 @@ def _run_to_dict(r: ProductStudioRun) -> Dict[str, Any]:
         "started_at": r.started_at.isoformat() if r.started_at else None,
         "finished_at": r.finished_at.isoformat() if r.finished_at else None,
         "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+def _safe_list(value) -> List[Any]:
+    if isinstance(value, list):
+        return value
+    if value in (None, ""):
+        return []
+    return [value]
+
+
+def _steps_from_item(item: Dict[str, Any]) -> List[Dict[str, Any]]:
+    steps = []
+    preconditions = (item.get("preconditions") or "").strip()
+    if preconditions:
+        steps.append({"step": 0, "action": f"前置条件：{preconditions}"})
+    for idx, action in enumerate(_safe_list(item.get("test_steps")), start=1):
+        text = str(action or "").strip()
+        if text:
+            steps.append({"step": idx, "action": text})
+    test_data = (item.get("test_data") or "").strip()
+    if test_data:
+        steps.append({"step": len(steps) + 1, "action": f"测试数据：{test_data}"})
+    return steps
+
+
+def _normalize_match_text(text: str) -> str:
+    return re.sub(r"[^\w\u4e00-\u9fff]", "", (text or "").lower())
+
+
+def _match_requirement_point(item: Dict[str, Any], rps: List[RequirementPoint]) -> Optional[RequirementPoint]:
+    if not rps:
+        return None
+    related_id = (item.get("related_requirement_id") or item.get("requirement_point_id") or "").strip()
+    if related_id:
+        for rp in rps:
+            if rp.id == related_id:
+                return rp
+
+    hint = _normalize_match_text(
+        " ".join([
+            str(item.get("related_requirement_hint") or ""),
+            str(item.get("case_title") or ""),
+            str(item.get("source_artifact_section") or ""),
+        ])
+    )
+    best = None
+    best_score = 0
+    for rp in rps:
+        candidate = _normalize_match_text(f"{rp.title} {rp.description}")
+        score = 0
+        if rp.title and _normalize_match_text(rp.title) in hint:
+            score += 3
+        for token in _safe_list(rp.keywords_json):
+            token_text = _normalize_match_text(str(token))
+            if token_text and token_text in hint:
+                score += 1
+        if candidate and hint and (candidate[:12] in hint or hint[:12] in candidate):
+            score += 1
+        if score > best_score:
+            best = rp
+            best_score = score
+    return best or rps[0]
+
+
+def _trace_link_dict(lk: ProductArtifactTraceLink, related_requirement_point_id: str = "") -> Dict[str, Any]:
+    if lk.target_type == "test_case" and related_requirement_point_id:
+        source_type = "requirement_point"
+        source_id = related_requirement_point_id
+        relation_type = "requirement_point_to_test_case"
+    else:
+        source_type = "product_artifact"
+        source_id = lk.artifact_id
+        relation_type = f"artifact_to_{lk.target_type}"
+    return {
+        "link_id": lk.link_id, "artifact_id": lk.artifact_id,
+        "source_type": source_type,
+        "source_id": source_id,
+        "source_artifact_type": lk.source_artifact_type,
+        "target_type": lk.target_type, "target_id": lk.target_id,
+        "relation_type": relation_type,
+        "generation_run_id": lk.generation_run_id,
+        "confidence_score": lk.confidence_score,
+        "status": lk.status,
+        "quality_score": lk.quality_score,
+        "quality_reason": lk.quality_reason,
+        "review_reason": lk.review_reason,
+        "promoted_at": lk.promoted_at.isoformat() if lk.promoted_at else None,
+        "promoted_target_id": lk.promoted_target_id,
+        "created_at": lk.created_at.isoformat() if lk.created_at else None,
     }
 
 
@@ -350,6 +441,17 @@ class ProductStudioService:
                 "is_mock": False,
             }
 
+    def generate_high_fidelity_prototype(self, idea_id: str,
+                                         provider: str = None,
+                                         model: str = None) -> Dict[str, Any]:
+        from services.prototype_generation_service import generate_high_fidelity_prototype
+        return generate_high_fidelity_prototype(
+            self.db, idea_id, provider=provider, model=model)
+
+    def get_high_fidelity_prototype(self, idea_id: str) -> Dict[str, Any]:
+        from services.prototype_generation_service import get_latest_high_fidelity_prototype
+        return get_latest_high_fidelity_prototype(self.db, idea_id)
+
     # ══════════════════════════════════════════════════════════════
     #  Phase 2: Artifact → 测试资产 打通
     # ══════════════════════════════════════════════════════════════
@@ -402,7 +504,7 @@ class ProductStudioService:
                 rp_id = f"RP_PS_{_uid()}"
                 rp = RequirementPoint(
                     id=rp_id,
-                    project_id=None,
+                    project_id=artifact.idea.project_id if artifact.idea else None,
                     source_type="ai_product_studio",
                     source_id=artifact_id,
                     point_type="feature",
@@ -428,9 +530,10 @@ class ProductStudioService:
                 )
                 self.db.add(link)
                 rps.append({"id": rp_id, "title": rp.title,
-                            "priority": rp.priority, "status": "draft"})
-                links.append({"link_id": link_id, "target_type": "requirement_point",
-                              "target_id": rp_id, "status": "draft"})
+                            "priority": rp.priority, "risk_level": rp.module_name,
+                            "source_type": rp.source_type, "source_id": rp.source_id,
+                            "status": "draft"})
+                links.append(_trace_link_dict(link))
 
             run.status = "succeeded"
             run.finished_at = _now()
@@ -471,6 +574,12 @@ class ProductStudioService:
         if not content.strip():
             raise ValueError("Artifact 内容为空，无法生成测试用例")
 
+        requirement_points = self.db.query(RequirementPoint).filter(
+            RequirementPoint.source_id == artifact_id
+        ).order_by(RequirementPoint.created_at.asc()).all()
+        if not requirement_points:
+            raise ValueError("当前产物缺少需求点，请先生成需求点后再生成测试用例")
+
         run_id = f"run_{_uid()}"
         trace_id = f"trace_{_uid()}"
         max_tokens = MAX_TOKENS_MAP.get("test_cases_from_artifact", 10000)
@@ -484,8 +593,18 @@ class ProductStudioService:
         self.db.commit()
 
         try:
+            rp_prompt_data = [
+                {
+                    "id": rp.id,
+                    "title": rp.title,
+                    "description": rp.description or "",
+                    "priority": rp.priority or "",
+                    "risk_level": rp.module_name or "",
+                }
+                for rp in requirement_points
+            ]
             prompt = build_test_cases_from_artifact_prompt(
-                content, artifact.artifact_type)
+                content, artifact.artifact_type, rp_prompt_data)
             text, model_name, is_mock = _call_llm(prompt, max_tokens=max_tokens)
             run.model_name = model_name
             run.output_text = text
@@ -499,15 +618,26 @@ class ProductStudioService:
             links = []
             for item in items:
                 tc_id = f"TC_PS_{_uid()}"
+                related_rp = _match_requirement_point(item, requirement_points)
+                if not related_rp:
+                    raise RuntimeError("无法将生成的测试用例关联到需求点")
                 case_type = item.get("case_type", "functional")
                 if case_type not in VALID_CASE_TYPES:
                     case_type = "functional"
                 priority = item.get("priority", "medium")
                 if priority not in {"critical", "high", "medium", "low"}:
                     priority = "medium"
+                risk_level = item.get("risk_level") or related_rp.module_name or "P1"
+                if risk_level not in {"P0", "P1", "P2"}:
+                    risk_level = "P1"
+                test_type = item.get("test_type") or case_type
 
-                steps_text = item.get("test_steps", "")
-                steps_json = [{"step": 1, "action": steps_text}] if steps_text else []
+                steps_json = _steps_from_item(item)
+                expected = item.get("expected_result", "")
+                if item.get("negative_scenario"):
+                    expected = f"{expected}\n异常场景：{item.get('negative_scenario')}".strip()
+                if item.get("boundary_scenario"):
+                    expected = f"{expected}\n边界场景：{item.get('boundary_scenario')}".strip()
 
                 tc = TestCase(
                     id=tc_id,
@@ -516,11 +646,21 @@ class ProductStudioService:
                     priority=priority,
                     status="draft",
                     steps=steps_json,
-                    expected=item.get("expected_result", ""),
+                    expected=expected,
                     case_type=case_type,
                     source="ai_product_studio",
                     created_by="ai_product_studio",
-                    tags=["product_studio", artifact.artifact_type],
+                    tags=[
+                        "product_studio",
+                        artifact.artifact_type,
+                        f"artifact:{artifact_id}",
+                        f"requirement_point:{related_rp.id}",
+                    ],
+                    test_point_id=related_rp.id,
+                    module_name=item.get("source_artifact_section", "") or related_rp.title,
+                    risk_level=risk_level,
+                    data_type=test_type,
+                    expected_behavior="success",
                 )
                 self.db.add(tc)
 
@@ -535,9 +675,10 @@ class ProductStudioService:
                 self.db.add(link)
                 tcs.append({"id": tc_id, "title": tc.title,
                             "case_type": case_type, "priority": priority,
+                            "risk_level": risk_level,
+                            "requirement_point_id": related_rp.id,
                             "status": "draft"})
-                links.append({"link_id": link_id, "target_type": "test_case",
-                              "target_id": tc_id, "status": "draft"})
+                links.append(_trace_link_dict(link, related_requirement_point_id=related_rp.id))
 
             run.status = "succeeded"
             run.finished_at = _now()
@@ -577,29 +718,18 @@ class ProductStudioService:
         tcs = []
         link_dicts = []
         for lk in links:
-            ld = {
-                "link_id": lk.link_id, "artifact_id": lk.artifact_id,
-                "source_artifact_type": lk.source_artifact_type,
-                "target_type": lk.target_type, "target_id": lk.target_id,
-                "generation_run_id": lk.generation_run_id,
-                "confidence_score": lk.confidence_score,
-                "status": lk.status,
-                "quality_score": lk.quality_score,
-                "quality_reason": lk.quality_reason,
-                "review_reason": lk.review_reason,
-                "promoted_at": lk.promoted_at.isoformat() if lk.promoted_at else None,
-                "promoted_target_id": lk.promoted_target_id,
-                "created_at": lk.created_at.isoformat() if lk.created_at else None,
-            }
-            link_dicts.append(ld)
             if lk.target_type == "requirement_point":
                 rp = self.db.query(RequirementPoint).filter(
                     RequirementPoint.id == lk.target_id).first()
                 if rp:
                     rps.append({"id": rp.id, "title": rp.title,
                                 "priority": rp.priority,
+                                "risk_level": rp.module_name,
+                                "source_type": rp.source_type,
+                                "source_id": rp.source_id,
                                 "description": rp.description or "",
                                 "link_status": lk.status})
+                link_dicts.append(_trace_link_dict(lk))
             elif lk.target_type == "test_case":
                 tc = self.db.query(TestCase).filter(
                     TestCase.id == lk.target_id).first()
@@ -607,8 +737,15 @@ class ProductStudioService:
                     tcs.append({"id": tc.id, "title": tc.title,
                                 "case_type": tc.case_type,
                                 "priority": tc.priority,
+                                "risk_level": getattr(tc, "risk_level", "") or "",
+                                "requirement_point_id": tc.test_point_id or "",
                                 "status": tc.status,
                                 "link_status": lk.status})
+                    link_dicts.append(_trace_link_dict(lk, related_requirement_point_id=tc.test_point_id or ""))
+                else:
+                    link_dicts.append(_trace_link_dict(lk))
+            else:
+                link_dicts.append(_trace_link_dict(lk))
         return {
             "artifact": _artifact_to_dict(artifact),
             "requirement_points": rps,
@@ -726,26 +863,35 @@ class ProductStudioService:
         }
 
     def get_quality_summary(self, artifact_id: str) -> Optional[Dict[str, Any]]:
+        from services.product_studio_quality_service import score_artifact_quality
         artifact = self.db.query(ProductArtifact).filter(
             ProductArtifact.artifact_id == artifact_id).first()
         if not artifact:
             return None
         links = self.db.query(ProductArtifactTraceLink).filter(
             ProductArtifactTraceLink.artifact_id == artifact_id).all()
+        artifact_quality = score_artifact_quality(self.db, artifact_id)
         total = len(links)
         confirmed = sum(1 for l in links if l.status == "confirmed")
         rejected = sum(1 for l in links if l.status == "rejected")
         draft = sum(1 for l in links if l.status == "draft")
         promoted = sum(1 for l in links if l.promoted_at is not None)
         scores = [l.quality_score for l in links if l.quality_score is not None]
-        avg_score = round(sum(scores) / len(scores), 2) if scores else 0.0
+        link_avg_score = round(sum(scores) / len(scores), 2) if scores else 0.0
         return {
             "artifact_id": artifact_id,
             "total_links": total,
+            "trace_link_count": artifact_quality.get("trace_link_count", total),
+            "requirement_point_count": artifact_quality.get("requirement_point_count", 0),
+            "test_case_count": artifact_quality.get("test_case_count", 0),
             "confirmed_count": confirmed,
             "rejected_count": rejected,
             "draft_count": draft,
-            "average_quality_score": avg_score,
+            "average_quality_score": artifact_quality.get("quality_score", 0.0),
+            "quality_score": artifact_quality.get("quality_score", 0.0),
+            "link_average_quality_score": link_avg_score,
+            "deduction_reasons": artifact_quality.get("deduction_reasons", []),
+            "warnings": artifact_quality.get("warnings", []),
             "promotion_count": promoted,
             "acceptance_rate": round(confirmed / total, 2) if total else 0.0,
             "rejection_rate": round(rejected / total, 2) if total else 0.0,
@@ -757,6 +903,7 @@ class ProductStudioService:
 
     def _collect_idea_stats(self, idea_id: str) -> Optional[Dict[str, Any]]:
         """收集 Idea 维度的全量统计数据"""
+        from services.product_studio_quality_service import score_artifact_quality
         idea = self.db.query(ProductIdea).filter(ProductIdea.idea_id == idea_id).first()
         if not idea:
             return None
@@ -764,25 +911,30 @@ class ProductStudioService:
         artifacts = self.db.query(ProductArtifact).filter(
             ProductArtifact.idea_id == idea_id).all()
         artifact_ids = [a.artifact_id for a in artifacts]
+        artifact_quality = [score_artifact_quality(self.db, aid) for aid in artifact_ids]
 
         links = []
         if artifact_ids:
             links = self.db.query(ProductArtifactTraceLink).filter(
                 ProductArtifactTraceLink.artifact_id.in_(artifact_ids)).all()
 
-        rp_count = sum(1 for l in links if l.target_type == "requirement_point")
-        tc_count = sum(1 for l in links if l.target_type == "test_case")
+        rp_count = sum(q.get("requirement_point_count", 0) for q in artifact_quality)
+        tc_count = sum(q.get("test_case_count", 0) for q in artifact_quality)
         total = len(links)
         confirmed = sum(1 for l in links if l.status == "confirmed")
         rejected = sum(1 for l in links if l.status == "rejected")
         draft = sum(1 for l in links if l.status == "draft")
         promoted = sum(1 for l in links if l.promoted_at is not None)
-        scores = [l.quality_score for l in links if l.quality_score is not None]
+        scores = [q.get("quality_score", 0.0) for q in artifact_quality]
         avg_score = round(sum(scores) / len(scores), 2) if scores else 0.0
-        dup_count = 0
-        for l in links:
-            if l.quality_reason and "duplicate" in (l.quality_reason or "").lower():
-                dup_count += 1
+        dup_count = sum(q.get("duplicate_candidate_count", 0) for q in artifact_quality)
+        quality_deductions = []
+        for q in artifact_quality:
+            for reason in q.get("deduction_reasons", []):
+                quality_deductions.append({
+                    "artifact_id": q.get("artifact_id"),
+                    **reason,
+                })
 
         confirmation_rate = round(confirmed / total, 2) if total else 0.0
         rejection_rate = round(rejected / total, 2) if total else 0.0
@@ -794,9 +946,11 @@ class ProductStudioService:
             art_by_type.setdefault(a.artifact_type, []).append(a)
 
         # per-artifact breakdown
+        quality_by_artifact = {q.get("artifact_id"): q for q in artifact_quality}
         per_artifact = []
         for a in artifacts:
             a_links = [l for l in links if l.artifact_id == a.artifact_id]
+            aq = quality_by_artifact.get(a.artifact_id, {})
             a_rp = sum(1 for l in a_links if l.target_type == "requirement_point")
             a_tc = sum(1 for l in a_links if l.target_type == "test_case")
             a_confirmed = sum(1 for l in a_links if l.status == "confirmed")
@@ -807,8 +961,10 @@ class ProductStudioService:
                 "artifact_id": a.artifact_id,
                 "artifact_type": a.artifact_type,
                 "title": a.title,
-                "requirement_point_count": a_rp,
-                "test_case_count": a_tc,
+                "requirement_point_count": aq.get("requirement_point_count", a_rp),
+                "test_case_count": aq.get("test_case_count", a_tc),
+                "quality_score": aq.get("quality_score", 0.0),
+                "deduction_reasons": aq.get("deduction_reasons", []),
                 "confirmed": a_confirmed,
                 "rejected": a_rejected,
                 "draft": a_draft,
@@ -831,6 +987,7 @@ class ProductStudioService:
             "rejection_rate": rejection_rate,
             "promotion_rate": promotion_rate,
             "duplicate_candidate_count": dup_count,
+            "quality_deduction_reasons": quality_deductions,
             "per_artifact": per_artifact,
             "links": links,        # raw ORM objects for report generation
             "artifacts": artifacts,  # raw ORM objects
@@ -844,6 +1001,7 @@ class ProductStudioService:
 
         # risk flags
         risk_flags = []
+        deduction_codes = {r.get("code") for r in data.get("quality_deduction_reasons", [])}
         if data["average_quality_score"] < 0.7:
             risk_flags.append("LOW_AVERAGE_QUALITY")
         if data["rejection_rate"] > 0.4:
@@ -856,11 +1014,16 @@ class ProductStudioService:
             risk_flags.append("DUPLICATE_RISK")
         if data["trace_link_count"] == 0 and data["artifact_count"] > 0:
             risk_flags.append("TRACE_LINK_MISSING")
+        if "REQUIREMENT_POINT_MISSING" in deduction_codes:
+            risk_flags.append("REQUIREMENT_POINT_MISSING")
+        if "TEST_CASE_MISSING" in deduction_codes:
+            risk_flags.append("TEST_CASE_MISSING")
 
         # recommendations
         recommendations = []
         if "LOW_AVERAGE_QUALITY" in risk_flags:
-            recommendations.append("平均质量分低于 0.7，建议优化生成 Prompt 或人工补充用例")
+            reasons = "；".join(r.get("message", "") for r in data.get("quality_deduction_reasons", [])[:5])
+            recommendations.append(f"平均质量分低于 0.7，扣分原因：{reasons or '请补齐需求点、测试用例和 TraceLink'}")
         if "HIGH_REJECTION_RATE" in risk_flags:
             recommendations.append("驳回率过高(>40%)，建议审查驳回原因并重新生成")
         if "LOW_CONFIRMATION_RATE" in risk_flags:
@@ -870,7 +1033,11 @@ class ProductStudioService:
         if "DUPLICATE_RISK" in risk_flags:
             recommendations.append("存在重复候选，建议去重后再 promote")
         if "TRACE_LINK_MISSING" in risk_flags:
-            recommendations.append("缺少 TraceLink，建议先生成需求点/测试用例")
+            recommendations.append("当前产物未建立需求-用例追踪关系，请先生成需求点和测试用例。")
+        if "REQUIREMENT_POINT_MISSING" in risk_flags:
+            recommendations.append("缺少需求点，请在 PRD 或产品方案产物上点击“生成需求点”。")
+        if "TEST_CASE_MISSING" in risk_flags:
+            recommendations.append("缺少测试用例，请先生成需求点，再点击“生成测试用例”。")
         if not risk_flags:
             recommendations.append("质量状态良好，建议进入测试执行阶段")
 
@@ -894,6 +1061,7 @@ class ProductStudioService:
             },
             "per_artifact": data["per_artifact"],
             "risk_flags": risk_flags,
+            "quality_deduction_reasons": data.get("quality_deduction_reasons", []),
             "recommendations": recommendations,
         }
 
