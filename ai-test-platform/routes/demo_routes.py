@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from database.session import get_db
 from database.models import Project, Environment, AuthProfile, ApiSpec, TestCase, TestRun, RunCase
+from utils.auth_crypto import auth_crypto
 import logging
 
 logger = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ def _create_demo_project(db: Session) -> dict:
     auth = AuthProfile(
         environment_id=env.id,
         auth_type="bearer",
-        auth_config=json.dumps({"token": DEMO_TOKEN}),
+        auth_config=auth_crypto.encrypt_auth_config({"token": DEMO_TOKEN}),
         default_headers={"Authorization": f"Bearer {DEMO_TOKEN}"},
     )
     db.add(auth)

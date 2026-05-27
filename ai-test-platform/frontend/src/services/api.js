@@ -1,67 +1,15 @@
 // API 服务配置文件
 // 统一管理所有 API 调用
-
-// ==================== API Base URL 配置 ====================
-const API_BASE_URL = '/api'  // 使用代理路径，Vite会自动转发到后端
-const PILOT_API_BASE_URL = '/api/v2'  // 统一使用v2路由
-
-// D2-2: 生成前端 trace_id，与后端 X-Trace-Id 全链路打通
-function generateTraceId() {
-  const ts = Date.now().toString(36)
-  const rand = Math.random().toString(36).substring(2, 10)
-  return `fe-${ts}-${rand}`
-}
-
-function getRoleHeader() {
-  const role = localStorage.getItem('pilot_role') || 'admin'
-  return { 'X-User-Role': role }
-}
-
-// ==================== 通用请求函数 ====================
-async function request(url, config = {}) {
-  const defaultConfig = {
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Trace-Id': generateTraceId(),
-      ...getRoleHeader(),
-      ...config.headers,
-    },
-    ...config,
-  }
-
-  try {
-    const response = await fetch(url, defaultConfig)
-    
-    if (!response.ok) {
-      const errorText = await response.text()
-      
-      // 404错误不重试,直接抛出
-      if (response.status === 404) {
-        console.warn(`API 404: ${url} - 该接口不可用`)
-        throw new Error(`404 ${errorText}`)
-      }
-      
-      throw new Error(`API调用失败: ${response.status} ${errorText}`)
-    }
-    
-    if (response.status === 204) {
-      return null
-    }
-
-    const responseText = await response.text()
-    if (!responseText) {
-      return null
-    }
-
-    return JSON.parse(responseText)
-  } catch (error) {
-    // 404错误静默处理,不在控制台重复输出
-    if (!error.message.startsWith('404')) {
-      console.error('API请求错误:', error)
-    }
-    throw error
-  }
-}
+import { codeCompareAPI as codeCompareService } from './codeCompare'
+import { API_BASE_URL, PILOT_API_BASE_URL, getRoleHeader, request } from './httpClient'
+import { iterationsAPI as v2IterationsService } from './iterations'
+import {
+  authProfilesAPI as v2AuthProfilesService,
+  environmentsAPI as v2EnvironmentsService,
+  projectsAPI as v2ProjectsService,
+} from './projectConfig'
+import { reportsAPI as reportsService } from './reports'
+import { visualAPI as visualService } from './visual'
 
 // ==================== API 接口定义 ====================
 
@@ -350,18 +298,7 @@ export const api = {
   },
 
   // ==================== 报告 ====================
-  reports: {
-    getAll: (params = {}) => {
-      const query = new URLSearchParams(params).toString()
-      return request(`${API_BASE_URL}/v2/reports${query ? '?' + query : ''}`)
-    },
-    get: (reportId) => request(`${API_BASE_URL}/v2/reports/${reportId}`),
-    generate: (data) => request(`${API_BASE_URL}/v2/test-runs/${data.run_id}/report`, {
-      method: 'POST',
-      body: JSON.stringify({ format: data.format || 'html' }),
-    }),
-    getByRunId: (runId) => request(`${API_BASE_URL}/v2/reports?run_id=${runId}`),
-  },
+  reports: reportsService,
 
   system: {
     getSettings: () => request(`${PILOT_API_BASE_URL}/system/settings`),
@@ -435,60 +372,11 @@ export const api = {
 
   // ==================== V2 API - 项目配置 ====================
   v2: {
-    projects: {
-      getAll: (params = {}) => {
-        const query = new URLSearchParams(params).toString()
-        return request(`${API_BASE_URL}/v2/projects${query ? '?' + query : ''}`)
-      },
-      get: (id) => request(`${API_BASE_URL}/v2/projects/${id}`),
-      create: (data) => request(`${API_BASE_URL}/v2/projects`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      update: (id, data) => request(`${API_BASE_URL}/v2/projects/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      }),
-      // Phase 10B: 后端要求 confirm_text=DELETE_PROJECT
-      delete: (id, extra = {}) => request(`${API_BASE_URL}/v2/projects/${id}`, {
-        method: 'DELETE',
-        body: JSON.stringify(extra),
-      }),
-      getEnvironments: (id) => request(`${API_BASE_URL}/v2/projects/${id}/environments`),
-    },
+    projects: v2ProjectsService,
 
-    environments: {
-      create: (data) => request(`${API_BASE_URL}/v2/environments`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      get: (id) => request(`${API_BASE_URL}/v2/environments/${id}`),
-      update: (id, data) => request(`${API_BASE_URL}/v2/environments/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      }),
-      // Phase 10B: 后端要求 confirm_text=DELETE_ENVIRONMENT
-      delete: (id, extra = {}) => request(`${API_BASE_URL}/v2/environments/${id}`, {
-        method: 'DELETE',
-        body: JSON.stringify(extra),
-      }),
-      getAuthProfile: (id) => request(`${API_BASE_URL}/v2/environments/${id}/auth-profile`),
-    },
+    environments: v2EnvironmentsService,
 
-    authProfiles: {
-      create: (data) => request(`${API_BASE_URL}/v2/auth-profiles`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      get: (id) => request(`${API_BASE_URL}/v2/auth-profiles/${id}`),
-      update: (id, data) => request(`${API_BASE_URL}/v2/auth-profiles/${id}`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      }),
-      delete: (id) => request(`${API_BASE_URL}/v2/auth-profiles/${id}`, {
-        method: 'DELETE',
-      }),
-    },
+    authProfiles: v2AuthProfilesService,
 
     testRuns: {
       create: (data) => request(`${API_BASE_URL}/v2/test-runs`, {
@@ -537,81 +425,7 @@ export const api = {
     },
 
     // ==================== 迭代管理 (D2-3A 迭代中心) ====================
-    iterations: {
-      templates: () => request(`${API_BASE_URL}/v2/iteration-templates`),
-      list: (projectId, params = {}) => {
-        const query = new URLSearchParams(params).toString()
-        return request(`${API_BASE_URL}/v2/projects/${projectId}/iterations${query ? '?' + query : ''}`)
-      },
-      create: (data) => request(`${API_BASE_URL}/v2/iterations`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      createForProject: (projectId, data) => request(`${API_BASE_URL}/v2/projects/${projectId}/iterations`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      get: (iterationId) => request(`${API_BASE_URL}/v2/iterations/${iterationId}`),
-      update: (iterationId, data) => request(`${API_BASE_URL}/v2/iterations/${iterationId}`, {
-        method: 'PUT',
-        body: JSON.stringify(data),
-      }),
-      patch: (iterationId, data) => request(`${API_BASE_URL}/v2/iterations/${iterationId}`, {
-        method: 'PATCH',
-        body: JSON.stringify(data),
-      }),
-      delete: (iterationId, extra = {}) => request(`${API_BASE_URL}/v2/iterations/${iterationId}`, {
-        method: 'DELETE',
-        body: JSON.stringify(extra),
-      }),
-      assignCases: (iterationId, caseIds) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/assign-cases`, {
-        method: 'POST',
-        body: JSON.stringify({ case_ids: caseIds }),
-      }),
-      unassignCases: (iterationId, caseIds) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/unassign-cases`, {
-        method: 'POST',
-        body: JSON.stringify({ case_ids: caseIds }),
-      }),
-      // D2-3A: 需求
-      createRequirement: (iterationId, data) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/requirements`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      listRequirements: (iterationId) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/requirements`),
-      // D2-3A: AI 解析
-      analyzeRequirements: (iterationId) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/ai/analyze-requirements`, {
-        method: 'POST',
-      }),
-      // D2-3A: 测试点
-      generateTestPoints: (iterationId) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/test-points/generate`, {
-        method: 'POST',
-      }),
-      listTestPoints: (iterationId, params = {}) => {
-        const query = new URLSearchParams(params).toString()
-        return request(`${API_BASE_URL}/v2/iterations/${iterationId}/test-points${query ? '?' + query : ''}`)
-      },
-      confirmTestPoint: (testPointId, confirmed = true) => request(`${API_BASE_URL}/v2/iteration-test-points/${testPointId}/confirm`, {
-        method: 'PATCH',
-        body: JSON.stringify({ confirmed }),
-      }),
-      // D2-3A: 测试用例
-      generateTestCases: (iterationId) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/test-cases/generate`, {
-        method: 'POST',
-      }),
-      listTestCases: (iterationId) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/test-cases`),
-      // D2-3A: 执行集
-      createExecutionSet: (iterationId, data = {}) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/execution-sets`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      listExecutionSets: (iterationId) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/execution-sets`),
-      // D2-3A: 执行 + 报告
-      run: (iterationId, data = {}) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/run`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      getReport: (iterationId) => request(`${API_BASE_URL}/v2/iterations/${iterationId}/report`),
-    },
+    iterations: v2IterationsService,
 
     swagger: {
       importFromUrl: (data) => request(`${API_BASE_URL}/v2/swagger/import-url`, {
@@ -812,146 +626,10 @@ export const api = {
     },
 
     // ── 需求-代码对比 ──
-    codeCompare: {
-      uploadCodeSnapshot: (formData) => fetch(`${API_BASE_URL}/v2/code-compare/upload`, {
-        method: 'POST',
-        body: formData,
-      }).then(r => r.json()),
-      cloneRepo: (data) => request(`${API_BASE_URL}/v2/code-compare/clone-repo`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      analyzeRequirementCodeCompare: (data) => request(`${API_BASE_URL}/v2/code-compare/analyze`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      cacheRequirement: (data) => request(`${API_BASE_URL}/v2/code-compare/cache-requirement`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      getCodeCompareReports: () => request(`${API_BASE_URL}/v2/code-compare/reports`),
-      getCodeCompareReportDetail: (reportId) => request(`${API_BASE_URL}/v2/code-compare/reports/${reportId}`),
-      confirmCodeCompareFinding: (reportId, data) => request(`${API_BASE_URL}/v2/code-compare/reports/${reportId}/confirm`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      convertFindingToDefect: (findingId, data) => request(`${API_BASE_URL}/v2/code-compare/findings/${findingId}/convert-to-defect`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      convertFindingToTestCase: (findingId, data) => request(`${API_BASE_URL}/v2/code-compare/findings/${findingId}/convert-to-test-case`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      convertFindingToQuestion: (findingId, data) => request(`${API_BASE_URL}/v2/code-compare/findings/${findingId}/convert-to-question`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      markFindingFalsePositive: (findingId, data) => request(`${API_BASE_URL}/v2/code-compare/findings/${findingId}/mark-false-positive`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      pushFindingToTapd: (findingId, data = {}) => request(`${API_BASE_URL}/v2/code-compare/findings/${findingId}/push-to-tapd`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      batchPushFindingsToTapd: (data) => request(`${API_BASE_URL}/v2/code-compare/findings/batch-push-to-tapd`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      syncFindingTapdStatus: (findingId) => request(`${API_BASE_URL}/v2/code-compare/findings/${findingId}/sync-tapd-status`, {
-        method: 'POST',
-      }),
-      syncReportTapdStatus: (reportId) => request(`${API_BASE_URL}/v2/code-compare/reports/${reportId}/sync-tapd-status`, {
-        method: 'POST',
-      }),
-      getTapdConfig: () => request(`${API_BASE_URL}/v2/code-compare/tapd/config`),
-      saveTapdConfig: (data) => request(`${API_BASE_URL}/v2/code-compare/tapd/config`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      testTapdConnection: () => request(`${API_BASE_URL}/v2/code-compare/tapd/test`, { method: 'POST' }),
-    },
+    codeCompare: codeCompareService,
 
     // ── 视觉测试 ──
-    // Phase 10B: 危险操作 confirm_text 常量（与 backend/routes/visual_routes.py 对应）
-    // 调用方必须显式传 {confirm: true, confirm_text: VISUAL_DANGER.XXX} 才能通过后端守卫
-    visual: {
-      listBaselines: (params = {}) => {
-        const qs = new URLSearchParams()
-        if (params.case_id) qs.set('case_id', params.case_id)
-        if (params.name) qs.set('name', params.name)
-        if (params.env) qs.set('env', params.env)
-        if (params.viewport) qs.set('viewport', params.viewport)
-        if (params.branch) qs.set('branch', params.branch)
-        if (params.limit) qs.set('limit', params.limit)
-        const s = qs.toString()
-        return request(`${API_BASE_URL}/v2/visual/baselines${s ? '?' + s : ''}`)
-      },
-      listNamespaces: () => request(`${API_BASE_URL}/v2/visual/namespaces`),
-      getBaseline: (id) => request(`${API_BASE_URL}/v2/visual/baselines/${encodeURIComponent(id)}`),
-      approveBaseline: (id, data = {}) => request(`${API_BASE_URL}/v2/visual/baselines/${encodeURIComponent(id)}/approve`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      updateConfig: (id, data) => request(`${API_BASE_URL}/v2/visual/baselines/${encodeURIComponent(id)}/config`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      deleteBaseline: (id, data = {}) => request(`${API_BASE_URL}/v2/visual/baselines/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        body: JSON.stringify(data),
-      }),
-      // 批量操作（最多 200 个 / 次）
-      bulkApprove: (data) => request(`${API_BASE_URL}/v2/visual/bulk/approve`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      bulkDelete: (data) => request(`${API_BASE_URL}/v2/visual/bulk/delete`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      bulkConfig: (data) => request(`${API_BASE_URL}/v2/visual/bulk/config`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      // 版本历史 / 回滚
-      listVersions: (id) => request(`${API_BASE_URL}/v2/visual/baselines/${encodeURIComponent(id)}/versions`),
-      rollback: (id, data) => request(`${API_BASE_URL}/v2/visual/baselines/${encodeURIComponent(id)}/rollback`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      // Webhook
-      getWebhookConfig: () => request(`${API_BASE_URL}/v2/visual/webhook/config`),
-      testWebhook: (data = {}) => request(`${API_BASE_URL}/v2/visual/webhook/test`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-      // Webhook 死信队列
-      listDeadLetters: (params = {}) => {
-        const qs = new URLSearchParams()
-        if (params.limit) qs.set('limit', params.limit)
-        if (params.include_resolved) qs.set('include_resolved', 'true')
-        if (params.event_type) qs.set('event_type', params.event_type)
-        const s = qs.toString()
-        return request(`${API_BASE_URL}/v2/visual/webhook/dead-letters${s ? '?' + s : ''}`)
-      },
-      retryDeadLetter: (id) => request(`${API_BASE_URL}/v2/visual/webhook/dead-letters/${id}/retry`, {
-        method: 'POST',
-      }),
-      deleteDeadLetter: (id, data = {}) => request(`${API_BASE_URL}/v2/visual/webhook/dead-letters/${id}`, {
-        method: 'DELETE',
-        body: JSON.stringify(data),
-      }),
-      pendingReviews: (params = {}) => {
-        const qs = new URLSearchParams()
-        if (params.days) qs.set('days', params.days)
-        if (params.limit) qs.set('limit', params.limit)
-        const s = qs.toString()
-        return request(`${API_BASE_URL}/v2/visual/pending-reviews${s ? '?' + s : ''}`)
-      },
-      getStats: () => request(`${API_BASE_URL}/v2/visual/stats`),
-    },
+    visual: visualService,
   },
 }
 

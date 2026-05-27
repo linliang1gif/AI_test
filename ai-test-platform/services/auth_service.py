@@ -19,6 +19,15 @@ class AuthService:
     def __init__(self, db: Session):
         self.db = db
         self.env_repo = get_environment_repo(db)
+
+    def _decrypt_and_upgrade_config(self, auth_profile: AuthProfile) -> Optional[Dict[str, Any]]:
+        """读取鉴权配置；旧格式在成功解密后升级为当前密文格式。"""
+        auth_config = auth_crypto.decrypt_auth_config(auth_profile.auth_config)
+        if auth_config and auth_crypto.needs_reencrypt(auth_profile.auth_config):
+            auth_profile.auth_config = auth_crypto.encrypt_auth_config(auth_config)
+            self.db.commit()
+            self.db.refresh(auth_profile)
+        return auth_config
     
     def create_auth_profile(self, auth_data: AuthProfileCreate) -> AuthProfile:
         """创建鉴权配置"""
@@ -93,8 +102,7 @@ class AuthService:
     
     def mask_sensitive_data(self, auth_profile: AuthProfile) -> Dict[str, Any]:
         """脱敏敏感数据"""
-        # 解密auth_config
-        auth_config = auth_crypto.decrypt_auth_config(auth_profile.auth_config)
+        auth_config = self._decrypt_and_upgrade_config(auth_profile)
         
         if not auth_config:
             return {}
@@ -116,4 +124,4 @@ class AuthService:
         
         用于执行测试时获取真实鉴权信息
         """
-        return auth_crypto.decrypt_auth_config(auth_profile.auth_config)
+        return self._decrypt_and_upgrade_config(auth_profile)

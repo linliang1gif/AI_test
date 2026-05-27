@@ -12,8 +12,18 @@ logger = logging.getLogger("startup")
 async def on_startup():
     """FastAPI startup 事件回调"""
     _check_database()
+    _run_registered_migrations()
     _run_migrations()
     _init_optional_modules()
+
+
+def _run_registered_migrations():
+    """运行带版本记录的轻量迁移；失败不阻塞 legacy 兜底迁移。"""
+    try:
+        from database.migration_registry import run_registered_migrations
+        run_registered_migrations()
+    except Exception as e:
+        logger.warning(f"数据库迁移登记失败，将继续执行 legacy 启动迁移: {e}")
 
 
 def _check_database():
