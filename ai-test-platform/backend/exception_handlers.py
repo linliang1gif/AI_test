@@ -63,9 +63,11 @@ def register_exception_handlers(app: FastAPI):
                 "code": sanitized.get("code", error_code),
                 "message": message,
                 "trace_id": tid,
-                "details": {k: v for k, v in sanitized.items() if k not in ("code", "message", "detail", "trace_id")},
+                "details": {k: v for k, v in sanitized.items() if k not in ("code", "message", "detail", "trace_id", "suggestion")},
                 "detail": message,  # 向后兼容
             }
+            if "suggestion" in sanitized:
+                content["suggestion"] = sanitized.get("suggestion")
         elif isinstance(detail_raw, list):
             content = {
                 "code": error_code,

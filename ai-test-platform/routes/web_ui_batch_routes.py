@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from database.session import get_db
-from database.models import TestCase, TestRun, RunCase, RunStep
+from database.models import TestCase, TestRun, RunCase, RunStep, Environment
 
 logger = logging.getLogger(__name__)
 
@@ -63,13 +63,8 @@ def batch_run_web_ui(
     db: Session = Depends(get_db),
 ):
     """P2-7: 批量执行 Web UI 用例"""
-    from services.playwright_engine import execute_web_ui, _is_playwright_available
-
-    if not _is_playwright_available():
-        raise HTTPException(
-            status_code=503,
-            detail="Playwright 未安装。请运行: pip install playwright && python -m playwright install chromium"
-        )
+    from services.playwright_engine import execute_web_ui
+    from services.web_ui_preflight import preflight_web_ui_execution, raise_preflight_http_error
 
     # 1. 查询用例
     cases = db.query(TestCase).filter(TestCase.id.in_(req.case_ids)).all()
@@ -94,8 +89,45 @@ def batch_run_web_ui(
     base_config.setdefault("enable_trace", True)
     base_config.setdefault("capture_console", True)
     base_config.setdefault("capture_network", True)
+    if req.environment_id is not None:
+        env = db.query(Environment).filter(Environment.id == req.environment_id).first()
+        if env and not base_config.get("base_url"):
+            base_config["base_url"] = env.base_url
+        if env and not base_config.get("session_project_id"):
+            base_config["session_project_id"] = str(env.project_id)
+    if req.project_id and not base_config.get("session_project_id"):
+        base_config["session_project_id"] = str(req.project_id)
 
-    # 4. 创建 TestRun
+    # 4. P0-2: 执行前预检，失败时不创建 TestRun，不执行业务步骤
+    for tc in webui_cases:
+        exec_config = dict(base_config)
+        tc_exec = tc.execution_config or {}
+        for k in ("base_url", "timeout", "viewport", "session_project_id", "login_url_keywords", "sso_url_keywords"):
+            if k in tc_exec:
+                exec_config[k] = tc_exec[k]
+        if not exec_config.get("base_url") and tc_exec.get("base_url"):
+            exec_config["base_url"] = tc_exec["base_url"]
+        try:
+            from routes.case_execute_routes import _sync_web_ui_session_from_auth_profile
+            _sync_web_ui_session_from_auth_profile(db, exec_config)
+        except Exception as e:
+            logger.warning("Web UI auth session sync failed before preflight: %s", e)
+
+        pf_env = preflight_web_ui_execution(
+            db=db,
+            case_type=getattr(tc, "case_type", "web_ui"),
+            steps=tc.steps or [],
+            assertions=tc.assertions or [],
+            execution_config=exec_config,
+            project_id=req.project_id,
+            environment_id=req.environment_id,
+        )
+        if not pf_env.get("ok"):
+            pf_env.setdefault("details", {})
+            pf_env["details"].update({"case_id": tc.id, "case_title": tc.title})
+            raise_preflight_http_error(pf_env)
+
+    # 5. 创建 TestRun
     run_id = f"RUN_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
     test_run = TestRun(
         id=run_id,
@@ -119,7 +151,7 @@ def batch_run_web_ui(
     retry_count = min(base_config.get("retry_count", 1), 3)  # cap at 3
     retry_on = base_config.get("retry_on", ["page_timeout", "network_error", "selector_not_found"])
 
-    # 5. 逐条执行 (单条失败不中断)
+    # 6. 逐条执行 (单条失败不中断)
     passed = 0
     failed = 0
     skipped = 0

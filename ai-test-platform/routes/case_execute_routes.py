@@ -200,24 +200,42 @@ def batch_execute_test_cases(
 
 def _execute_web_ui_case(tc, req, db):
     """P2-4: 执行 Web UI 用例并写入结果"""
-    from services.playwright_engine import execute_web_ui, _is_playwright_available
+    from services.playwright_engine import execute_web_ui
+    from services.web_ui_preflight import preflight_web_ui_execution, raise_preflight_http_error
     import uuid as _uuid
-
-    if not _is_playwright_available():
-        raise HTTPException(
-            status_code=503,
-            detail="Playwright 未安装。请运行: pip install playwright && python -m playwright install chromium"
-        )
 
     from services.web_ui_stability import (
         analyze_selectors, analyze_wait_strategies, preflight_check,
         categorize_failure, should_retry,
     )
 
-    exec_config = tc.execution_config or {}
+    exec_config = dict(tc.execution_config or {})
+    env_project_id = None
+    if req.environment_id:
+        env = db.query(Environment).filter(Environment.id == req.environment_id).first()
+        if env:
+            env_project_id = env.project_id
+            if not exec_config.get("base_url"):
+                exec_config["base_url"] = env.base_url
+            if not exec_config.get("session_project_id"):
+                exec_config["session_project_id"] = str(env.project_id)
+    if req.base_url:
+        exec_config["base_url"] = req.base_url
     steps = tc.steps or []
     assertions = tc.assertions or []
     _sync_web_ui_session_from_auth_profile(db, exec_config)
+
+    pf_env = preflight_web_ui_execution(
+        db=db,
+        case_type=getattr(tc, "case_type", "web_ui"),
+        steps=steps,
+        assertions=assertions,
+        execution_config=exec_config,
+        project_id=env_project_id,
+        environment_id=req.environment_id,
+    )
+    raise_preflight_http_error(pf_env)
+    exec_config = pf_env.get("execution_config") or exec_config
 
     # P2-9B: preflight check
     pf = preflight_check(getattr(tc, 'case_type', 'web_ui'), steps, assertions, exec_config)

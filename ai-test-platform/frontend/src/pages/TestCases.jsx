@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import api, { DANGER } from '../services/api'
 import DangerConfirmDialog from '../components/common/DangerConfirmDialog'
 import SVNInput from '../components/SVNInput'
+import { getErrorHint, formatErrorHintText } from '../utils/errorHints'
 
 const EXECUTION_ENV_STORAGE_KEY = 'ai_test_selected_execution_environment_id'
 
@@ -90,6 +91,7 @@ export default function TestCases() {
   const [isExecuting, setIsExecuting] = useState(false)
   const [executionResult, setExecutionResult] = useState(null)
   const [showResultDialog, setShowResultDialog] = useState(false)
+  const [executionErrorHint, setExecutionErrorHint] = useState(null)
   const [showManualTestDialog, setShowManualTestDialog] = useState(false)
   const [manualTestSteps, setManualTestSteps] = useState([])
   const [currentStepIndex, setCurrentStepIndex] = useState(0)
@@ -909,6 +911,7 @@ export default function TestCases() {
     } catch (error) {
       // 解析后端返回的具体错误信息
       let msg = error.message || '执行失败'
+      const hint = getErrorHint(error)
       try {
         const parsed = JSON.parse(msg.replace(/^API调用失败: \d+ /, ''))
         const detail = parsed.detail
@@ -918,7 +921,8 @@ export default function TestCases() {
           msg = detail
         }
       } catch {}
-      alert('执行失败: ' + msg)
+      setExecutionErrorHint(hint)
+      alert(formatErrorHintText(error, '执行失败') || ('执行失败: ' + msg))
     } finally {
       setIsExecuting(false)
     }
@@ -975,12 +979,14 @@ export default function TestCases() {
           : tc
       ))
     } catch (error) {
+      const hint = getErrorHint(error)
       let msg = error.message || '批量执行失败'
       try {
         const parsed = JSON.parse(msg.replace(/^API调用失败: \d+ /, ''))
         if (parsed.detail) msg = parsed.detail
       } catch {}
-      alert('批量执行失败: ' + msg)
+      setExecutionErrorHint(hint)
+      alert(formatErrorHintText(error, '批量执行失败') || ('批量执行失败: ' + msg))
     } finally {
       setIsExecuting(false)
     }
@@ -1016,9 +1022,11 @@ export default function TestCases() {
         statusById[tc.id] ? { ...tc, status: statusById[tc.id], lastRun: new Date().toLocaleString() } : tc
       ))
     } catch (error) {
+      const hint = getErrorHint(error)
       let msg = error.message || 'Web UI 批量执行失败'
       try { const p = JSON.parse(msg.replace(/^API调用失败: \d+ /, '')); if (p.detail) msg = p.detail } catch {}
-      alert('Web UI 批量执行失败: ' + msg)
+      setExecutionErrorHint(hint)
+      alert(formatErrorHintText(error, 'Web UI 批量执行失败') || ('Web UI 批量执行失败: ' + msg))
     } finally {
       setIsExecuting(false)
     }
@@ -1859,6 +1867,44 @@ export default function TestCases() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {executionErrorHint && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-[680px] max-h-[80vh] overflow-y-auto">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <h2 className="text-xl font-bold text-red-700">{executionErrorHint.title}</h2>
+                <div className="mt-1 text-xs font-mono text-red-500">{executionErrorHint.code}</div>
+              </div>
+              <button onClick={() => setExecutionErrorHint(null)} className="text-gray-400 hover:text-gray-600 text-xl">x</button>
+            </div>
+            <div className="space-y-3 text-sm">
+              <div className="rounded border border-red-200 bg-red-50 p-3">
+                <div className="font-medium text-red-800 mb-1">错误原因</div>
+                <div className="text-red-700 whitespace-pre-wrap">{executionErrorHint.reason}</div>
+              </div>
+              <div className="rounded border border-amber-200 bg-amber-50 p-3">
+                <div className="font-medium text-amber-800 mb-1">修复建议</div>
+                <div className="text-amber-800 whitespace-pre-wrap">{executionErrorHint.suggestion}</div>
+              </div>
+              {executionErrorHint.traceId && (
+                <div className="text-xs text-gray-600">
+                  trace_id: <code className="font-mono bg-gray-100 px-1 py-0.5 rounded">{executionErrorHint.traceId}</code>
+                </div>
+              )}
+              <details>
+                <summary className="cursor-pointer text-gray-600 font-medium">原始错误详情</summary>
+                <pre className="mt-2 bg-gray-900 text-gray-100 p-3 rounded text-xs overflow-auto max-h-64">
+                  {JSON.stringify(executionErrorHint.raw || executionErrorHint.details || {}, null, 2)}
+                </pre>
+              </details>
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button onClick={() => setExecutionErrorHint(null)} className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 text-sm">关闭</button>
+            </div>
           </div>
         </div>
       )}
