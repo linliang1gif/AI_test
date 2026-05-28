@@ -54,7 +54,7 @@ class TestRunResponse(BaseModel):
     environment_id: Optional[int]
     trigger_type: str
     status: str
-    trace_id: str
+    trace_id: Optional[str]
     start_time: Optional[datetime]
     end_time: Optional[datetime]
     duration: Optional[float]
@@ -65,6 +65,26 @@ class TestRunResponse(BaseModel):
     summary: Optional[str]
     created_at: datetime
     created_by: str
+
+    @validator('trigger_type', pre=True, always=True)
+    def default_trigger_type(cls, v):
+        return v or 'manual'
+
+    @validator('status', pre=True, always=True)
+    def default_status(cls, v):
+        return v or 'created'
+
+    @validator('total_cases', 'passed_cases', 'failed_cases', 'skipped_cases', pre=True, always=True)
+    def default_count(cls, v):
+        return 0 if v is None else v
+
+    @validator('created_at', pre=True, always=True)
+    def default_created_at(cls, v):
+        return v or datetime.now()
+
+    @validator('created_by', pre=True, always=True)
+    def default_created_by(cls, v):
+        return v or 'system'
     
     class Config:
         from_attributes = True

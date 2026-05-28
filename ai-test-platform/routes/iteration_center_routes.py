@@ -77,6 +77,9 @@ class CreateRequirementBody(BaseModel):
     source_url: Optional[str] = ""
     risk_level: Optional[str] = "P1"
 
+class AnalyzeRequirementsBody(BaseModel):
+    requirement_ids: Optional[List[int]] = None
+
 class ConfirmTestPointBody(BaseModel):
     confirmed: bool = True
 
@@ -88,6 +91,10 @@ class RunIterationBody(BaseModel):
     execution_set_id: Optional[int] = None
     environment_id: Optional[int] = None
     base_url: Optional[str] = ""
+
+class ManualExecuteCaseBody(BaseModel):
+    status: str = Field("passed", pattern="^(passed|failed|skipped)$")
+    notes: Optional[str] = ""
 
 
 # ═══════ 辅助函数 ═══════
@@ -201,24 +208,28 @@ def _resolve_iteration_environment(
     return env.id, env.base_url.rstrip("/")
 
 
+def _is_executable_api_case(tc: TestCase) -> bool:
+    cfg = tc.execution_config or {}
+    method = (cfg.get("method") or "").strip()
+    url = (cfg.get("url") or "").strip()
+    return getattr(tc, "case_type", None) == "api" and bool(method and url)
+
+
+def _execution_skip_info(tc: TestCase) -> dict:
+    cfg = tc.execution_config or {}
+    method = (cfg.get("method") or "").strip()
+    url = (cfg.get("url") or "").strip()
+    if getattr(tc, "case_type", None) != "api":
+        reason = "仅支持 api 用例进入迭代真实执行"
+    elif not method or not url:
+        reason = "缺少 execution_config.method 或 execution_config.url"
+    else:
+        reason = "未知不可执行原因"
+    return {"case_id": tc.id, "title": tc.title, "reason": reason}
+
+
 def _validate_execution_cases(cases: List[TestCase]) -> None:
-    invalid_cases = []
-    for tc in cases:
-        cfg = tc.execution_config or {}
-        method = (cfg.get("method") or "").strip()
-        url = (cfg.get("url") or "").strip()
-        if getattr(tc, "case_type", None) != "api":
-            invalid_cases.append({
-                "case_id": tc.id,
-                "title": tc.title,
-                "reason": "仅支持 api 用例进入迭代真实执行",
-            })
-        elif not method or not url:
-            invalid_cases.append({
-                "case_id": tc.id,
-                "title": tc.title,
-                "reason": "缺少 execution_config.method 或 execution_config.url",
-            })
+    invalid_cases = [_execution_skip_info(tc) for tc in cases if not _is_executable_api_case(tc)]
     if invalid_cases:
         _raise_api_error(
             400,
@@ -378,19 +389,37 @@ def list_requirements(iteration_id: int, db: Session = Depends(get_db)):
 
 # ═══════ 7. POST /api/v2/iterations/{iid}/ai/analyze-requirements ═══════
 @router.post("/api/v2/iterations/{iteration_id}/ai/analyze-requirements")
-def ai_analyze_requirements(iteration_id: int, db: Session = Depends(get_db)):
+def ai_analyze_requirements(
+    iteration_id: int,
+    body: AnalyzeRequirementsBody = Body(default_factory=AnalyzeRequirementsBody),
+    db: Session = Depends(get_db),
+):
     it = _get_iter_or_404(db, iteration_id)
-    reqs = db.query(IterationRequirement).filter(
+    q = db.query(IterationRequirement).filter(
         IterationRequirement.iteration_id == iteration_id
-    ).all()
-    if not reqs:
+    )
+    all_reqs = q.all()
+    if not all_reqs:
         raise HTTPException(status_code=400, detail="该迭代暂无需求，请先录入需求")
+
+    requested_ids = [int(rid) for rid in (body.requirement_ids or [])]
+    if requested_ids:
+        reqs = q.filter(IterationRequirement.id.in_(requested_ids)).all()
+        found_ids = {r.id for r in reqs}
+        missing_ids = [rid for rid in requested_ids if rid not in found_ids]
+        if missing_ids:
+            raise HTTPException(status_code=400, detail=f"需求不属于当前迭代或不存在: {missing_ids}")
+    else:
+        reqs = [r for r in all_reqs if not (r.ai_summary or "").strip()]
+
+    if not reqs:
+        raise HTTPException(status_code=400, detail="该迭代暂无未解析需求，请先录入新需求")
 
     from services.iteration_ai_service import analyze_requirements
     req_list = [{"title": r.title, "content": r.content or ""} for r in reqs]
     result = analyze_requirements(req_list)
 
-    # 将 AI 摘要回写到各需求
+    # 将 AI 摘要只回写到本次实际参与解析的需求，避免旧需求被重复纳入后续解析。
     for r in reqs:
         r.ai_summary = json.dumps(result.get("functional_points", []), ensure_ascii=False)
         if result.get("confirm_questions"):
@@ -402,6 +431,9 @@ def ai_analyze_requirements(iteration_id: int, db: Session = Depends(get_db)):
         "iteration_id": iteration_id,
         "analysis": result,
         "source": result.get("_source", "unknown"),
+        "analyzed_requirement_ids": [r.id for r in reqs],
+        "analyzed_requirement_count": len(reqs),
+        "skipped_parsed_requirement_count": len(all_reqs) - len(reqs),
     }
 
 
@@ -409,16 +441,28 @@ def ai_analyze_requirements(iteration_id: int, db: Session = Depends(get_db)):
 @router.post("/api/v2/iterations/{iteration_id}/test-points/generate")
 def generate_test_points(iteration_id: int, db: Session = Depends(get_db)):
     it = _get_iter_or_404(db, iteration_id)
-    reqs = db.query(IterationRequirement).filter(
+    all_reqs = db.query(IterationRequirement).filter(
         IterationRequirement.iteration_id == iteration_id
     ).all()
-    if not reqs:
+    if not all_reqs:
         raise HTTPException(status_code=400, detail="该迭代暂无需求，请先录入需求")
+
+    used_requirement_ids = {
+        row[0]
+        for row in db.query(IterationTestPoint.requirement_id).filter(
+            IterationTestPoint.iteration_id == iteration_id,
+            IterationTestPoint.requirement_id.isnot(None),
+        ).distinct().all()
+    }
+    reqs = [r for r in all_reqs if r.id not in used_requirement_ids]
+    if not reqs:
+        raise HTTPException(status_code=400, detail="该迭代暂无未生成测试点的需求，请先录入新需求")
 
     from services.iteration_ai_service import analyze_requirements
     req_list = [{"title": r.title, "content": r.content or ""} for r in reqs]
     result = analyze_requirements(req_list)
 
+    target_requirement_id = reqs[0].id if reqs else None
     created = []
     for tp_data in result.get("test_points", []):
         if isinstance(tp_data, dict):
@@ -438,7 +482,7 @@ def generate_test_points(iteration_id: int, db: Session = Depends(get_db)):
 
         tp = IterationTestPoint(
             iteration_id=iteration_id,
-            requirement_id=reqs[0].id if reqs else None,
+            requirement_id=target_requirement_id,
             module_name=module_name,
             test_point=text, priority=priority,
             test_type=test_type, risk_level=risk_level,
@@ -564,8 +608,83 @@ def list_iteration_test_cases(iteration_id: int, db: Session = Depends(get_db)):
             "last_run_status": c.last_run_status or "pending",
             "iteration_id": c.iteration_id,
             "expected": c.expected or "",
+            "steps": c.steps or [],
         })
     return {"test_cases": result, "total": len(result)}
+
+
+# ═══════ 12A. POST /api/v2/iterations/{iid}/test-cases/{case_id}/manual-execute ═══════
+@router.post("/api/v2/iterations/{iteration_id}/test-cases/{case_id}/manual-execute")
+def manual_execute_iteration_case(
+    iteration_id: int,
+    case_id: str,
+    body: ManualExecuteCaseBody,
+    db: Session = Depends(get_db),
+):
+    it = _get_iter_or_404(db, iteration_id)
+    tc = db.query(TestCase).filter(
+        TestCase.id == case_id,
+        TestCase.iteration_id == iteration_id,
+        TestCase.status != "deleted",
+    ).first()
+    if not tc:
+        _raise_api_error(
+            404,
+            "ITERATION_CASE_NOT_FOUND",
+            "测试用例不存在或不属于当前迭代",
+            {"iteration_id": iteration_id, "case_id": case_id},
+        )
+
+    status = body.status
+    notes = body.notes or ""
+    now = datetime.now()
+    run_id = f"MANUAL_{now.strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
+
+    tc.last_run_status = status
+    tc.status = status
+    tc.updated_at = now
+
+    run = TestRun(
+        id=run_id,
+        project_id=it.project_id,
+        environment_id=None,
+        trigger_type="manual",
+        status=status,
+        trace_id=f"TRACE_{uuid.uuid4().hex}",
+        start_time=now,
+        end_time=now,
+        duration=0,
+        total_cases=1,
+        passed_cases=1 if status == "passed" else 0,
+        failed_cases=1 if status == "failed" else 0,
+        skipped_cases=1 if status == "skipped" else 0,
+        summary=json.dumps({"manual": True, "notes": notes}, ensure_ascii=False),
+        created_at=now,
+        created_by="manual",
+        iteration_id=iteration_id,
+    )
+    db.add(run)
+    db.add(RunCase(
+        run_id=run_id,
+        test_case_id=case_id,
+        status=status,
+        start_time=now,
+        end_time=now,
+        duration=0,
+        error_message=notes if status == "failed" else None,
+        error_type="manual_failed" if status == "failed" else None,
+        assertion_details=[{"type": "manual", "passed": status == "passed", "notes": notes}],
+    ))
+    db.commit()
+
+    return {
+        "success": True,
+        "iteration_id": iteration_id,
+        "case_id": case_id,
+        "status": status,
+        "run_id": run_id,
+        "message": "人工执行结果已记录，并已纳入迭代报告统计",
+    }
 
 
 # ═══════ 13. POST /api/v2/iterations/{iid}/execution-sets ═══════
@@ -620,6 +739,8 @@ def create_execution_set(iteration_id: int, body: CreateExecutionSetBody, db: Se
 
     result = _es_dict(es)
     result["case_ids"] = [c.id for c in selected]
+    result["executable_case_count"] = sum(1 for c in selected if _is_executable_api_case(c))
+    result["manual_case_count"] = len(selected) - result["executable_case_count"]
     if fallback_flag:
         result["regression_fallback"] = True
     return result
@@ -720,7 +841,16 @@ def run_iteration(
             "执行集中存在已失效或不存在的用例",
             {"execution_set_id": es.id, "missing_case_ids": missing_ids[:20]},
         )
-    _validate_execution_cases(cases)
+    executable_cases = [c for c in cases if _is_executable_api_case(c)]
+    skipped_cases = [_execution_skip_info(c) for c in cases if not _is_executable_api_case(c)]
+    if not executable_cases:
+        _raise_api_error(
+            400,
+            "NO_EXECUTABLE_API_CASES",
+            "执行集中没有可真实执行的 API 用例，请重新创建执行集或导入带 execution_config 的 api 用例",
+            {"execution_set_id": es.id, "skipped_cases": skipped_cases[:20]},
+        )
+    case_ids = [c.id for c in executable_cases]
     if base_url is None:
         environment_id, base_url = _resolve_iteration_environment(db, it, body)
 
@@ -789,11 +919,14 @@ def run_iteration(
         "execution_set_id": es.id,
         "environment_id": environment_id,
         "base_url": base_url,
-        "total_cases": result["total_cases"],
+        "total_cases": result["total_cases"] + len(skipped_cases),
         "passed": result["passed_cases"],
         "failed": result["failed_cases"],
         "error": result["error_cases"],
-        "skipped": result["skipped_cases"],
+        "skipped": result["skipped_cases"] + len(skipped_cases),
+        "manual_case_count": len(skipped_cases),
+        "manual_cases": skipped_cases[:20],
+        "auto_executable_case_count": len(executable_cases),
         "no_assertion": result["no_assertion_cases"],
         "pass_rate": result["pass_rate"],
         "status": result["status"],

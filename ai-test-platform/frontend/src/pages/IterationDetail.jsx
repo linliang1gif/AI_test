@@ -24,6 +24,10 @@ export default function IterationDetail() {
 
   // Forms
   const [reqForm, setReqForm] = useState({ title: '', content: '', risk_level: 'P1' })
+  const [pendingAnalysisRequirementIds, setPendingAnalysisRequirementIds] = useState([])
+  const [lastAnalysisMeta, setLastAnalysisMeta] = useState(null)
+  const [parsingRequirementId, setParsingRequirementId] = useState(null)
+  const [manualExecutingCaseId, setManualExecutingCaseId] = useState(null)
   const [actionLoading, setActionLoading] = useState(false)
   const templatePoints = testPoints.filter(tp => String(tp.test_type || '').startsWith('template_'))
 
@@ -52,22 +56,41 @@ export default function IterationDetail() {
     if (!reqForm.title.trim()) { flash('请输入需求标题', 'error'); return }
     setActionLoading(true)
     try {
-      await api.v2.iterations.createRequirement(id, reqForm)
+      const created = await api.v2.iterations.createRequirement(id, reqForm)
+      setPendingAnalysisRequirementIds(prev => [...prev, created.id].filter(Boolean))
+      setLastAnalysisMeta(null)
       setReqForm({ title: '', content: '', risk_level: 'P1' })
       const r = await api.v2.iterations.listRequirements(id)
       setRequirements(r.requirements || [])
-      flash('需求已录入')
+      flash('需求已录入，下一次 AI 解析将只处理本次新增需求')
     } catch (e) { flash(e.message || '录入失败', 'error') }
     setActionLoading(false)
   }
 
-  const runAiAnalysis = async () => {
+  const runAiAnalysis = async (requirementId = null) => {
     setActionLoading(true)
+    if (requirementId) setParsingRequirementId(requirementId)
     try {
-      const r = await api.v2.iterations.analyzeRequirements(id)
+      const targetRequirementIds = requirementId
+        ? [requirementId]
+        : pendingAnalysisRequirementIds
+      const payload = targetRequirementIds.length
+        ? { requirement_ids: targetRequirementIds }
+        : {}
+      const r = await api.v2.iterations.analyzeRequirements(id, payload)
       setAnalysis(r.analysis || r)
-      flash(`AI解析完成 (${r.source || 'unknown'})`)
+      setLastAnalysisMeta({
+        analyzedRequirementIds: r.analyzed_requirement_ids || [],
+        analyzedRequirementCount: r.analyzed_requirement_count || 0,
+        skippedParsedRequirementCount: r.skipped_parsed_requirement_count || 0,
+      })
+      setPendingAnalysisRequirementIds(prev => prev.filter(reqId => !(r.analyzed_requirement_ids || []).includes(reqId)))
+      const refreshed = await api.v2.iterations.listRequirements(id)
+      setRequirements(refreshed.requirements || [])
+      setTab(2)
+      flash(`AI解析完成：本轮解析 ${r.analyzed_requirement_count ?? 0} 条需求 (${r.source || 'unknown'})`)
     } catch (e) { flash(e.message || 'AI解析失败', 'error') }
+    if (requirementId) setParsingRequirementId(null)
     setActionLoading(false)
   }
 
@@ -123,6 +146,18 @@ export default function IterationDetail() {
       setExecSets(es.execution_sets || [])
     } catch (e) { flash(e.message || '执行失败', 'error') }
     setActionLoading(false)
+  }
+
+  const manualExecuteCase = async (caseId, status) => {
+    setManualExecutingCaseId(caseId)
+    try {
+      await api.v2.iterations.manualExecuteCase(id, caseId, { status })
+      const tc = await api.v2.iterations.listTestCases(id)
+      setTestCases(tc.test_cases || [])
+      loadIter()
+      flash(`人工执行结果已记录：${status}`)
+    } catch (e) { flash(e.message || '人工执行记录失败', 'error') }
+    setManualExecutingCaseId(null)
   }
 
   return (
@@ -221,11 +256,20 @@ export default function IterationDetail() {
               <div className="space-y-2">
                 {requirements.map(r => (
                   <div key={r.id} className="bg-white border rounded-lg p-4">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${r.risk_level === 'P0' ? 'bg-red-100 text-red-700' : r.risk_level === 'P1' ? 'bg-yellow-100 text-yellow-700' : 'bg-slate-100 text-slate-600'}`}>{r.risk_level}</span>
-                      <span className="font-medium text-sm">{r.title}</span>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${r.risk_level === 'P0' ? 'bg-red-100 text-red-700' : r.risk_level === 'P1' ? 'bg-yellow-100 text-yellow-700' : 'bg-slate-100 text-slate-600'}`}>{r.risk_level}</span>
+                          {r.ai_summary && <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded">已解析</span>}
+                          <span className="font-medium text-sm">{r.title}</span>
+                        </div>
+                        {r.content && <p className="text-xs text-slate-500 mt-1">{r.content}</p>}
+                      </div>
+                      <button onClick={() => runAiAnalysis(r.id)} disabled={actionLoading}
+                        className="px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-medium hover:bg-purple-700 disabled:opacity-50 whitespace-nowrap">
+                        {parsingRequirementId === r.id ? '解析中...' : '解析'}
+                      </button>
                     </div>
-                    {r.content && <p className="text-xs text-slate-500 mt-1">{r.content}</p>}
                   </div>
                 ))}
               </div>
@@ -236,10 +280,20 @@ export default function IterationDetail() {
         {/* ═══ 2: AI解析 ═══ */}
         {tab === 2 && (
           <div>
-            <button onClick={runAiAnalysis} disabled={actionLoading}
+            <button onClick={() => runAiAnalysis()} disabled={actionLoading}
               className="mb-4 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 disabled:opacity-50">
-              {actionLoading ? '解析中...' : 'AI 解析需求'}
+              {actionLoading ? '解析中...' : pendingAnalysisRequirementIds.length ? `AI 解析本次新增 ${pendingAnalysisRequirementIds.length} 条需求` : 'AI 解析未解析需求'}
             </button>
+            <div className="mb-4 text-xs text-slate-500">
+              {pendingAnalysisRequirementIds.length > 0
+                ? `待解析新增需求 ID：${pendingAnalysisRequirementIds.join(', ')}`
+                : '当前没有本页新增待解析需求；点击后将解析后端识别出的未解析需求。'}
+              {lastAnalysisMeta && (
+                <span className="ml-3 text-purple-700">
+                  上次解析 {lastAnalysisMeta.analyzedRequirementCount} 条，跳过已解析 {lastAnalysisMeta.skippedParsedRequirementCount} 条
+                </span>
+              )}
+            </div>
             {analysis ? (
               <div className="grid grid-cols-2 gap-4">
                 {[
@@ -332,6 +386,7 @@ export default function IterationDetail() {
                   <th className="text-left p-3 font-medium text-slate-600">优先级</th>
                   <th className="text-left p-3 font-medium text-slate-600">类型</th>
                   <th className="text-left p-3 font-medium text-slate-600">状态</th>
+                  <th className="text-left p-3 font-medium text-slate-600">操作</th>
                 </tr></thead>
                 <tbody>
                   {testCases.map(c => (
@@ -341,6 +396,20 @@ export default function IterationDetail() {
                       <td className="p-3"><span className={`text-xs px-1.5 py-0.5 rounded ${c.priority === 'high' ? 'bg-red-100 text-red-700' : 'bg-slate-100'}`}>{c.priority}</span></td>
                       <td className="p-3 text-xs text-slate-500">{c.case_type}</td>
                       <td className="p-3"><span className={`text-xs px-1.5 py-0.5 rounded ${c.last_run_status === 'passed' ? 'bg-green-100 text-green-700' : c.last_run_status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-500'}`}>{c.last_run_status}</span></td>
+                      <td className="p-3">
+                        {c.case_type === 'api' ? (
+                          <span className="text-xs text-slate-400">随执行集自动执行</span>
+                        ) : (
+                          <div className="flex gap-1">
+                            {['passed', 'failed', 'skipped'].map(status => (
+                              <button key={status} onClick={() => manualExecuteCase(c.id, status)} disabled={manualExecutingCaseId === c.id}
+                                className={`px-2 py-1 rounded text-xs disabled:opacity-50 ${status === 'passed' ? 'bg-green-100 text-green-700 hover:bg-green-200' : status === 'failed' ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                                {manualExecutingCaseId === c.id ? '记录中' : status === 'passed' ? '通过' : status === 'failed' ? '失败' : '跳过'}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

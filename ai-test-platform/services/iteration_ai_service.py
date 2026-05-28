@@ -42,7 +42,9 @@ def _empty_result() -> Dict[str, Any]:
     return {key: [] for key in EMPTY_RESULT}
 
 
-_SYSTEM_PROMPT = """你是一位资深测试分析师和接口自动化专家。用户会给你一段需求描述，以及从知识库检索到的相关 API、前端代码、后端代码、操作手册片段。请结合这些上下文分析，并以 JSON 格式输出以下内容:
+_SYSTEM_PROMPT = """你是一位资深测试分析师。用户会给你一段或多段需求描述，以及从知识库检索到的 API、前端代码、后端代码、操作手册片段。请只围绕【本次需求文本】做解析，知识库上下文只能用于识别真实接口、影响模块和字段，不允许把知识库里的无关功能扩展成本次需求。
+
+输出必须是 JSON，结构如下:
 
 {
   "functional_points": ["功能点1", "功能点2"],
@@ -65,6 +67,7 @@ _SYSTEM_PROMPT = """你是一位资深测试分析师和接口自动化专家。
       "test_type": "functional/api/performance/security",
       "risk_level": "P0/P1/P2",
       "module_name": "模块名",
+      "requirement_trace": "对应的需求原文短句",
       "recommended_api": {"method": "POST", "url": "/recycle/xxx", "summary": "接口用途", "confidence": 0.85},
       "execution_config": {
         "method": "POST",
@@ -79,16 +82,16 @@ _SYSTEM_PROMPT = """你是一位资深测试分析师和接口自动化专家。
   "confirm_questions": ["需要和产品确认的问题1"]
 }
 
-要求:
-1. 功能点要具体，每个功能点是可独立测试的单元
-2. 业务规则要包括边界条件、约束条件
-3. 影响范围要考虑上下游关联模块
-4. 风险点关注数据安全、性能、兼容性等方面
-5. 测试点要覆盖正向/反向/边界场景
-6. 待确认问题列出需求中含糊或缺失的部分
-7. 如果知识库中能匹配到真实 API，必须在 test_points 中填充 recommended_api 和 execution_config
-8. execution_config.url 只填写接口路径，不要拼接环境域名；如果知识库路径包含 /recycle 前缀且环境 base_url 已包含 /recycle，应去掉开头 /recycle
-9. 如果是纯 UI 验证且没有合适 API，则 recommended_api 和 execution_config 可为 null
+硬性要求:
+1. 只能解析【本次需求文本】中明确出现或能直接推导出的内容；不要补充通用测试模板，不要生成和原文无关的功能。
+2. 每个 test_point 必须对应一个 requirement_trace，requirement_trace 必须摘自需求原文，不能杜撰。
+3. 功能点必须是可独立验证的用户行为、系统规则或数据变化，不能只写“验证功能正常”。
+4. 如果需求只描述 UI 行为，测试点就写 UI/功能验证；不要强行映射 API。
+5. 只有知识库 API 与需求关键词、模块、动作高度匹配时，才填写 recommended_api 和 execution_config；不确定时填 null。
+6. 测试点要优先覆盖需求原文里的正向路径、条件限制、异常提示、数据回填、状态变化、权限/边界；原文没提到的不要扩展。
+7. 待确认问题只列需求中含糊、缺字段、缺规则、缺边界的点；不要泛泛写“需确认业务规则”。
+8. execution_config.url 只填写接口路径，不要拼接环境域名；如果知识库路径包含 /recycle 前缀且环境 base_url 已包含 /recycle，应去掉开头 /recycle。
+9. 输出数量要克制：每个明确功能点通常 1-3 个高质量测试点即可，宁少勿泛。
 
 只返回 JSON，不要有其他文字。"""
 
@@ -271,8 +274,21 @@ def _normalize_execution_config(config: Any) -> Any:
     return normalized
 
 
-def _normalize_llm_result(parsed: Dict[str, Any], rag_context: Dict[str, Any]) -> Dict[str, Any]:
+def _requirement_trace_candidates(requirements_text: str) -> List[str]:
+    candidates = _split_requirement_sentences(requirements_text)
+    return sorted(set(candidates), key=len, reverse=True)
+
+
+def _point_has_requirement_trace(point: Dict[str, Any], trace_candidates: List[str]) -> bool:
+    trace = str(point.get("requirement_trace") or "").strip()
+    if not trace:
+        return False
+    return any(trace in candidate or candidate in trace for candidate in trace_candidates)
+
+
+def _normalize_llm_result(parsed: Dict[str, Any], rag_context: Dict[str, Any], requirements_text: str = "") -> Dict[str, Any]:
     result = _empty_result()
+    trace_candidates = _requirement_trace_candidates(requirements_text)
     for key in EMPTY_RESULT:
         if key in parsed and isinstance(parsed[key], list):
             result[key] = parsed[key]
@@ -280,9 +296,14 @@ def _normalize_llm_result(parsed: Dict[str, Any], rag_context: Dict[str, Any]) -
     normalized_points = []
     for item in result["test_points"]:
         if not isinstance(item, dict):
-            normalized_points.append(item)
             continue
         point = dict(item)
+        if trace_candidates and not _point_has_requirement_trace(point, trace_candidates):
+            point_text = str(point.get("test_point") or "")
+            matched_trace = next((trace for trace in trace_candidates if trace and trace in point_text), "")
+            if not matched_trace:
+                continue
+            point["requirement_trace"] = matched_trace[:120]
         rec_api = point.get("recommended_api")
         if isinstance(rec_api, dict) and rec_api.get("url") and not rec_api.get("path"):
             rec_api["path"] = rec_api.get("url")
@@ -367,12 +388,17 @@ def analyze_requirements_with_llm(requirements: List[Dict[str, str]]) -> Dict[st
 
         rag_context = retrieve_iteration_rag_context(combined)
         prompt = (
-            "以下是本次迭代的需求列表，请进行分析。\n\n"
+            "请解析下面这一次用户选中的需求。必须以【需求文本】为唯一事实来源；"
+            "知识库检索上下文只允许用于辅助匹配 API、模块和字段，不能扩展出需求原文没有提到的功能。\n\n"
             "【需求文本】\n"
             f"{combined}\n\n"
             "【知识库检索上下文】\n"
             f"{_format_rag_context(rag_context)}\n\n"
-            "请优先使用知识库中的真实 API 和代码上下文生成测试点与 execution_config 初稿。"
+            "输出要求：\n"
+            "1. 每个 test_point 必须带 requirement_trace，值必须是需求原文里的短句。\n"
+            "2. 如果某个 API 只是模块相似但动作不匹配，recommended_api 和 execution_config 必须为 null。\n"
+            "3. 不要生成通用的正向/异常/边界三件套，除非需求原文本身包含对应条件。\n"
+            "4. 优先少量、准确、可执行的测试点。"
         )
         raw = client.generate_text(prompt, system_prompt=_SYSTEM_PROMPT, temperature=0.3)
 
@@ -381,7 +407,7 @@ def analyze_requirements_with_llm(requirements: List[Dict[str, str]]) -> Dict[st
         end = raw.rfind('}') + 1
         if start >= 0 and end > start:
             parsed = json.loads(raw[start:end])
-            result = _normalize_llm_result(parsed, rag_context)
+            result = _normalize_llm_result(parsed, rag_context, combined)
             result["_source"] = "llm"
             logger.info("LLM 需求解析成功, test_points=%d", len(result["test_points"]))
             return result
@@ -426,8 +452,54 @@ def _extract_sub_features(content: str) -> List[str]:
     return unique
 
 
+def _split_requirement_sentences(content: str) -> List[str]:
+    sentences = []
+    for raw in re.split(r'[。；;\n]+', content or ""):
+        sentence = re.sub(r'^\s*(?:\d+[.、)）]|\(\d+\)|[①②③④⑤⑥⑦⑧⑨⑩]|[-*])\s*', '', raw).strip()
+        sentence = sentence.strip('，, ')
+        if len(sentence) >= 4:
+            sentences.append(sentence)
+    return sentences
+
+
+def _is_actionable_requirement_sentence(sentence: str) -> bool:
+    action_keywords = [
+        "支持", "新增", "展示", "显示", "实现", "提供", "增加", "优化", "修复", "调整",
+        "设置", "配置", "绑定", "对接", "获取", "控制", "播放", "打印", "导出", "上传",
+        "下载", "监控", "刷新", "保存", "删除", "编辑", "查看", "选择", "录入", "解析",
+        "回填", "带出", "校验", "提示", "生成", "同步", "筛选", "查询", "排序", "分页",
+    ]
+    rule_keywords = ["必须", "不允许", "不能", "需要", "应该", "至少", "最多", "不超过", "默认", "自动", "手动"]
+    return any(kw in sentence for kw in action_keywords + rule_keywords)
+
+
+def _make_requirement_test_point(sentence: str, title: str, rag_context: Dict[str, Any]) -> Dict[str, Any]:
+    trace = sentence[:120]
+    recommended_api = _select_api_for_text(sentence, rag_context)
+    execution_config = None
+    if recommended_api:
+        execution_config = _normalize_execution_config({
+            "method": recommended_api.get("method"),
+            "url": recommended_api.get("url") or recommended_api.get("path"),
+            "headers": {"Content-Type": "application/json"},
+            "body": {},
+            "query_params": {},
+            "timeout": 10,
+        })
+    return {
+        "test_point": f"验证{trace}",
+        "priority": "high" if any(kw in sentence for kw in ["必须", "不能", "不允许", "自动", "回填", "校验"]) else "medium",
+        "test_type": "api" if execution_config else "functional",
+        "risk_level": "P1" if any(kw in sentence for kw in ["必须", "不能", "不允许", "异常", "失败", "权限", "数据"]) else "P2",
+        "module_name": title[:40],
+        "requirement_trace": trace,
+        "recommended_api": recommended_api,
+        "execution_config": execution_config,
+    }
+
+
 def analyze_requirements_fallback(requirements: List[Dict[str, str]]) -> Dict[str, Any]:
-    """规则型 fallback: 从需求文本智能提取关键信息"""
+    """规则型 fallback: 只按需求原文生成可追溯测试点，避免泛化模板。"""
     result = {**_empty_result(), "_source": "fallback"}
     combined = "\n\n".join([
         f"需求标题: {r.get('title', '')}\n需求内容: {r.get('content', '')}"
@@ -437,86 +509,56 @@ def analyze_requirements_fallback(requirements: List[Dict[str, str]]) -> Dict[st
     result["_rag_context"] = rag_context
 
     for req in requirements:
-        title = req.get("title", "")
-        content = req.get("content", "")
-
-        # 功能点: 先加标题，再从内容中提取子功能
-        result["functional_points"].append(title)
+        title = (req.get("title") or "").strip()
+        content = (req.get("content") or "").strip()
+        sentences = _split_requirement_sentences(content)
         sub_features = _extract_sub_features(content)
+
+        if title:
+            result["functional_points"].append(title)
         result["functional_points"].extend(sub_features)
 
-        # 拆分句子用于后续分析
-        sentences = [s.strip() for s in re.split(r'[。；\n]', content) if s.strip()]
-
-        # 业务规则: 提取包含关键词的句子
         rule_keywords = ["必须", "不允许", "不能", "需要", "应该", "至少", "最多", "不超过",
                          "范围", "格式", "限制", "校验", "默认", "有效", "自动", "手动"]
+        scope_keywords = ["模块", "页面", "接口", "数据库", "表", "字段", "关联", "依赖",
+                          "上游", "下游", "组件", "弹窗", "对话框", "列表", "摄像头", "设备"]
+        risk_keywords = ["安全", "性能", "并发", "权限", "敏感", "数据丢失", "兼容", "回滚",
+                         "异常", "超时", "断开", "离线", "失败", "重连", "冲突"]
+
+        actionable_sentences = []
         for sentence in sentences:
             if any(kw in sentence for kw in rule_keywords):
                 result["business_rules"].append(sentence)
-
-        # 影响范围
-        scope_keywords = ["模块", "页面", "接口", "数据库", "表", "字段", "关联", "依赖",
-                          "上游", "下游", "组件", "弹窗", "对话框", "列表", "摄像头", "设备"]
-        for sentence in sentences:
             if any(kw in sentence for kw in scope_keywords):
                 result["impact_scope"].append(sentence)
-
-        # 风险点
-        risk_keywords = ["安全", "性能", "并发", "权限", "敏感", "数据丢失", "兼容", "回滚",
-                         "异常", "超时", "断开", "离线", "失败", "重连", "冲突"]
-        for sentence in sentences:
             if any(kw in sentence for kw in risk_keywords):
                 result["risk_points"].append(sentence)
+            if _is_actionable_requirement_sentence(sentence):
+                actionable_sentences.append(sentence)
 
-        # 测试点: 优先用子功能生成，无子功能则用标题
-        test_targets = sub_features if sub_features else [title]
-        for target in test_targets:
-            short_name = target[:60]  # 防止过长
-            recommended_api = _select_api_for_text(short_name, rag_context)
-            execution_config = None
-            if recommended_api:
-                execution_config = _normalize_execution_config({
-                    "method": recommended_api.get("method"),
-                    "url": recommended_api.get("url") or recommended_api.get("path"),
-                    "headers": {"Content-Type": "application/json"},
-                    "body": {},
-                    "query_params": {},
-                    "timeout": 10,
-                })
-            result["test_points"].extend([
-                {"test_point": f"验证{short_name}的正向功能", "priority": "high",
-                 "test_type": "api" if execution_config else "functional", "risk_level": "P1",
-                 "recommended_api": recommended_api, "execution_config": execution_config},
-                {"test_point": f"验证{short_name}的异常处理", "priority": "medium",
-                 "test_type": "api" if execution_config else "functional", "risk_level": "P1",
-                 "recommended_api": recommended_api, "execution_config": execution_config},
-                {"test_point": f"验证{short_name}的边界条件", "priority": "medium",
-                 "test_type": "api" if execution_config else "functional", "risk_level": "P2",
-                 "recommended_api": recommended_api, "execution_config": execution_config},
-            ])
+        if not actionable_sentences:
+            if sentences:
+                actionable_sentences = sentences[:2]
+            elif title:
+                actionable_sentences = [title]
 
-        # 待确认问题
+        for sentence in actionable_sentences[:8]:
+            result["test_points"].append(_make_requirement_test_point(sentence, title, rag_context))
+
         question_keywords = ["是否", "还是", "或者", "待定", "TBD", "?", "？"]
         for sentence in sentences:
             if any(kw in sentence for kw in question_keywords):
                 result["confirm_questions"].append(sentence)
 
-    # 去重
     for key in ["functional_points", "business_rules", "impact_scope", "risk_points", "confirm_questions"]:
         seen = set()
         unique = []
         for item in result[key]:
-            if item not in seen:
+            if item and item not in seen:
                 seen.add(item)
                 unique.append(item)
         result[key] = unique
 
-    # 如果没有提取到业务规则，补充默认
-    if not result["business_rules"]:
-        result["business_rules"].append("需进一步分析需求文本中的业务规则")
-    if not result["risk_points"]:
-        result["risk_points"].append("建议评估数据安全和性能影响")
     result["api_mappings"] = [
         {
             "feature": api.get("summary") or api.get("path"),
@@ -526,7 +568,7 @@ def analyze_requirements_fallback(requirements: List[Dict[str, str]]) -> Dict[st
             "confidence": api.get("similarity", 0),
         }
         for api in rag_context.get("apis", [])
-        if isinstance(api, dict)
+        if isinstance(api, dict) and float(api.get("similarity") or 0) >= 0.65
     ]
 
     return result

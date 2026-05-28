@@ -123,8 +123,27 @@ def main():
         "risk_level": "P0",
     })
     _assert(resp.status_code == 200, f"create requirement failed: {resp.status_code} {resp.text[:200]}")
+    first_requirement_id = resp.json()["id"]
     resp = request("POST", f"/api/v2/iterations/{iteration_id}/ai/analyze-requirements")
     _assert(resp.status_code == 200, f"AI analyze failed: {resp.status_code} {resp.text[:500]}")
+    first_analysis = resp.json()
+    _assert(first_analysis.get("analyzed_requirement_count") == 1, f"first AI analyze should parse one requirement: {first_analysis}")
+    _assert(first_analysis.get("analyzed_requirement_ids") == [first_requirement_id], f"first AI analyze parsed wrong requirement: {first_analysis}")
+
+    resp = request("POST", f"/api/v2/iterations/{iteration_id}/requirements", json={
+        "title": "付款金额二次新增规则",
+        "content": "重新录入的新需求只应参与本轮 AI 解析，不应混入已解析历史需求。",
+        "source_type": "manual",
+        "risk_level": "P1",
+    })
+    _assert(resp.status_code == 200, f"create second requirement failed: {resp.status_code} {resp.text[:200]}")
+    second_requirement_id = resp.json()["id"]
+    resp = request("POST", f"/api/v2/iterations/{iteration_id}/ai/analyze-requirements")
+    _assert(resp.status_code == 200, f"second AI analyze failed: {resp.status_code} {resp.text[:500]}")
+    second_analysis = resp.json()
+    _assert(second_analysis.get("analyzed_requirement_count") == 1, f"second AI analyze should parse only new requirement: {second_analysis}")
+    _assert(second_analysis.get("skipped_parsed_requirement_count") >= 1, f"second AI analyze should skip parsed requirements: {second_analysis}")
+    _assert(second_analysis.get("analyzed_requirement_ids") == [second_requirement_id], f"second AI analyze parsed old requirement: {second_analysis}")
     checks.append("AI analyze flow continues")
 
     # 10 all checked successful responses include trace header already sampled above
