@@ -19,14 +19,13 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from .llm_client import get_llm_client
 
-# 引入传统流程的解析能力
+# 引入传统流程的解析能力；当前主线不再要求这些历史模块，缺失时静默使用内置简化解析。
 try:
     from parser.requirement_parser import RequirementParser
     from test_design.module_splitter import ModuleSplitter
     _parser_available = True
 except ImportError:
     _parser_available = False
-    print("⚠️  传统解析模块未找到，将使用简化模式")
 
 # 引入决策级RAG
 try:

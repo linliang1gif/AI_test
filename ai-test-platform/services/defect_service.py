@@ -68,6 +68,20 @@ def _generate_duplicate_key(project_id, case_id, failure_category, error_message
     return hashlib.md5(raw.encode()).hexdigest()
 
 
+def _normalize_optional_str_id(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _normalize_run_case_lookup_id(value: Any) -> Optional[int]:
+    text = _normalize_optional_str_id(value)
+    if not text or not text.isdigit():
+        return None
+    return int(text)
+
+
 def _defect_to_dict(d: Defect, include_events: bool = False) -> dict:
     result = {
         "id": d.id,
@@ -116,6 +130,7 @@ def _event_to_dict(e: DefectEvent) -> dict:
 # ── 核心服务 ──────────────────────────────────────────
 def create_defect(db: Session, data: dict) -> dict:
     """创建缺陷"""
+    run_case_id = _normalize_optional_str_id(data.get("run_case_id"))
     evidence = _sanitize_evidence(data.get("evidence_json") or {})
     dup_key = _generate_duplicate_key(
         data.get("project_id"), data.get("case_id"),
@@ -134,7 +149,7 @@ def create_defect(db: Session, data: dict) -> dict:
         failure_category=data.get("failure_category", ""),
         case_id=data.get("case_id"),
         run_id=data.get("run_id"),
-        run_case_id=data.get("run_case_id"),
+        run_case_id=run_case_id,
         report_id=data.get("report_id"),
         trace_path=data.get("trace_path"),
         screenshot_path=data.get("screenshot_path"),
@@ -266,10 +281,14 @@ def check_duplicates(db: Session, project_id=None, case_id=None, failure_categor
     }
 
 
-def create_from_run_case(db: Session, run_case_id: str, data: dict = None) -> dict:
+def create_from_run_case(db: Session, run_case_id: Any, data: dict = None) -> dict:
     """从 run_case 创建缺陷"""
     data = data or {}
-    rc = db.query(RunCase).filter(RunCase.id == run_case_id).first()
+    run_case_lookup_id = _normalize_run_case_lookup_id(run_case_id)
+    if run_case_lookup_id is None:
+        return {"error": f"run_case {run_case_id} not found"}
+
+    rc = db.query(RunCase).filter(RunCase.id == run_case_lookup_id).first()
     if not rc:
         return {"error": f"run_case {run_case_id} not found"}
 
@@ -287,7 +306,7 @@ def create_from_run_case(db: Session, run_case_id: str, data: dict = None) -> di
         "source": "run_failure",
         "case_id": rc.test_case_id,
         "run_id": rc.run_id,
-        "run_case_id": run_case_id,
+        "run_case_id": str(rc.id),
         "failure_category": rc.error_type or "unknown",
         "severity": data.get("severity", "major"),
         "priority": data.get("priority", "P2"),

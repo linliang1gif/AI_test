@@ -5,7 +5,7 @@ P3-3B: 缺陷闭环 MVP 路由
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
-from typing import Optional, List
+from typing import Optional, List, Union
 from datetime import datetime
 from sqlalchemy.orm import Session
 
@@ -20,6 +20,23 @@ router = APIRouter(prefix="/api/v2/defects", tags=["缺陷管理"])
 
 
 # ── Schemas ───────────────────────────────────────────
+IdValue = Union[str, int]
+
+
+def _normalize_optional_id(v):
+    if v is None:
+        return None
+    text = str(v).strip()
+    return text or None
+
+
+def _normalize_required_id(v):
+    text = _normalize_optional_id(v)
+    if text is None:
+        raise ValueError("run_case_id is required")
+    return text
+
+
 class DefectCreateRequest(BaseModel):
     title: str
     description: Optional[str] = ""
@@ -31,7 +48,7 @@ class DefectCreateRequest(BaseModel):
     failure_category: Optional[str] = ""
     case_id: Optional[str] = None
     run_id: Optional[str] = None
-    run_case_id: Optional[str] = None
+    run_case_id: Optional[IdValue] = None
     report_id: Optional[str] = None
     trace_path: Optional[str] = None
     screenshot_path: Optional[str] = None
@@ -42,7 +59,7 @@ class DefectCreateRequest(BaseModel):
     @field_validator("run_case_id", mode="before")
     @classmethod
     def normalize_run_case_id(cls, v):
-        return None if v is None else str(v)
+        return _normalize_optional_id(v)
 
 
 class DefectUpdateRequest(BaseModel):
@@ -63,7 +80,7 @@ class TransitionRequest(BaseModel):
 
 
 class FromRunCaseRequest(BaseModel):
-    run_case_id: str
+    run_case_id: IdValue
     title: Optional[str] = None
     description: Optional[str] = ""
     severity: Optional[str] = "major"
@@ -75,7 +92,7 @@ class FromRunCaseRequest(BaseModel):
     @field_validator("run_case_id", mode="before")
     @classmethod
     def normalize_run_case_id(cls, v):
-        return "" if v is None else str(v)
+        return _normalize_required_id(v)
 
 
 class FromFailureAnalysisRequest(BaseModel):
@@ -83,7 +100,7 @@ class FromFailureAnalysisRequest(BaseModel):
     description: Optional[str] = ""
     case_id: Optional[str] = None
     run_id: Optional[str] = None
-    run_case_id: Optional[str] = None
+    run_case_id: Optional[IdValue] = None
     failure_category: Optional[str] = "unknown"
     error_message: Optional[str] = ""
     suggested_action: Optional[str] = ""
@@ -100,7 +117,7 @@ class FromFailureAnalysisRequest(BaseModel):
     @field_validator("run_case_id", mode="before")
     @classmethod
     def normalize_run_case_id(cls, v):
-        return None if v is None else str(v)
+        return _normalize_optional_id(v)
 
 
 class LinkRunRequest(BaseModel):

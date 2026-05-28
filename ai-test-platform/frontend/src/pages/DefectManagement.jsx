@@ -321,8 +321,15 @@ export default function DefectManagement() {
         suggested_fix,
       },
     }
+    if (payload.run_case_id !== undefined && payload.run_case_id !== null && payload.run_case_id !== '') {
+      payload.run_case_id = String(payload.run_case_id)
+    }
     const r = await fetch(API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     if (r.ok) { setShowCreate(false); setForm(DEFAULT_FORM); fetchDefects() }
+    else {
+      const d = await r.json().catch(() => ({}))
+      alert(d.message || d.detail || '创建缺陷失败')
+    }
   }
 
   const applyBugTemplate = (key) => {

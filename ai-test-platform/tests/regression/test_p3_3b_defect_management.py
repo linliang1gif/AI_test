@@ -62,6 +62,19 @@ T("status=open", d1.get("status") == "open")
 T("source=manual", d1.get("source") == "manual")
 T("duplicate_key 非空", d1.get("duplicate_key") is not None and len(d1.get("duplicate_key", "")) > 0)
 
+section("1A. run_case_id 类型兼容")
+r = requests.post(DEFECT_API, json={
+    "title": "测试缺陷-run_case_id数字兼容",
+    "description": "run_case_id 传数字也应能创建缺陷",
+    "severity": "major",
+    "priority": "P2",
+    "source": "manual",
+    "run_case_id": 7282,
+})
+T("数字 run_case_id 创建缺陷 200", r.status_code in (200, 201), r.text[:200])
+numeric_defect = r.json() if r.status_code in (200, 201) else {}
+T("数字 run_case_id 保存为字符串", numeric_defect.get("run_case_id") == "7282", f"实际: {numeric_defect.get('run_case_id')}")
+
 section("2. 查询缺陷列表")
 r = requests.get(DEFECT_API)
 T("列表 200", r.status_code == 200)
@@ -157,11 +170,21 @@ if run_case_id:
     T("source=run_failure", d.get("source") == "run_failure")
     T("case_id 关联", d.get("case_id") is not None)
     T("evidence_json 存在", d.get("evidence_json") is not None)
+    if str(run_case_id).isdigit():
+        r_num = requests.post(f"{DEFECT_API}/from-run-case", json={"run_case_id": int(run_case_id)})
+        T("from-run-case 数字 run_case_id 200", r_num.status_code == 200, r_num.text[:200])
+        d_num = r_num.json() if r_num.status_code == 200 else {}
+        T("from-run-case 返回字符串 run_case_id", d_num.get("run_case_id") == str(int(run_case_id)), f"实际: {d_num.get('run_case_id')}")
+    else:
+        T("from-run-case 数字 run_case_id 200", True, "run_case_id 非数字，跳过")
+        T("from-run-case 返回字符串 run_case_id", True, "跳过")
     from_rc_id = d.get("id")
 else:
     # 如果没有历史执行记录，测试 from-run-case 对不存在的 run_case 返回 404
     r = requests.post(f"{DEFECT_API}/from-run-case", json={"run_case_id": "nonexistent_rc"})
     T("from-run-case 404 for missing", r.status_code == 404)
+    r_num = requests.post(f"{DEFECT_API}/from-run-case", json={"run_case_id": 999999999})
+    T("from-run-case 缺失数字 run_case_id 不返回 422", r_num.status_code != 422, r_num.text[:200])
     T("source=run_failure (skip: no run_case)", True, "无历史执行记录，跳过正向测试")
     T("case_id 关联 (skip)", True, "跳过")
     T("evidence_json 存在 (skip)", True, "跳过")

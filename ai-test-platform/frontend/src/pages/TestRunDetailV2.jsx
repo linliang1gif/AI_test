@@ -463,8 +463,12 @@ export default function TestRunDetailV2() {
                         <button onClick={() => {
                           fetch('/api/v2/defects/from-run-case', {
                             method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ run_case_id: cd.id, title: `[${cd.status}] ${cd.test_case_id}` })
-                          }).then(r => r.json()).then(d => {
+                            body: JSON.stringify({ run_case_id: String(cd.id), title: `[${cd.status}] ${cd.test_case_id}` })
+                          }).then(async r => {
+                            const d = await r.json().catch(() => ({}))
+                            if (!r.ok) throw new Error(d.message || d.detail || `HTTP ${r.status}`)
+                            return d
+                          }).then(d => {
                             if (d.id) alert(`缺陷已创建: #${d.id}`)
                             else alert('创建失败: ' + JSON.stringify(d))
                           }).catch(e => alert('创建失败: ' + e.message))
